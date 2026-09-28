@@ -2,7 +2,7 @@
 
 PathKit either detects a pattern correctly or clearly does not detect it; it never silently guesses. This file is the honest list of what it does and doesn't cover.
 
-**Status:** research phase. Nothing has been built yet, so everything below is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
+**Status:** building (M2 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
 
 ## Carried over from the TypeScript version (planned)
 
@@ -17,6 +17,12 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 
 - **`--version` shows a commit-based version for local builds (M0).** A `go build` inside a git checkout prints something like `v0.0.0-20260928070644-65ea0f53be27+dirty` (Go stamps it from git automatically); `go run` prints `dev`. Only release builds (M9) and `go install ...@vX.Y.Z` show a clean `vX.Y.Z`. This is how Go works, not a bug.
 - **The race detector (`go test -race`) needs a C compiler (M0).** CI runs it on Linux, macOS and Windows, where one is installed. On the development machine there is no C compiler, so the local check is plain `go test ./...`.
+- **Until M4, a workflow that uses any of these is skipped, not mapped (M2):** `switch`, type switch, `select`, any `for`/`range` loop (even one with no Temporal call), labels or `goto`, `workflow.Selector`, the result of `AwaitWithTimeout`/`ReceiveWithTimeout`/`ReceiveAsync` inside an `if`, or a `defer` that calls the Temporal SDK. `analyze` prints `skipping <workflow>: <construct> at <file>:<line> is supported from M4` and carries on with the other workflows. In the pilot, 5 of 8 workflows are skipped for this reason.
+- **Some returns end at a plain `End`, with no kind (M2).** PathKit names the end kind only when it's certain: `nil` is completed; `workflow.NewContinueAsNewError(...)` is continued-as-new; `fmt.Errorf`, `errors.New`, `temporal.New…Error`, or an error variable returned on the error side of its own nil check is failed. A bare `return` with named results, `return doSomething()`, or an error variable nobody checked prints plain `End`.
+- **"Where did this `err` come from?" uses the nearest assignment above the `if` (M2).** PathKit looks for the last assignment to that variable that appears **above** the `if` in the source, in the workflow function itself (including the `if`'s own `err := ...;` part, but not inside closures). If `err` is set in different ways in different branches before the check, only the one written last counts. `//pathkit:branch` or `//pathkit:ignore` override the result.
+- **An error check must compare the variable with `nil` and nothing else (M2).** `if err != nil && retries > 3` is a plain `if` with `true`/`false` exits, not a `failure`/`success` check. When its true side returns `err`, the end is plain `End`, because the condition doesn't prove `err` is non-nil.
+- **`//pathkit:ignore` on a plain `if` assumes the condition is false (M2)**, because an ignored `if` is usually a defensive check that doesn't fire. On an error check it assumes "no error". A pragma counts when it's on the `if`'s own line or the line directly above. That includes a comment trailing the previous statement on that line.
+- **One broken package stops `analyze` (M2).** If any package in `analyze <folder>/...` doesn't compile, the command fails with `package does not compile: ...` instead of analyzing the others.
 
 ## New in Go, because of the proposed design (planned)
 
@@ -25,13 +31,13 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 - **Only error checks right after a Temporal call are junctions.** An `if err != nil` counts only when `err` last came from an activity, child workflow, timer, sleep, await or external-signal call **in the same function**. Other error checks are assumed to take the "no error" side. An `err` passed through several variables, or set inside a closure, may not be traced back; use `//pathkit:branch` to force it.
 - **Selectors are understood only in the simple shape.** The `Selector` must be created, have its `AddReceive`/`AddFuture`/`AddDefault` calls, and call `Select` in the same function, with inline function literals as callbacks. A selector passed to a helper, callbacks that are named functions, or `Add*` calls made inside a loop are shown with generic exit labels or cause a clear "cannot instrument" error.
 - **Saga compensation in `defer` is noted, not branched.** Paths show that a compensation `defer` exists, but "compensation ran" vs "didn't run" is not a separate path in v1, because counting it would create impossible paths (a successful order that also compensated) that could never be covered.
-- **`&&` / `||` inside a condition is one junction, not several.** `if a && b` has two exits (`true`/`false`), not one per part. (`go/cfg` doesn't model short-circuiting.)
+- **`&&` / `||` inside a condition is one junction, not several.** `if a && b` has two exits (`true`/`false`), not one per part. (`go/cfg` adds the whole condition as one node; confirmed in M2.)
 - **`panic` is not a path.** A panic is not drawn as an exit; a trace from a run that panicked is marked incomplete and ignored.
 - **Coverage is recorded only by `pathkit test`, not by plain `go test`.** A plain `go test` compiles your original workflow files, so it records nothing, while your tests still pass or fail as usual; `coverage`/`report` then show 0% and say that no trace files were found. Use `pathkit test`, or add the `-overlay` flag that `pathkit prepare` prints to your own `go test` command.
 - **Trace files are only written when the workflow function returns.** A test that times out or leaves a workflow blocked forever produces no trace for that run.
 - **Child workflows mocked with `OnWorkflow` record nothing** for the child (its code doesn't run). To cover a child workflow, test it directly.
 - **Staleness hash ignores comments and formatting but nothing else.** Renaming a variable inside the workflow function marks its old traces stale, even though the paths didn't change. `--allow-stale` is the escape hatch.
-- **`ReceiveWithTimeout` support is unconfirmed.** Research sources disagree on whether the SDK's signal channel has this method; it will be checked in M2 and this entry updated.
+- **`ReceiveWithTimeout` is confirmed (M2).** It exists in SDK v1.49.0 (`internal/workflow.go` line 236) and returns `(ok, more bool)` with no error. Using its `ok` in an `if` becomes a `received`/`not received` junction in M4; until then such a workflow is skipped.
 
 ## Fixed by design compared to the TypeScript version (to be proven by tests)
 

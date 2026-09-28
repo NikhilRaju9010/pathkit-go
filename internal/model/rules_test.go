@@ -1,0 +1,185 @@
+package model_test
+
+import (
+	"errors"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
+	"github.com/NikhilRaju9010/pathkit-go/internal/load"
+	"github.com/NikhilRaju9010/pathkit-go/internal/model"
+)
+
+// workflowsIn loads a folder or pattern once per test binary and returns
+// its workflows by name.
+var cache sync.Map
+
+func workflowsIn(t *testing.T, arg string) map[string]discover.Workflow {
+	t.Helper()
+	if v, ok := cache.Load(arg); ok {
+		return v.(map[string]discover.Workflow)
+	}
+	res, err := load.Load(arg)
+	if err != nil {
+		t.Fatalf("load %s: %v", arg, err)
+	}
+	m := map[string]discover.Workflow{}
+	for _, wf := range discover.Find(res.Packages) {
+		m[wf.Name] = wf
+	}
+	cache.Store(arg, m)
+	return m
+}
+
+func buildRule(t *testing.T, name string) (*model.Graph, error) {
+	t.Helper()
+	wf, ok := workflowsIn(t, "../../testdata/fixtures/rules")["rules."+name]
+	if !ok {
+		t.Fatalf("fixture workflow rules.%s not found", name)
+	}
+	return model.Build(wf)
+}
+
+// pathKeys renders each path as "J1.true J2.failure|failed" in listing order.
+func pathKeys(g *model.Graph) []string {
+	var out []string
+	for _, p := range g.Paths(model.DefaultMaxPaths).List {
+		out = append(out, p.Key())
+	}
+	return out
+}
+
+func TestRules(t *testing.T) {
+	tests := []struct {
+		workflow string
+		want     []string
+	}{
+		{"PlainIfElse", []string{"J1.true|completed", "J1.false|completed"}},
+		{"IfNoElse", []string{"J1.true|completed", "J1.false|completed"}},
+		{"ElseIfChain", []string{"J1.true|completed", "J1.false J2.true|completed", "J1.false J2.false|completed"}},
+		{"IfWithInit", []string{"J1.true|completed", "J1.false|completed"}},
+		{"Sequential", []string{"J1.true J2.true|completed", "J1.true J2.false|completed", "J1.false J2.true|completed", "J1.false J2.false|completed"}},
+		{"CompoundCondition", []string{"J1.true|", "J1.false|completed"}},
+		{"Panics", []string{"J1.false|completed"}},
+		{"NoBranches", []string{"|completed"}},
+
+		{"ActivityErr", []string{"J1.failure|failed", "J1.success|completed"}},
+		{"NilOnLeft", []string{"J1.failure|failed", "J1.success|completed"}},
+		{"EqNilTemporal", []string{"J1.failure|completed", "J1.success|completed"}},
+		{"ChildErr", []string{"J1.failure|failed", "J1.success|completed"}},
+		{"SleepAwaitErr", []string{"J1.failure|failed", "J1.success J2.failure|failed", "J1.success J2.success|completed"}},
+		{"FutureVariable", []string{"J1.failure|failed", "J1.success|completed"}},
+		{"TransparentPlainErr", []string{"|completed"}},
+		{"TransparentEqNil", []string{"J1.true|completed", "J1.false|completed"}}, // M1 finding 2
+		{"QueryHandlerErr", []string{"|completed"}},                               // M1 finding 1
+		{"NearestAssignment", []string{"J1.failure|failed", "J1.success|completed"}},
+
+		{"IgnoredErrCheck", []string{"|completed"}},
+		{"IgnoredPlainIf", []string{"|completed"}},
+		{"ForcedBranch", []string{"J1.failure|failed", "J1.success|completed"}},
+
+		{"EndKinds", []string{
+			"J1.true|completed",
+			"J1.false J2.true|continued-as-new",
+			"J1.false J2.false J3.true|failed",
+			"J1.false J2.false J3.false J4.true|failed",
+			"J1.false J2.false J3.false J4.false J5.true|failed",
+			"J1.false J2.false J3.false J4.false J5.false|",
+		}},
+		{"NamedBare", []string{"|"}},
+		{"UncheckedVar", []string{"|"}},
+		{"PlainDefer", []string{"|completed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.workflow, func(t *testing.T) {
+			g, err := buildRule(t, tt.workflow)
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			if got := pathKeys(g); !slices.Equal(got, tt.want) {
+				t.Errorf("paths:\n got  %q\n want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestJunctionLabels(t *testing.T) {
+	tests := []struct{ workflow, want string }{
+		{"PlainIfElse", "if x > 0"},
+		{"IfWithInit", "if n > 3"},
+		{"CompoundCondition", "if err != nil && x > 0"},
+		{"ActivityErr", "Charge (activity)"},
+		{"NilOnLeft", "Charge (activity)"},
+		{"EqNilTemporal", "Notify (local activity)"},
+		{"ChildErr", "ChildFlow (child workflow)"},
+		{"SleepAwaitErr", "Sleep (timer)"},
+		{"FutureVariable", "Charge (activity)"},
+		{"ForcedBranch", "decode (call)"},
+	}
+	for _, tt := range tests {
+		g, err := buildRule(t, tt.workflow)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.workflow, err)
+		}
+		if got := g.Junctions[0].Label; got != tt.want {
+			t.Errorf("%s: J1 label = %q, want %q", tt.workflow, got, tt.want)
+		}
+	}
+	g, _ := buildRule(t, "SleepAwaitErr")
+	if got := g.Junctions[1].Label; got != "Await (wait)" {
+		t.Errorf("SleepAwaitErr J2 label = %q, want %q", got, "Await (wait)")
+	}
+}
+
+func TestUnsupportedUntilM4(t *testing.T) {
+	tests := []struct{ workflow, construct string }{
+		{"UsesSwitch", "switch statement"},
+		{"UsesTypeSwitch", "type switch"},
+		{"UsesFor", "for loop"},
+		{"UsesRange", "range loop"},
+		{"UsesGoSelect", "select statement"},
+		{"UsesLabel", "goto"},
+		{"UsesSelector", "workflow.Selector"},
+		{"UsesAwaitResult", "result of AwaitWithTimeout used in an if"},
+		{"UsesReceiveWithTimeout", "result of ReceiveWithTimeout used in an if"},
+		{"UsesDeferCompensation", "defer with a Temporal call (saga compensation)"},
+	}
+	for _, tt := range tests {
+		_, err := buildRule(t, tt.workflow)
+		var u *model.UnsupportedError
+		if !errors.As(err, &u) {
+			t.Errorf("%s: err = %v, want an UnsupportedError", tt.workflow, err)
+			continue
+		}
+		if u.Construct != tt.construct || !strings.HasSuffix(err.Error(), "is supported from M4") {
+			t.Errorf("%s: err = %q, want construct %q", tt.workflow, err, tt.construct)
+		}
+	}
+}
+
+func TestMethodWorkflow(t *testing.T) {
+	g, err := buildRule(t, "Service.MethodWorkflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pathKeys(g); len(got) != 2 {
+		t.Errorf("paths = %q, want 2", got)
+	}
+}
+
+func TestPathCap(t *testing.T) {
+	g, err := buildRule(t, "TwelveIfs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := g.Paths(model.DefaultMaxPaths)
+	if len(ps.List) != 2000 || !ps.Truncated {
+		t.Errorf("got %d paths, truncated=%v; want 2000, true", len(ps.List), ps.Truncated)
+	}
+	full := g.Paths(10000)
+	if len(full.List) != 4096 || full.Truncated {
+		t.Errorf("uncapped: got %d paths, truncated=%v; want 4096, false", len(full.List), full.Truncated)
+	}
+}

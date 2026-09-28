@@ -81,7 +81,7 @@ Second defence against explosion: `report`/`coverage` also print **branch covera
 | `workflow.Selector` + `Select(ctx)` | Junction at `Select`. Each `AddReceive`/`AddFuture`/`AddDefault` registered **on the same selector variable, in the same function, with an inline func literal** is one exit. The callback's body becomes that exit's road. | `signal "<name>"` (receive on a signal channel), `timeout` (future from `workflow.NewTimer`), `activity <name>` / `child <name>` (activity/child future), `default` |
 | `workflow.NewTimer` in a Selector | Covered by the Selector rule → `timeout` label. The Go equivalent of TS `Promise.race` + `sleep`. | |
 | `GetSignalChannel(...).Receive(ctx, &v)` | **Not** a junction — it just waits, only one thing can happen. | |
-| `ReceiveAsync` / `ReceiveWithTimeout` (if present in the SDK version) used in an `if` | That `if` is a junction; labelled `received` / `not received`. | |
+| `ReceiveAsync` / `ReceiveWithTimeout` used in an `if` (`ReceiveWithTimeout` confirmed in SDK v1.49.0, M2) | That `if` is a junction; labelled `received` / `not received`. | |
 | `workflow.Await(ctx, cond)` | Not a junction (one outcome). | |
 | `workflow.AwaitWithTimeout(ctx, d, cond)` | The `if ok` that follows is a junction, labelled `signaled` / `timeout` (the Go equivalent of TS `condition(fn, timeout)`). | |
 | `for` loop / `for range` containing a Temporal call | Loop junction with `iterate` / `exit`; the back-edge is `retry`. **Loop rule** (the one definition; everything else points here): *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip.* **Analyzer half:** because `iterate`, `exit` and `retry` can each be used only once per path, a loop adds exactly three kinds of path: (a) *not entered*, meaning `exit` straight away; (b) *entered and left from inside the body*, meaning `iterate`, then a `return`/`break` inside the body; (c) *entered, went round, then left*, meaning `iterate`, the body, `retry`, then `exit` (after `retry` the only way on is `exit`, because `iterate` is used up). **Matcher half:** when a trace enters the same loop's body again (another `iterate` for that loop), the walker drops every step recorded since that loop's previous `iterate`, including the steps of any loops nested inside it, and carries on from the new `iterate`. Only the last trip through the body survives, followed by what came after the loop. So "went round twice, then returned from inside the body" folds into (b), and "went round three times, then left" folds into (c). The number of trips is never counted (same as TS). A `for {}` with no condition only leaves through `break`/`return`. | `iterate`, `exit`, `retry` |
@@ -315,4 +315,58 @@ Also learned: `env.OnActivity(fn, ...)` works without a separate `env.RegisterAc
 - Both are in `EXPECTED.md`.
 
 **Checks run:** in `testdata/pilot`: `gofmt -l .` (clean), `go vet ./...` (clean), staticcheck v0.8.1 (clean), `go test -count=1 ./...` (7 packages ok). At the repo root: `go vet ./...` and `go test ./...` still green. `go test -race` runs in CI only (no C compiler locally, see M0).
+
+## 2026-09-28 — M2: graph model and `analyze` (first slice)
+
+**`ReceiveWithTimeout` exists (the open fact from research).** In `go.temporal.io/sdk` v1.49.0 the `ReceiveChannel` interface declares `ReceiveWithTimeout(ctx Context, timeout time.Duration, valuePtr any) (ok, more bool)`. It is in `internal/workflow.go` line 236, exported as `workflow.ReceiveChannel` in `workflow/deterministic_wrappers.go` line 18, and implemented in `internal/internal_workflow.go` line 859. It returns no `error`, so it never creates an err check. Its `ok` in an `if` is an M4 junction. The research sources that said it doesn't exist were wrong or out of date.
+
+**What was built.**
+- `internal/load` wraps `go/packages` (x/tools v0.50.0). It accepts a file, a folder or `folder/...`, and loads from the named folder so that folder's own `go.mod` applies.
+- `internal/discover` implements the D3 rule. The `workflow.Context` check compares types with `go/types`, so aliases and renamed imports can't fool it.
+- `internal/model` builds a `go/cfg` graph and shrinks it to junctions. It classifies every `if`, assigns every ID, lists paths, and rejects M4 constructs.
+- `internal/render` prints text and Mermaid from model data only.
+- `internal/cli/analyze.go` wires it all together, with `--summary`, `--limit`, `--mermaid` and `--out`.
+- A new fixtures module, `testdata/fixtures`, holds one tiny workflow per rule (`rules/`) and a package with a type error (`broken/`).
+
+**Single source of truth (D5), made concrete.**
+- `model.EdgeID` has a hidden field, so only `model` can create IDs, and the compiler enforces it. Junctions are numbered `J1…` in source order, counting only real junctions. Exits are `J<n>.<label>`.
+- `Graph.ExitFor(ifStmt, label)` and `Graph.LookupEdge("J2.failure")` are the only ways in, for M3's recorder and matcher.
+- Each exit keeps the statement it leads into (`Road`), which is where M3 inserts its recording calls.
+- `Path.Key()` is the exit IDs plus the end kind, and `Path.ID()` is a 10-hex-digit SHA-256 of that key.
+
+**Exact rules implemented** (they refine D2/D3; all covered by `internal/model/rules_test.go`):
+- **Temporal err check:** the condition is exactly `v != nil`, `v == nil`, `nil != v` or `nil == v`, with `v` an `error` variable. Its nearest assignment before the condition, by source position, in the function body (not inside closures, but including the `if`'s own init) must come from one of these:
+  - `.Get` on a `Future` (so `ExecuteActivity`, `ExecuteLocalActivity`, `ExecuteChildWorkflow`, `NewTimer`, `SignalExternalWorkflow`, `RequestCancelExternalWorkflow`)
+  - `workflow.Sleep`, `Await` or `AwaitWithTimeout`
+
+  Exits are `failure` and `success`.
+- **Transparent:** every other err check, including `SetQueryHandler` (M1 finding 1). PathKit walks only the no-error side, which is the true side for `== nil` (M1 finding 2; the fixture `TransparentEqNil` fails if this breaks, and that was checked by temporarily breaking the rule).
+- **Plain `if`:** everything else, including compound conditions like `err != nil && x > 0`.
+- **Pragmas:** `//pathkit:ignore` or `//pathkit:branch` on the `if`'s own line or the line above. An ignored plain `if` walks its false side.
+- **End kinds:**
+  - `nil` → completed
+  - `workflow.NewContinueAsNewError` → continued-as-new
+  - `fmt.Errorf` / `errors.New` / `temporal.New…Error` → failed
+  - an error variable on the error side of its own nil check → failed
+  - anything else → plain `End`
+- **Dropped paths:** paths into `panic`, `os.Exit` or `log.Fatal*` are removed.
+- **Unsupported until M4:** any `switch`, `select`, loop, label or `goto`, `Selector.Select`, the result of `AwaitWithTimeout` / `ReceiveWithTimeout` / `ReceiveAsync` in an `if`, or a `defer` that calls into the Temporal SDK. The workflow is skipped with `skipping <workflow>: <construct> at <file>:<line> is supported from M4`. Closures (func literals) are not looked into in M2.
+
+**Answer key.** `internal/model/pilot_test.go` reads `testdata/pilot/EXPECTED.md` as-is and parses all 8 sections (it also checks each "**K paths:**" count against its lines).
+- The 3 M2 workflows match exactly: `orders.OrderWorkflow` 3/3 paths, `fulfillment.PaymentWorkflow` 4/4, `reports.DailyReportWorkflow` 6/6.
+- The 5 M4 workflows are skipped, each naming its construct: approval → AwaitWithTimeout result, polling and billing → for loop, shipment → `workflow.Selector`, fulfillment → defer.
+- There were no disagreements, and `EXPECTED.md` was not edited.
+
+**Choices made while building:**
+- Error messages that match the setup guide's capitalized wording ("Workflow file not found", "Directory not found") carry a `//lint:ignore ST1005` comment for staticcheck.
+- If any package in a `./...` load doesn't compile, the whole `analyze` fails (`package does not compile: ...`). Whether `report` (M7) should skip broken packages instead is left for M7.
+- Path display order is a fixed depth-first walk (`true` before `false`, `failure` before `success`). So the printed numbers can differ from `EXPECTED.md`'s numbering; the comparison is by set.
+
+**Checks run:**
+- `gofmt -l .`: clean
+- `go vet ./...`: clean
+- staticcheck v0.8.1: clean
+- `go test -count=1 ./...`: all ok
+- `go vet` on `testdata/fixtures/rules`: clean
+- the manual `analyze` commands from the plan, on the built binary: output as expected
 

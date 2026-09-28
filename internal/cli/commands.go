@@ -2,24 +2,10 @@ package cli
 
 import "github.com/spf13/cobra"
 
-// The three commands exist from M0 so their argument checks and error
+// coverage and report exist from M0 so their argument checks and error
 // style are tested from the start. Their real work arrives in the
-// milestone named in each "not implemented yet" message.
-
-func newAnalyzeCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "analyze <file>",
-		Short: "List every possible path through the workflows in a file",
-		Args:  exactlyOne("<file>"),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return notImplemented("M2")
-		},
-	}
-	// Placeholder: registered now so tests can prove that a flag written
-	// after the file name is still read. Implemented in M2.
-	cmd.Flags().Bool("summary", false, "only print the workflow name and total path count (coming in M2)")
-	return cmd
-}
+// milestone named in each "not implemented yet" message. (analyze is real
+// since M2: analyze.go.)
 
 func newCoverageCommand() *cobra.Command {
 	cmd := &cobra.Command{

@@ -2,7 +2,7 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (milestone M0 of M9).** The `pathkit` command exists, but its three commands are not implemented yet. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (milestone M2 of M9).** `pathkit analyze` works for workflows made of `if`/`else` and Temporal error checks; loops, `switch`, selectors and the rest arrive in M4. `coverage` and `report` are not implemented yet. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test` (or add the `-overlay` flag that `pathkit prepare` prints to your own `go test` command). *(Both commands arrive in M3.)*
@@ -11,7 +11,7 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 
 | Command | What it does | Available |
 | --- | --- | --- |
-| `pathkit analyze <file>` | Lists every possible path through the workflows in one file. | coming in M2 |
+| `pathkit analyze <file>` | Lists every possible path through the workflows in one file (or a package folder, or `folder/...`). | yes (M2; some constructs from M4) |
 | `pathkit coverage <file> --traces <dir>` | Shows which of one workflow's paths your tests ran. | coming in M6 |
 | `pathkit report <dir> --traces <dir>` | The same across every workflow in a project, with a project-wide total. | coming in M7 |
 | `pathkit --version` | Prints the installed version. | yes |
@@ -38,7 +38,49 @@ go build -o pathkit ./cmd/pathkit
 
 The repo includes a small pretend Temporal project at `testdata/pilot/` (an online shop: orders, approvals, polling, shipping, a saga with a child workflow, a subscription that continues as new, and a daily scheduled report). It's what PathKit is tested against. `testdata/pilot/EXPECTED.md` lists, by hand, every path PathKit should find and which ones the sample tests cover. To run the sample's own tests: `cd testdata/pilot && go test ./...`.
 
-## 3. Errors and exit codes
+## 3. See all paths (`analyze`)
+
+```bash
+pathkit analyze testdata/pilot/orders/orders.go
+```
+
+```
+Workflow: orders.OrderWorkflow
+Total paths: 3
+
+  1. Start -> if in.AmountCents <= 0 --true--> End (completed)
+
+  2. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)
+
+  3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
+```
+
+You can pass a `.go` file (only the workflows declared in that file), a package folder, or `folder/...` for every package under it. The package must compile, because PathKit uses Go's type checker to recognize Temporal calls exactly.
+
+| Flag | Effect |
+| --- | --- |
+| `--summary` | Only the workflow name and total path count. Best for big workflows. |
+| `--limit <n>` | Print at most `n` paths, plus a "... and N more" note. |
+| `--mermaid` | Print a Mermaid diagram instead (paste into https://mermaid.live). |
+| `--out <path>` | Also write exactly what was printed to a file. |
+
+**Which functions are workflows:** exported functions (or methods) whose first parameter is `workflow.Context` and whose last result is `error`.
+
+**What counts as a junction (a decision point):**
+- Every `if` / `else if` has exits `true` / `false`.
+- An `if err != nil` (or `err == nil`) right after a Temporal call has exits `failure` / `success`. A Temporal call here means an activity, local activity or child workflow `.Get`, a timer, `workflow.Sleep`, `workflow.Await` or `workflow.AwaitWithTimeout`. The path shows the call's name, e.g. `ChargeCard (activity)`.
+- Any other error check (for example after `json.Unmarshal` or `workflow.SetQueryHandler`) is **not** a junction. PathKit follows its "no error" side.
+- `//pathkit:ignore` on the `if` line or the line above makes an `if` never count (a plain `if` is then assumed false). `//pathkit:branch` makes an error check count even when it isn't after a Temporal call.
+
+**How paths end:** `End (completed)` for `return ..., nil`; `End (failed)` for a returned error; `End (continued-as-new)` for `workflow.NewContinueAsNewError`. It's a plain `End` when PathKit can't tell.
+
+**Not yet supported (arrives in M4):** loops, `switch`, `select`, `workflow.Selector`, using the result of `AwaitWithTimeout`/`ReceiveWithTimeout`/`ReceiveAsync` in an `if`, and `defer` with Temporal calls (saga compensation). A workflow that uses one of these is skipped with a note on stderr, and the other workflows are still printed:
+
+```
+pathkit analyze: skipping polling.ReportPollingWorkflow: for loop at polling.go:21 is supported from M4
+```
+
+## 4. Errors and exit codes
 
 Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 
@@ -55,5 +97,11 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `unknown flag: --xyz` | Misspelled or unsupported flag. | Check the spelling (`pathkit <command> --help` lists flags). |
 | `pathkit: unknown command "xyz"` | Misspelled command. | Use `analyze`, `coverage` or `report`. |
 | `not implemented yet (planned for Mx)` | The command exists but its work arrives in a later milestone. | Wait for that milestone. |
+| `Workflow file not found: ...` / `Directory not found: ...` | Wrong path. | Check the path and your working directory. |
+| `package does not compile: ...` | PathKit needs code that builds. | Fix the compile error shown (run `go build ./...`). |
+| `... has no exported workflow functions to analyze` | Nothing in that file matches the workflow rule above. | Check the function is exported, takes `workflow.Context` first and returns `error` last. |
+| `no workflows could be analyzed` | Every workflow found was skipped (see the `skipping ...` lines). | Wait for M4, or analyze another file. |
+| `invalid --limit value: ...` | `--limit` needs a positive whole number. | e.g. `--limit 20`. |
+| `--limit ignored because --summary was passed.` | Both flags together. A note only. | Use one or the other. |
 
 Flags can go before or after the file name: `pathkit analyze orders.go --summary` and `pathkit analyze --summary orders.go` mean the same thing.
