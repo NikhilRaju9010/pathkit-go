@@ -17,6 +17,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            testdata/pilot/go.sum
 
       - name: Check formatting (gofmt)
         if: runner.os != 'Windows' # line endings make gofmt noisy on Windows checkouts
@@ -35,4 +38,18 @@ jobs:
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
       - name: go test (with race detector)
+        run: go test -race ./...
+
+      # The pilot project (testdata/pilot) is a separate Go module, so the
+      # commands above skip it. It is checked on its own here.
+      - name: pilot — go vet
+        working-directory: testdata/pilot
+        run: go vet ./...
+
+      - name: pilot — staticcheck
+        working-directory: testdata/pilot
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+      - name: pilot — go test (with race detector)
+        working-directory: testdata/pilot
         run: go test -race ./...

@@ -34,6 +34,10 @@ go build -o pathkit ./cmd/pathkit
 
 `--version` prints just the version. A build from a git checkout shows a version made from the commit, like `v0.0.0-20260928070644-65ea0f53be27` (with `+dirty` if you have uncommitted changes); `go run` shows `dev`.
 
+## Sample project
+
+The repo includes a small pretend Temporal project at `testdata/pilot/` (an online shop: orders, approvals, polling, shipping, a saga with a child workflow, a subscription that continues as new, and a daily scheduled report). It's what PathKit is tested against. `testdata/pilot/EXPECTED.md` lists, by hand, every path PathKit should find and which ones the sample tests cover. To run the sample's own tests: `cd testdata/pilot && go test ./...`.
+
 ## 3. Errors and exit codes
 
 Every error is one line on stderr, in the form `pathkit <command>: <message>`.

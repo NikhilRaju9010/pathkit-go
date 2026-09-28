@@ -84,7 +84,7 @@ Second defence against explosion: `report`/`coverage` also print **branch covera
 | `ReceiveAsync` / `ReceiveWithTimeout` (if present in the SDK version) used in an `if` | That `if` is a junction; labelled `received` / `not received`. | |
 | `workflow.Await(ctx, cond)` | Not a junction (one outcome). | |
 | `workflow.AwaitWithTimeout(ctx, d, cond)` | The `if ok` that follows is a junction, labelled `signaled` / `timeout` (the Go equivalent of TS `condition(fn, timeout)`). | |
-| `for` loop / `for range` containing a Temporal call | Loop junction with `iterate` / `exit`; the back-edge is `retry`. A path takes the loop "at least once" or "not at all" (same as TS). A `for {}` with no condition only leaves through `break`/`return`. | `iterate`, `exit`, `retry` |
+| `for` loop / `for range` containing a Temporal call | Loop junction with `iterate` / `exit`; the back-edge is `retry`. **Loop rule** (the one definition; everything else points here): *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip.* **Analyzer half:** because `iterate`, `exit` and `retry` can each be used only once per path, a loop adds exactly three kinds of path: (a) *not entered*, meaning `exit` straight away; (b) *entered and left from inside the body*, meaning `iterate`, then a `return`/`break` inside the body; (c) *entered, went round, then left*, meaning `iterate`, the body, `retry`, then `exit` (after `retry` the only way on is `exit`, because `iterate` is used up). **Matcher half:** when a trace enters the same loop's body again (another `iterate` for that loop), the walker drops every step recorded since that loop's previous `iterate`, including the steps of any loops nested inside it, and carries on from the new `iterate`. Only the last trip through the body survives, followed by what came after the loop. So "went round twice, then returned from inside the body" folds into (b), and "went round three times, then left" folds into (c). The number of trips is never counted (same as TS). A `for {}` with no condition only leaves through `break`/`return`. | `iterate`, `exit`, `retry` |
 | Loop with no Temporal call | Transparent (walked once), same as TS. | |
 | `ExecuteActivity` error handling | Via D2. | `success` / `failure` |
 | `ExecuteChildWorkflow` | Error check via D2. The child's own code is **not** followed (it's another workflow with its own map). Shown as a labelled step. | |
@@ -134,7 +134,7 @@ The Go design removes that possibility:
 
 1. **One package builds the graph (`internal/model`).** It assigns every junction a stable ID (`J1`, `J2`, … in source order within the function) and every exit an edge ID (`J3.true`, `J5.case:"approved"`, `J7.timeout`). `analyze`, the instrumenter, and the matcher all get IDs from this one package. The instrumenter never works out IDs on its own; it asks the model "which edge ID belongs to this exit of this AST node?". (This is the TS `outcomeEdgeIndex` idea, but as the only way in, not a later add-on.)
 2. **The graph follows execution order.** Built on `go/cfg`, a junction appears in the graph exactly where it runs. The recorder calls `hit()` **at the top of each exit's road**, the moment the decision is made. Graph order and trace order are therefore the same thing by construction. (Go has no `try/catch`, so the TS bug's exact trigger, "try-success recorded at the end of the try block", doesn't exist here.)
-3. **Matching walks the graph; it does not compare lists.** The matcher starts at `Start`, reads the trace one edge at a time, and follows that edge in the graph. If a step doesn't exist in the graph, the trace is reported as unmatched, with the exact step where it went off the map. The loop rule (keep only the last trip round a loop, same as TS) lives in this one walker.
+3. **Matching walks the graph; it does not compare lists.** The matcher starts at `Start`, reads the trace one edge at a time, and follows that edge in the graph. If a step doesn't exist in the graph, the trace is reported as unmatched, with the exact step where it went off the map. The matcher half of the **loop rule** (defined once, in the D3 table's loop row: *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip*) lives in this one walker.
 4. **Built-in consistency test.** For every test fixture, an automated check proves that every edge ID the instrumenter writes exists in the graph, and every graph exit has exactly one `hit()` call. Plus end-to-end tests that run fixtures in the Temporal test env and check each trace lands on the expected path.
 5. **Path IDs** are a short hash of the path's edge-ID list, so "path 3" in `analyze` and "path 3" in `report` are the same trip.
 
@@ -287,4 +287,32 @@ The highest is 1.26.0, so PathKit's `go.mod` says `go 1.26.0`, with no `toolchai
 - (b) `go test -race` needs cgo and a C compiler. The dev machine has none, so `-race` runs in CI only. The local check is `go test ./...`.
 
 **Checks run:** `gofmt -l .` (clean), `go vet ./...` (clean), `go test -count=1 ./...` (3 packages ok, including a test that builds the real binary and checks its actual exit codes), staticcheck v0.8.1 (clean). CI has not run yet, because the repo is not pushed to GitHub.
+
+## 2026-09-28 — M1: pilot project built, test-environment facts (D6) checked
+
+**What was built.** `testdata/pilot/` is a separate Go module (`example.com/pilot`, `go 1.26.0`, `go.temporal.io/sdk` v1.49.0, `testify` v1.12.1). It has 8 workflow functions in 7 packages (orders, approval, polling, shipment, fulfillment with a saga parent and payment child, billing, reports), fake activities, 21 tests (covering 20 distinct paths; two polling tests land on the same path), and `cmd/worker/main.go` (registers everything and creates a Temporal Schedule with cron `0 6 * * *` for the daily report; compiled and vetted, never run). Go skips `testdata/`, so PathKit's own `go.mod` and `go test ./...` are untouched. CI now also runs `go vet`, staticcheck and `go test -race` inside `testdata/pilot` on all three OSes.
+
+**The answer key.** `testdata/pilot/EXPECTED.md` was written by hand before PathKit can analyze anything. It lists 38 expected paths and which test covers which path: 20 covered, 52.6% expected project coverage. Later milestones are checked against it. A disagreement gets recorded in its "Disagreements" section, not silently "fixed" in the key.
+
+**D6 facts, each checked by a real test:**
+
+| Fact | Result | Where |
+| --- | --- | --- |
+| The fake clock skips long timers instantly | Confirmed. A 72h `NewTimer` and a 48h `AwaitWithTimeout` finish in milliseconds; tests assert under 10s. | shipment, approval |
+| A non-retryable mock error fails the activity at once | Confirmed with `temporal.NewNonRetryableApplicationError` | orders, shipment, billing, reports |
+| `QueryWorkflow` answers while the workflow is running | Confirmed from inside `RegisterDelayedCallback` | approval |
+| `OnWorkflow` mocks a child workflow | Confirmed. The child's code doesn't run; the parent sees the mocked error. The child was registered with `env.RegisterWorkflow` first. | fulfillment |
+| `SetLastCompletionResult` drives the cron "later run" branch | Confirmed. A `mock.MatchedBy` on `BuildReport`'s `since` argument proves the branch was taken. | reports |
+| Continue-as-new comes back as a detectable error | Confirmed: `errors.As(err, &*workflow.ContinueAsNewError)` | billing |
+| `AwaitWithTimeout` times out under the fake clock | Confirmed | approval |
+| `workflow.Go` + `Receive` gets a signal sent with `SignalWorkflow` | Confirmed | approval |
+
+Also learned: `env.OnActivity(fn, ...)` works without a separate `env.RegisterActivity(fn)`. Not checked in M1: whether the test environment ever replays workflow code (D6 says it doesn't; this matters for M3).
+
+**Cases that M2 must handle, found while writing realistic code:**
+- `if err := workflow.SetQueryHandler(...); err != nil` (approval) is a Temporal-package call that is *not* in D2's list, so it's transparent.
+- `if err := workflow.GetLastCompletionResult(...); err == nil` (reports) is transparent. Its no-error side is the **true** side, so PathKit must walk into the `if` body, not skip it.
+- Both are in `EXPECTED.md`.
+
+**Checks run:** in `testdata/pilot`: `gofmt -l .` (clean), `go vet ./...` (clean), staticcheck v0.8.1 (clean), `go test -count=1 ./...` (7 packages ok). At the repo root: `go vet ./...` and `go test ./...` still green. `go test -race` runs in CI only (no C compiler locally, see M0).
 
