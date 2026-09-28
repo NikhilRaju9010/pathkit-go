@@ -56,7 +56,16 @@ func TestPilotMatchesExpected(t *testing.T) {
 				t.Fatalf("Build: %v", err)
 			}
 			got := pathKeys(g)
-			want := slices.Clone(expected[name].Paths)
+			var want []string
+			for _, p := range expected[name].Paths {
+				// The note is part of what must match: a note in the key
+				// that the model doesn't produce is a disagreement.
+				k := p.Key
+				if p.Compensation {
+					k += " [compensation (defer)]"
+				}
+				want = append(want, k)
+			}
 			slices.Sort(got)
 			slices.Sort(want)
 			if !slices.Equal(got, want) {

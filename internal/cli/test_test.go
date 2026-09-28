@@ -92,3 +92,19 @@ func TestTracesOutcomes(t *testing.T) {
 		}
 	}
 }
+
+// One trace is "1 trace", not "1 traces".
+func TestTraceCountWording(t *testing.T) {
+	for n, want := range map[int]string{0: "0 traces", 1: "1 trace", 2: "2 traces"} {
+		if got := count(n, "trace"); got != want {
+			t.Errorf("count(%d) = %q, want %q", n, got, want)
+		}
+	}
+
+	dir := t.TempDir()
+	writeTrace(t, dir, "only", map[string]any{"schemaVersion": 1, "workflow": "nope.Nope", "status": "complete", "steps": []string{}})
+	stdout, _, code := run(t, "traces", pilot+"/orders", "--traces", dir)
+	if code != ExitOK || !strings.HasSuffix(stdout, "\n1 trace: 1 unknown workflow\n") {
+		t.Errorf("code=%d, output does not end with %q:\n%s", code, "1 trace: 1 unknown workflow", stdout)
+	}
+}

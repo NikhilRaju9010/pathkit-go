@@ -6,24 +6,9 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// Every workflow here uses a construct that arrives in M4, so M2 must skip
-// it with a clear message instead of drawing a half-right map.
-
-func UsesSwitch(ctx workflow.Context, s string) (string, error) {
-	switch s {
-	case "a":
-		return "A", nil
-	}
-	return "other", nil
-}
-
-func UsesTypeSwitch(ctx workflow.Context, v any) (string, error) {
-	switch v.(type) {
-	case int:
-		return "int", nil
-	}
-	return "other", nil
-}
+// Every workflow here uses a construct PathKit can't map (yet, or ever:
+// goto and Go's select), so it must be skipped with a clear message
+// instead of drawn with a half-right map.
 
 func UsesFor(ctx workflow.Context, n int) (string, error) {
 	for i := 0; i < n; i++ {

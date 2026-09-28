@@ -15,15 +15,22 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
 )
 
-// UnsupportedError means the workflow uses a construct PathKit can't map
-// yet. The workflow is skipped rather than shown with a half-right map.
+// UnsupportedError means the workflow uses a construct PathKit can't map.
+// The workflow is skipped rather than shown with a half-right map.
 type UnsupportedError struct {
 	Construct string // e.g. "for loop"
 	Pos       token.Position
+	// Reason says why PathKit never maps this construct. Empty means
+	// support is planned for a later M4 slice.
+	Reason string
 }
 
 func (e *UnsupportedError) Error() string {
-	return fmt.Sprintf("%s at %s:%d is supported from M4", e.Construct, filepath.Base(e.Pos.Filename), e.Pos.Line)
+	where := fmt.Sprintf("%s at %s:%d", e.Construct, filepath.Base(e.Pos.Filename), e.Pos.Line)
+	if e.Reason != "" {
+		return where + " is not supported: " + e.Reason
+	}
+	return where + " is supported from M4"
 }
 
 type builder struct {
@@ -33,7 +40,8 @@ type builder struct {
 	pragmas   map[int]string // line -> "ignore" / "branch"
 	memo      map[*cfg.Block]Target
 	busy      map[*cfg.Block]bool
-	junctions map[*ast.IfStmt]*Junction
+	junctions map[ast.Node]*Junction
+	switchOf  map[*ast.CaseClause]ast.Stmt // case clause -> its switch
 	err       error
 }
 
@@ -45,9 +53,11 @@ func Build(wf discover.Workflow) (*Graph, error) {
 		fset:      wf.Pkg.Fset,
 		memo:      map[*cfg.Block]Target{},
 		busy:      map[*cfg.Block]bool{},
-		junctions: map[*ast.IfStmt]*Junction{},
+		junctions: map[ast.Node]*Junction{},
+		switchOf:  map[*ast.CaseClause]ast.Stmt{},
 	}
 	b.pragmas = b.readPragmas()
+	b.indexSwitches()
 	if u := b.findUnsupported(); u != nil {
 		return nil, u
 	}
@@ -108,12 +118,16 @@ func (b *builder) computeRoad(blk *cfg.Block) Target {
 		return b.road(blk.Succs[0])
 	}
 	then, other := blk.Succs[0], blk.Succs[1]
-	ifs, ok := then.Stmt.(*ast.IfStmt)
-	if !ok || then.Kind != cfg.KindIfThen {
-		b.fail(fmt.Errorf("internal error: unexpected branch (%s) in %s", then.Kind, b.wf.Name))
-		return Target{End: endDead}
+	if ifs, ok := then.Stmt.(*ast.IfStmt); ok && then.Kind == cfg.KindIfThen {
+		return b.decide(ifs, then, other)
 	}
-	return b.decide(ifs, then, other)
+	if clause, ok := then.Stmt.(*ast.CaseClause); ok && then.Kind == cfg.KindSwitchCaseBody {
+		if sw := b.switchOf[clause]; sw != nil {
+			return b.switchJunction(sw, blk)
+		}
+	}
+	b.fail(fmt.Errorf("internal error: unexpected branch (%s) in %s", then.Kind, b.wf.Name))
+	return Target{End: endDead}
 }
 
 // decide turns one if statement into a junction, or walks straight
@@ -166,9 +180,9 @@ func (b *builder) transparent(takeThen bool, then, other *cfg.Block) Target {
 	return b.road(other)
 }
 
-func (b *builder) newJunction(ifs *ast.IfStmt, kind JunctionKind, label string) *Junction {
-	j := &Junction{Kind: kind, Label: label, Stmt: ifs, Pos: b.fset.Position(ifs.Pos())}
-	b.junctions[ifs] = j
+func (b *builder) newJunction(stmt ast.Node, kind JunctionKind, label string) *Junction {
+	j := &Junction{Kind: kind, Label: label, Stmt: stmt, Pos: b.fset.Position(stmt.Pos())}
+	b.junctions[stmt] = j
 	return j
 }
 

@@ -77,15 +77,15 @@ Second defence against explosion: `report`/`coverage` also print **branch covera
 | Construct | v1 decision | Outcome labels |
 | --- | --- | --- |
 | `if` / `else`, `else if` | Junction (except transparent error checks, D2) | `true` / `false` |
-| `switch`, type switch | **Junction** (the TS version skipped `switch`; Go workflows use it a lot, e.g. on a signal's type). A missing `default` adds an implicit `default` exit. `fallthrough` handled by `go/cfg`. | `case <expr>` / `default` |
+| `switch`, type switch | **Junction** (the TS version skipped `switch`; Go workflows use it a lot, e.g. on a signal's type). A missing `default` adds an implicit `default` exit. `fallthrough` handled by `go/cfg`: falling into the next case is not a new decision, so it adds no step (built in M4a). A `switch` with only a `default` has one outcome and is not a junction. | `case <expr>` / `default` |
 | `workflow.Selector` + `Select(ctx)` | Junction at `Select`. Each `AddReceive`/`AddFuture`/`AddDefault` registered **on the same selector variable, in the same function, with an inline func literal** is one exit. The callback's body becomes that exit's road. | `signal "<name>"` (receive on a signal channel), `timeout` (future from `workflow.NewTimer`), `activity <name>` / `child <name>` (activity/child future), `default` |
 | `workflow.NewTimer` in a Selector | Covered by the Selector rule → `timeout` label. The Go equivalent of TS `Promise.race` + `sleep`. | |
 | `GetSignalChannel(...).Receive(ctx, &v)` | **Not** a junction — it just waits, only one thing can happen. | |
 | `ReceiveAsync` / `ReceiveWithTimeout` used in an `if` (`ReceiveWithTimeout` confirmed in SDK v1.49.0, M2) | That `if` is a junction; labelled `received` / `not received`. | |
 | `workflow.Await(ctx, cond)` | Not a junction (one outcome). | |
 | `workflow.AwaitWithTimeout(ctx, d, cond)` | The `if ok` that follows is a junction, labelled `signaled` / `timeout` (the Go equivalent of TS `condition(fn, timeout)`). | |
-| `for` loop / `for range` containing a Temporal call | Loop junction with `iterate` / `exit`; the back-edge is `retry`. **Loop rule** (the one definition; everything else points here): *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip.* **Analyzer half:** because `iterate`, `exit` and `retry` can each be used only once per path, a loop adds exactly three kinds of path: (a) *not entered*, meaning `exit` straight away; (b) *entered and left from inside the body*, meaning `iterate`, then a `return`/`break` inside the body; (c) *entered, went round, then left*, meaning `iterate`, the body, `retry`, then `exit` (after `retry` the only way on is `exit`, because `iterate` is used up). **Matcher half:** when a trace enters the same loop's body again (another `iterate` for that loop), the walker drops every step recorded since that loop's previous `iterate`, including the steps of any loops nested inside it, and carries on from the new `iterate`. Only the last trip through the body survives, followed by what came after the loop. So "went round twice, then returned from inside the body" folds into (b), and "went round three times, then left" folds into (c). The number of trips is never counted (same as TS). A `for {}` with no condition only leaves through `break`/`return`. | `iterate`, `exit`, `retry` |
-| Loop with no Temporal call | Transparent (walked once), same as TS. | |
+| `for` loop / `for range` containing a Temporal call **or any junction** (amended 2026-09-28, see Decisions Log) | Loop junction with `iterate` / `exit`; the back-edge is `retry`. **Loop rule** (the one definition; everything else points here): *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip.* **Analyzer half:** because `iterate`, `exit` and `retry` can each be used only once per path, a loop adds exactly three kinds of path: (a) *not entered*, meaning `exit` straight away; (b) *entered and left from inside the body*, meaning `iterate`, then a `return`/`break` inside the body; (c) *entered, went round, then left*, meaning `iterate`, the body, `retry`, then `exit` (after `retry` the only way on is `exit`, because `iterate` is used up). **Matcher half:** when a trace enters the same loop's body again (another `iterate` for that loop), the walker drops every step recorded since that loop's previous `iterate`, including the steps of any loops nested inside it, and carries on from the new `iterate`. Only the last trip through the body survives, followed by what came after the loop. So "went round twice, then returned from inside the body" folds into (b), and "went round three times, then left" folds into (c). The number of trips is never counted (same as TS). A `for {}` with no condition only leaves through `break`/`return`. | `iterate`, `exit`, `retry` |
+| Loop with no Temporal call and no junction inside | Transparent (walked once), same as TS. | |
 | `ExecuteActivity` error handling | Via D2. | `success` / `failure` |
 | `ExecuteChildWorkflow` | Error check via D2. The child's own code is **not** followed (it's another workflow with its own map). Shown as a labelled step. | |
 | `defer` compensation (saga) | **Recognized and labelled, not a junction in v1.** See reasoning below. | |
@@ -132,7 +132,7 @@ The TS bug: `analyze` listed a path's steps in one order, the recorded trace cam
 
 The Go design removes that possibility:
 
-1. **One package builds the graph (`internal/model`).** It assigns every junction a stable ID (`J1`, `J2`, … in source order within the function) and every exit an edge ID (`J3.true`, `J5.case:"approved"`, `J7.timeout`). `analyze`, the instrumenter, and the matcher all get IDs from this one package. The instrumenter never works out IDs on its own; it asks the model "which edge ID belongs to this exit of this AST node?". (This is the TS `outcomeEdgeIndex` idea, but as the only way in, not a later add-on.)
+1. **One package builds the graph (`internal/model`).** It assigns every junction a stable ID (`J1`, `J2`, … in source order within the function) and every exit an edge ID, always `J<n>.<exit label>` (`J3.true`, `J5.case "approved"`, `J7.timeout`; rule confirmed 2026-09-28, see Decisions Log). `analyze`, the instrumenter, and the matcher all get IDs from this one package. The instrumenter never works out IDs on its own; it asks the model "which edge ID belongs to this exit of this AST node?". (This is the TS `outcomeEdgeIndex` idea, but as the only way in, not a later add-on.)
 2. **The graph follows execution order.** Built on `go/cfg`, a junction appears in the graph exactly where it runs. The recorder calls `hit()` **at the top of each exit's road**, the moment the decision is made. Graph order and trace order are therefore the same thing by construction. (Go has no `try/catch`, so the TS bug's exact trigger, "try-success recorded at the end of the try block", doesn't exist here.)
 3. **Matching walks the graph; it does not compare lists.** The matcher starts at `Start`, reads the trace one edge at a time, and follows that edge in the graph. If a step doesn't exist in the graph, the trace is reported as unmatched, with the exact step where it went off the map. The matcher half of the **loop rule** (defined once, in the D3 table's loop row: *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip*) lives in this one walker.
 4. **Built-in consistency test.** For every test fixture, an automated check proves that every edge ID the instrumenter writes exists in the graph, and every graph exit has exactly one `hit()` call. Plus end-to-end tests that run fixtures in the Temporal test env and check each trace lands on the expected path.
@@ -448,3 +448,90 @@ There were no disagreements, and `EXPECTED.md` was not edited. The shared answer
 - pilot: `go vet` and `go test` ok
 - fixtures (except the deliberately broken package): `go vet` ok
 
+## 2026-09-28 — M4 plan approved; two decision changes (D3 loops, D5 edge IDs)
+
+The owner approved the M4 plan: four slices (M4a switch + groundwork, M4b loops, M4c Selector + wait results, M4d saga note + finish), each committed separately, with a stop after each one. Two approved decisions changed, both now written into D3 and D5 above:
+
+1. **D3, loops: a loop is a junction if its body contains a Temporal call *or any junction*.** A junction here means an `if`, `switch` or selector that counts. D3 used to say "a loop with no Temporal call is transparent (walked once)". That breaks on a loop like `for _, item := range items { if item.Priority { ... } }`: each trip records the `if` again, and with no loop markers the matcher can't fold the trips, so every such run would show as `unmatched`. Loops with neither a Temporal call nor a junction stay transparent, as before. **Effect on the answer key: none.** The pilot has exactly two loops, `polling.go:21` and `subscription.go:20`. Both call `ExecuteActivity` and `workflow.Sleep`, so they are junctions under both the old and the new rule. No other pilot workflow has a loop. So none of the 38 paths in `EXPECTED.md` can change. M4b adds a test that pins this.
+2. **D5, edge IDs keep the one M2 rule: `J<n>.<exit label>`.** D5 sketched `J5.case:"approved"` (with a colon). The ID is now exactly the junction ID, a dot, and the label that is printed: `J3.case "complete"`, `J2.signal "delivery-update"`, `J1.iterate`. Reasons:
+   - it is one rule with no translation step;
+   - it is exactly how `EXPECTED.md` writes steps;
+   - a trace file can be read against `analyze` output directly.
+
+   In a trace file the quotes are escaped as JSON requires (`"J3.case \"complete\""`). Two exits of one junction that would get the same label are told apart with ` #2`, ` #3` (for example two identical `case x > 0` lines).
+
+## 2026-09-28 — M4a: `switch`, groundwork for M4, strict answer-key reader
+
+**What was built:**
+- **`switch` and type switch are junctions** (`internal/model/switch.go`):
+  - one exit per `case` in source order, labelled with the source text (`case "complete"`, `case "a", "b"`, `case *types.Basic`, `case nil`);
+  - `default`, written or added when missing;
+  - junction labels `switch status`, `switch` (no tag), `switch v.(type)`.
+
+  go/cfg turns a switch into a chain of tests. The model follows that chain from the first test to find each case's code block and the "no case matched" block. `break` inside a `switch` leaves the switch. A `switch` with only a `default` has one outcome and is not a junction.
+- **The model is no longer `if`-only.** `Junction.Stmt` and `ExitFor` take any statement, and `JunctionKind` has a new `Switch` value. IDs still come only from `model`.
+- **Recording:**
+  - `pathkitRec.hit(...)` is inserted right after each `case ...:` colon;
+  - a missing default becomes `; default: pathkitRec.hit("J2.default")`, inserted just before the switch's `}`;
+  - `fallthrough` gets `pathkitRec.fell();` in front of it, and the case it falls into records with `hitUnlessFell`.
+
+  All of this is inserted on existing lines, so line numbers still don't move.
+- **Skip messages.** `goto` and Go's own `select` statement will never be supported, so their message says why and promises nothing:
+  - `goto at x.go:12 is not supported: PathKit maps break, continue and return, but not goto`
+  - `... Temporal workflows must use workflow.Selector instead of Go's select`
+
+  The constructs still planned (loops, labels, Selector, wait results, saga defer) keep "is supported from M4" until their slice.
+- `pathkit test` and `pathkit traces` now say `1 trace`, not `1 traces`.
+
+**`fallthrough` design.** The graph shows the chosen case only. Falling into the next case continues along the same road, the way go/cfg lowers it. The recorder must therefore not record the next case's hit when it is reached by falling through; the `fell` flag skips exactly one such hit. The live test `TestRouteHugeFallsThrough` checks the trace is exactly `J1.success`, `J2.case "huge"`, `J3.false`.
+
+**Strict answer-key reader** (owner's condition). `internal/expected` was rewritten so it never skips anything. The old reader, checked while planning, **silently dropped two things**:
+- the `retry` step in `retry --> J1` (polling path 5);
+- the 4 polling tests, which are written as bullet lines under the `**Tests**` line.
+
+Neither caused a wrong result yet, because polling was still skipped. Now every path line must be read completely:
+- every `J<n> ... --label-->` step;
+- `retry --> J<n>`, read as `J<n>.retry`;
+- the `End (kind)`;
+- an optional `[compensation (defer)]`;
+- nothing else except a remark starting with `,` or `.` that contains no step or note.
+
+Every test mention, on the `**Tests**` line or a bullet, must have the form `` `TestName` → N ``. A `-->` or a test mention anywhere else is an error. The reader also cross-checks:
+- path numbering;
+- `**K paths:**` against the list;
+- `X/Y covered` against the tests;
+- `Not covered:` against the rest;
+- the `Found (8)` list, the Totals rows and the Total row (38 paths, 20 covered, 52.6%) against the sections.
+
+Every error names the file and line. The only free text is the "Disagreements" section, which is for people, not data.
+- `TestReadRealKey` reads the real key: 8 workflows, 38 paths, 20 covered, 21 tests. Polling path 5 is `J1.iterate J2.success J3.default J1.retry J1.exit|completed`, and fulfillment's notes are `false, true, true, true`.
+- `TestRejectsWhatItCannotRead` has 19 broken inputs, each required to fail at its line.
+- The pilot test now also compares the compensation note: a note in the key that the model doesn't produce counts as a disagreement.
+
+`EXPECTED.md` was not edited.
+
+**Tests added:**
+- `TestRules`: 11 switch fixtures in `testdata/fixtures/rules/switches.go`. They cover a written default in the middle, a tagless switch with an init, a type switch with an assignment and `nil`, fallthrough, only-default, `break` in a case, a switch after an activity, duplicate case text (`#2`), and a qualified type case.
+- `TestJunctionLabels`: 4 labels.
+- `TestUnsupported`: renamed from `TestUnsupportedUntilM4`, now also checks the never-supported wording.
+- `TestLiveFixtures` (`internal/e2e`): runs each of the 8 tests in the new live fixture package `testdata/fixtures/switches` alone under `pathkit test`, and requires its one trace to land on the stated path. That package has `RouteWorkflow` (expression switch, `fallthrough`, added default) and `LedgerWorkflow` (type switch with a written default).
+- `TestTraceCountWording`.
+- The consistency test `TestEveryExitRecordedOnce` and the compile and line-number tests now also cover the switch fixtures.
+
+**Answer key after M4a:**
+- **Match (3):** `orders.OrderWorkflow`, `fulfillment.PaymentWorkflow`, `reports.DailyReportWorkflow`. That is 13 of 38 paths, and 8 of 21 tests land on their path.
+- **Still skipped (5):**
+  - polling and billing, for the `for` loop (M4b; polling's `switch` is supported now, but the loop around it comes first);
+  - shipment, for `workflow.Selector` (M4c; the `switch` inside its callback comes with it);
+  - approval, for the `AwaitWithTimeout` result (M4c);
+  - order fulfillment, for the saga `defer` (M4d).
+
+**Found while building.** The dev machine has a git-ignored `testdata/pilot/.pathkit/` from an M3 hand check. `gofmt -l .` lists the overlay copies inside it (generated code isn't gofmt-formatted). It was left in place (working rule 5). The verification commands now run gofmt on tracked files only: `gofmt -l $(git ls-files '*.go')`.
+
+**Checks run:**
+- `gofmt` on all tracked and new Go files: clean
+- `go vet ./...`: clean
+- staticcheck v0.8.1 (root and pilot): clean
+- `go test -count=1 ./...`: all packages ok
+- fixtures `go vet` (every package except `broken`): clean
+- pilot `go vet` and `go test`: ok

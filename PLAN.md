@@ -2,7 +2,7 @@
 
 Tick each milestone only when its Definition of Done (see `CLAUDE.md`) is met: `go test ./...` and `go vet ./...` pass, the Decisions Log, `LIMITATIONS.md` and `SETUP-GUIDE.md` are updated where needed, and the owner has been given step-by-step commands to verify it themselves. Each milestone starts in Plan Mode and only after the owner's go-ahead.
 
-**Status (2026-09-28):** the design decisions D1–D10 in `CLAUDE.md` and this M0–M9 order are **approved**, with four amendments (see the `CLAUDE.md` Decisions Log). M0 has not started; it waits for the owner's go-ahead.
+**Status (2026-09-28):** M0–M3 are done. M4 is split into four slices (see below). **M4a is done; M4b is next** and waits for the owner's go-ahead. The design decisions D1–D10 in `CLAUDE.md` are approved, with the amendments recorded in its Decisions Log.
 
 ## Why this order differs from the first draft
 
@@ -29,6 +29,12 @@ Scope config (M5) comes after the constructs, because it filters a list of disco
 
 - [ ] **M4 — Remaining constructs, analysis + recording together.** One sub-step per construct, each with analyze output, instrumentation, matcher support and a live `testsuite` test: (a) `switch`/type switch, (b) `for`/`range` retry loops with `break`/`continue`/labels (via `go/cfg`), (c) `workflow.Selector` with `AddReceive`/`AddFuture`/`AddDefault` and `NewTimer` timeouts, (d) `AwaitWithTimeout` / `ReceiveAsync` (and `ReceiveWithTimeout` if it exists), (e) child workflow calls as labelled steps + error checks, (f) `defer` compensation recognized and noted on paths (not a junction), (g) ContinueAsNew end kind. Anything that can be analyzed but not safely instrumented fails loudly with a clear message (TS rule: never silently wrong).
   *Visible result:* every pilot workflow analyzes and records correctly.
+
+  M4 is built in four slices, each committed separately, with a stop for the owner after each one. The M4 box above is ticked only when all four are done. **Done for M4 means:** all 8 pilot workflows are analyzed and recorded, all 38 `EXPECTED.md` paths match `analyze`, all 21 pilot tests land on their `EXPECTED.md` path, and no "supported from M4" message is left.
+  - [x] **M4a — `switch` + groundwork.** `switch`/type switch/`fallthrough` (analysis, recording, matching, live fixture tests); the model generalized beyond `if`; the strict answer-key reader (reads `retry` steps, bullet tests and compensation notes, and fails with a line number on anything it can't read); a permanent "not supported" wording for `goto` and Go `select`; "1 trace" wording. Unlocks no pilot workflow yet (polling also needs loops).
+  - [ ] **M4b — loops and the loop rule.** `for`/`for cond`/`for {}`/`range`, `break`/`continue`/labels, nested loops, the matcher's folding. Unlocks polling (5 paths, 4 tests) and billing (3 paths, 2 tests; continue-as-new end to end).
+  - [ ] **M4c — Selector + timeouts + wait results.** `workflow.Selector` (`AddReceive`/`AddFuture`/`AddDefault`, timer → `timeout`), `AwaitWithTimeout`/`ReceiveWithTimeout`/`ReceiveAsync` in an `if`. Unlocks shipment (9 paths, 3 tests) and approval (4 paths, 2 tests).
+  - [ ] **M4d — saga note, child label, finish.** `[compensation (defer)]` note, child-workflow label end to end, the final 38-path / 21-test check. Unlocks the order fulfillment saga (4 paths, 2 tests).
 
 - [ ] **M5 — Workflow-level scope config.** `.pathkitrc.json` (search from the current folder up to `go.mod`), `workflows.include` / `workflows.exclude` with reasons, unknown names are errors, `packages`, `traces`, `failUnder`, `html`, `out`, `json`, `noColor`, `allowStale`. `include` can also add a workflow the automatic detection missed (e.g. unexported); an `include` name that matches no function, or a function whose first parameter isn't `workflow.Context`, is an error; such workflows are labelled `added by config` in `analyze` and `report` output (text and `--json`; M8 carries the label into HTML). Applied to `analyze` (with `--all` to override and a "hidden by scope" note) and to `pathkit test` (only in-scope workflows are instrumented). `--include`/`--exclude` flags take workflow names.
   *Visible result:* in the pilot project, excluding the saga workflow hides it from `analyze` and stops it being instrumented.

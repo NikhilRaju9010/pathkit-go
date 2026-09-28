@@ -91,7 +91,7 @@ func runTraces(cmd *cobra.Command, target, traceDir string) error {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[k], k))
 		}
 	}
-	fmt.Fprintf(w, "\n%d traces: %s\n", len(files), strings.Join(parts, ", "))
+	fmt.Fprintf(w, "\n%s: %s\n", count(len(files), "trace"), strings.Join(parts, ", "))
 	return nil
 }
 

@@ -71,10 +71,11 @@ type current struct {
 	hash  string
 }
 
-// graphs builds the current graph and hash of every M2 pilot workflow.
-func graphs(t *testing.T, pilot string) map[string]current {
+// graphs builds the current graph and hash of every workflow PathKit can
+// map under pattern.
+func graphs(t *testing.T, pattern string) map[string]current {
 	t.Helper()
-	res, err := load.Load(pilot + "/...")
+	res, err := load.Load(pattern)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestAnswerKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := graphs(t, pilot)
+	now := graphs(t, pilot+"/...")
 	before := hashTree(t, pilot)
 	t.Chdir(t.TempDir()) // pathkit writes .pathkit/ here, never into the pilot
 
@@ -135,7 +136,7 @@ func TestAnswerKey(t *testing.T) {
 				t.Fatalf("%s: want exactly one trace for %s, got %+v", test.Name, name, files)
 			}
 			out := trace.Check(files[0], now[name].graph, now[name].hash)
-			want := ew.Paths[test.Path-1]
+			want := ew.Paths[test.Path-1].Key
 			if out.Kind != trace.Matched || out.Path.Key() != want {
 				t.Errorf("%s: trace %v → %s %q (%s); EXPECTED.md says path %d = %q",
 					test.Name, files[0].Steps, out.Kind, out.Path.Key(), out.Reason, test.Path, want)
@@ -233,5 +234,58 @@ func TestFixturesUnderOverlay(t *testing.T) {
 	// must NOT count as complete (the TS d0aa17a trap).
 	if files := readTraces(t, traces); len(files) != 1 || files[0].Status != "incomplete" {
 		t.Errorf("panics fixture: want 1 incomplete trace, got %+v", files)
+	}
+}
+
+// liveCase is one fixture test and the path its single run must take.
+type liveCase struct {
+	test, workflow, want string
+}
+
+// liveFixtures are fixture packages whose tests run for real under
+// "pathkit test"; each test runs one workflow once.
+var liveFixtures = map[string][]liveCase{
+	"switches": {
+		// fallthrough from "huge" into "large" records no second case
+		{"TestRouteHugeFallsThrough", "switches.RouteWorkflow", `J1.success J2.case "huge" J3.false|completed`},
+		{"TestRouteLarge", "switches.RouteWorkflow", `J1.success J2.case "large" J3.false|completed`},
+		{"TestRouteTiny", "switches.RouteWorkflow", `J1.success J2.case "small", "tiny" J3.false|completed`},
+		// no case matches: the default PathKit added
+		{"TestRouteMediumHasNoLane", "switches.RouteWorkflow", "J1.success J2.default J3.true|failed"},
+		{"TestRouteMeasureFails", "switches.RouteWorkflow", "J1.failure|failed"},
+		{"TestLedgerRefund", "switches.LedgerWorkflow", "J1.case Refund|completed"},
+		{"TestLedgerCharge", "switches.LedgerWorkflow", "J1.case Charge|completed"},
+		{"TestLedgerUnknown", "switches.LedgerWorkflow", "J1.default|failed"},
+	},
+}
+
+// Each fixture test, run alone under "pathkit test", must leave exactly one
+// complete trace that lands on its stated path.
+func TestLiveFixtures(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test on the fixtures; skipped with -short")
+	}
+	fixtures := abs(t, "../../testdata/fixtures")
+	t.Chdir(t.TempDir())
+	for pkg, cases := range liveFixtures {
+		dir := filepath.Join(fixtures, pkg)
+		now := graphs(t, dir)
+		for _, c := range cases {
+			traces := t.TempDir()
+			stdout, stderr, code := pathkit(t, "test", dir, "--traces", traces, "--", "-run", "^"+c.test+"$")
+			if code != 0 {
+				t.Fatalf("pathkit test (%s) exit %d\nstdout:\n%s\nstderr:\n%s", c.test, code, stdout, stderr)
+			}
+			files := readTraces(t, traces)
+			if len(files) != 1 || files[0].Workflow != c.workflow {
+				t.Fatalf("%s: want exactly one trace for %s, got %+v", c.test, c.workflow, files)
+			}
+			out := trace.Check(files[0], now[c.workflow].graph, now[c.workflow].hash)
+			if out.Kind != trace.Matched || out.Path.Key() != c.want {
+				t.Errorf("%s: trace %v → %s %q (%s); want %q", c.test, files[0].Steps, out.Kind, out.Path.Key(), out.Reason, c.want)
+				continue
+			}
+			t.Logf("%s → %s ✓", c.test, c.want)
+		}
 	}
 }

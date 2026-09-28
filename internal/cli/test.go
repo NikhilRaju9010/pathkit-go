@@ -158,7 +158,7 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 			complete++
 		}
 	}
-	fmt.Fprintf(stderr, "pathkit test: recorded %d traces (%d complete) in %s\n", len(files), complete, traceDir)
+	fmt.Fprintf(stderr, "pathkit test: recorded %s (%d complete) in %s\n", count(len(files), "trace"), complete, traceDir)
 
 	if testErr != nil {
 		var exitErr *exec.ExitError
@@ -168,6 +168,14 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 		return userError("could not run go test: %v", testErr)
 	}
 	return nil
+}
+
+// count prints "1 trace", "2 traces", "0 traces".
+func count(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func hasCountFlag(args []string) bool {

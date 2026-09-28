@@ -26,26 +26,30 @@ const (
 	// ErrCheck is an if err != nil (or == nil) right after a Temporal call:
 	// exits "failure" and "success".
 	ErrCheck
+	// Switch is a switch or type switch: one exit per case ("case x"),
+	// plus "default" (written, or added when none is written).
+	Switch
 )
 
 // Junction is one decision point in a workflow.
 type Junction struct {
 	ID    string // "J1", "J2", ... in source order
 	Kind  JunctionKind
-	Label string // "if x > 0", or "ChargeCard (activity)" for an err check
-	Stmt  *ast.IfStmt
+	Label string   // "if x > 0", "ChargeCard (activity)", "switch status"
+	Stmt  ast.Node // the *ast.IfStmt, *ast.SwitchStmt or *ast.TypeSwitchStmt
 	Pos   token.Position
-	Exits []*Exit // display order: true before false, failure before success
+	Exits []*Exit // display order: true before false, failure before success, cases in source order
 }
 
 // Exit is one way out of a junction.
 type Exit struct {
 	ID       EdgeID
-	Label    string // "true", "false", "failure", "success"
+	Label    string // "true", "false", "failure", "success", "case x", "default"
 	Junction *Junction
-	// Road is the statement this exit leads into: the if's body, its else
-	// branch, or nil when there is no else. M3 inserts its recording
-	// calls here.
+	// Road is the statement this exit leads into, where the recorder
+	// inserts its call: the if's body or else branch (nil when there is
+	// no else), or the switch's case clause (nil for a default PathKit
+	// added because none is written).
 	Road ast.Stmt
 	To   Target
 }
@@ -85,14 +89,14 @@ type Graph struct {
 	Junctions []*Junction // in ID order (J1, J2, ...)
 	Start     Target
 
-	byStmt map[*ast.IfStmt]*Junction
+	byStmt map[ast.Node]*Junction
 	byID   map[string]*Exit
 }
 
 // ExitFor returns the ID of the exit with this label ("true", "failure",
-// ...) of the junction built from stmt. M3's recorder uses it to find the
-// ID to record at each exit.
-func (g *Graph) ExitFor(stmt *ast.IfStmt, label string) (EdgeID, bool) {
+// "case x", ...) of the junction built from stmt. The recorder uses it to
+// find the ID to record at each exit.
+func (g *Graph) ExitFor(stmt ast.Node, label string) (EdgeID, bool) {
 	j, ok := g.byStmt[stmt]
 	if !ok {
 		return EdgeID{}, false

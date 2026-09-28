@@ -2,7 +2,7 @@
 
 PathKit either detects a pattern correctly or clearly does not detect it; it never silently guesses. This file is the honest list of what it does and doesn't cover.
 
-**Status:** building (M3 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
+**Status:** building (M4a done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
 
 ## Carried over from the TypeScript version (planned)
 
@@ -17,7 +17,16 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 
 - **`--version` shows a commit-based version for local builds (M0).** A `go build` inside a git checkout prints something like `v0.0.0-20260928070644-65ea0f53be27+dirty` (Go stamps it from git automatically); `go run` prints `dev`. Only release builds (M9) and `go install ...@vX.Y.Z` show a clean `vX.Y.Z`. This is how Go works, not a bug.
 - **The race detector (`go test -race`) needs a C compiler (M0).** CI runs it on Linux, macOS and Windows, where one is installed. On the development machine there is no C compiler, so the local check is plain `go test ./...`.
-- **Until M4, a workflow that uses any of these is skipped, not mapped (M2):** `switch`, type switch, `select`, any `for`/`range` loop (even one with no Temporal call), labels or `goto`, `workflow.Selector`, the result of `AwaitWithTimeout`/`ReceiveWithTimeout`/`ReceiveAsync` inside an `if`, or a `defer` that calls the Temporal SDK. `analyze` prints `skipping <workflow>: <construct> at <file>:<line> is supported from M4` and carries on with the other workflows. In the pilot, 5 of 8 workflows are skipped for this reason.
+- **Until the rest of M4 lands, a workflow that uses any of these is skipped, not mapped (M2, updated in M4a):**
+  - any `for`/`range` loop (even one with no Temporal call) or a label: M4b;
+  - `workflow.Selector`, or the result of `AwaitWithTimeout`/`ReceiveWithTimeout`/`ReceiveAsync` inside an `if`: M4c;
+  - a `defer` that calls the Temporal SDK: M4d.
+
+  `analyze` prints `skipping <workflow>: <construct> at <file>:<line> is supported from M4` and carries on with the other workflows. In the pilot, 5 of 8 workflows are still skipped for this reason. `switch` and type switch are supported since M4a.
+- **`goto` and Go's own `select` statement are never supported (M4a).** Such a workflow is skipped with a message that says why, for example `goto at x.go:12 is not supported: PathKit maps break, continue and return, but not goto`. (Temporal workflows can't use Go's `select`; they use `workflow.Selector`.)
+- **Junctions are treated as independent (M4a).** PathKit lists every combination of exits, even when the code makes some combinations impossible. Example (`testdata/fixtures/switches`): `switch size` sets `lane`, then `if lane == ""` checks it. PathKit lists `case "huge"` followed by `lane == ""` true, which can't happen. Such paths show as never covered. This is true of all junctions (it was already true of two `if`s in a row) and matches the TS version. Branch coverage (M6) is the fairer number for such workflows.
+- **A `switch` with only a `default` is not a junction (M4a)**, because only one thing can happen. **Falling through (`fallthrough`) into the next case is not a separate step:** the path shows the case the switch chose, e.g. `case "huge"`, and the code of the next case simply runs as part of that road.
+- **Case labels are the source text (M4a).** `case StatusApproved` prints the constant's name, not its value; `case "a", "b"` stays one exit. Two cases with the same text (possible with non-constant cases) get ` #2`, ` #3` added to keep their IDs apart.
 - **Some returns end at a plain `End`, with no kind (M2).** PathKit names the end kind only when it's certain: `nil` is completed; `workflow.NewContinueAsNewError(...)` is continued-as-new; `fmt.Errorf`, `errors.New`, `temporal.New…Error`, or an error variable returned on the error side of its own nil check is failed. A bare `return` with named results, `return doSomething()`, or an error variable nobody checked prints plain `End`.
 - **"Where did this `err` come from?" uses the nearest assignment above the `if` (M2).** PathKit looks for the last assignment to that variable that appears **above** the `if` in the source, in the workflow function itself (including the `if`'s own `err := ...;` part, but not inside closures). If `err` is set in different ways in different branches before the check, only the one written last counts. `//pathkit:branch` or `//pathkit:ignore` override the result.
 - **An error check must compare the variable with `nil` and nothing else (M2).** `if err != nil && retries > 3` is a plain `if` with `true`/`false` exits, not a `failure`/`success` check. When its true side returns `err`, the end is plain `End`, because the condition doesn't prove `err` is non-nil.
@@ -50,7 +59,7 @@ These TS limitations should not exist in Go. Each needs a test in its milestone 
 
 - Listed-path order vs recorded-trace order drifting apart (one model owns all IDs; matching walks the graph). **Proven in M3** (`TestEveryExitRecordedOnce`, `TestAnswerKey`).
 - `break`, labeled `break`, `continue` handled wrongly (handled by `go/cfg`).
-- `switch` not detected (it's a junction in Go v1).
+- `switch` not detected (it's a junction in Go v1). **Proven in M4a** (`TestRules` switch cases, `TestLiveFixtures`).
 - One instrumented function per test run, and boilerplate in every test (all in-scope workflows instrumented; existing tests unchanged). **Proven in M3**: the pilot's tests are unchanged, and one `pathkit test ./...` records all three M2 workflows.
 - Leftover instrumented copies next to source files (overlay files live in `.pathkit/`). **Proven in M3** (`TestAnswerKey` hashes the pilot before and after).
 - Relative trace folder depending on where the test ran (the absolute path is baked into the recorder by `pathkit test`). **Proven in M3.**

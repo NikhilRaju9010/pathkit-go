@@ -92,6 +92,28 @@ func TestRules(t *testing.T) {
 		{"UncheckedVar", []string{"|"}},
 		{"ReturnsCall", []string{"J1.true|", "J1.false|completed"}},
 		{"PlainDefer", []string{"|completed"}},
+
+		{"UsesSwitch", []string{`J1.case "a"|completed`, "J1.default|completed"}},
+		{"UsesTypeSwitch", []string{"J1.case int|completed", "J1.default|completed"}},
+		{"SwitchWithDefault", []string{`J1.case "a", "b"|completed`, "J1.default|failed", `J1.case "c"|completed`}},
+		{"TaglessSwitchWithInit", []string{
+			"J1.case m > 10|completed",
+			"J1.case m > 4 J2.true|completed",
+			"J1.case m > 4 J2.false|completed",
+			"J1.default|completed",
+		}},
+		{"TypeSwitchAssign", []string{"J1.case nil|completed", "J1.case string, int|completed", "J1.default|failed"}},
+		{"Fallthrough", []string{"J1.case n > 10|completed", "J1.case n > 5|completed", "J1.default|completed"}},
+		{"OnlyDefault", []string{"|completed"}},
+		{"BreakInSwitch", []string{`J1.case "skip" J2.true|completed`, `J1.case "skip" J2.false|completed`, "J1.default|completed"}},
+		{"SwitchOnActivityResult", []string{
+			"J1.failure|failed",
+			`J1.success J2.case "ok"|completed`,
+			`J1.success J2.case "retry"|failed`,
+			"J1.success J2.default|completed",
+		}},
+		{"DuplicateCases", []string{"J1.case x > 0|completed", "J1.case x > 0 #2|completed", "J1.default|completed"}},
+		{"QualifiedTypeCase", []string{"J1.case *types.Basic|completed", "J1.default|completed"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.workflow, func(t *testing.T) {
@@ -118,6 +140,10 @@ func TestJunctionLabels(t *testing.T) {
 		{"SleepAwaitErr", "Sleep (timer)"},
 		{"FutureVariable", "Charge (activity)"},
 		{"ForcedBranch", "decode (call)"},
+		{"UsesSwitch", "switch s"},
+		{"UsesTypeSwitch", "switch v.(type)"},
+		{"TaglessSwitchWithInit", "switch"},
+		{"TypeSwitchAssign", "switch v.(type)"},
 	}
 	for _, tt := range tests {
 		g, err := buildRule(t, tt.workflow)
@@ -134,18 +160,18 @@ func TestJunctionLabels(t *testing.T) {
 	}
 }
 
-func TestUnsupportedUntilM4(t *testing.T) {
-	tests := []struct{ workflow, construct string }{
-		{"UsesSwitch", "switch statement"},
-		{"UsesTypeSwitch", "type switch"},
-		{"UsesFor", "for loop"},
-		{"UsesRange", "range loop"},
-		{"UsesGoSelect", "select statement"},
-		{"UsesLabel", "goto"},
-		{"UsesSelector", "workflow.Selector"},
-		{"UsesAwaitResult", "result of AwaitWithTimeout used in an if"},
-		{"UsesReceiveWithTimeout", "result of ReceiveWithTimeout used in an if"},
-		{"UsesDeferCompensation", "defer with a Temporal call (saga compensation)"},
+func TestUnsupported(t *testing.T) {
+	const planned = "is supported from M4"
+	tests := []struct{ workflow, construct, ending string }{
+		{"UsesFor", "for loop", planned},
+		{"UsesRange", "range loop", planned},
+		{"UsesSelector", "workflow.Selector", planned},
+		{"UsesAwaitResult", "result of AwaitWithTimeout used in an if", planned},
+		{"UsesReceiveWithTimeout", "result of ReceiveWithTimeout used in an if", planned},
+		{"UsesDeferCompensation", "defer with a Temporal call (saga compensation)", planned},
+		// never supported: the message says why, and promises nothing
+		{"UsesGoSelect", "select statement", "is not supported: Temporal workflows must use workflow.Selector instead of Go's select"},
+		{"UsesLabel", "goto", "is not supported: PathKit maps break, continue and return, but not goto"},
 	}
 	for _, tt := range tests {
 		_, err := buildRule(t, tt.workflow)
@@ -154,8 +180,8 @@ func TestUnsupportedUntilM4(t *testing.T) {
 			t.Errorf("%s: err = %v, want an UnsupportedError", tt.workflow, err)
 			continue
 		}
-		if u.Construct != tt.construct || !strings.HasSuffix(err.Error(), "is supported from M4") {
-			t.Errorf("%s: err = %q, want construct %q", tt.workflow, err, tt.construct)
+		if u.Construct != tt.construct || !strings.HasSuffix(err.Error(), tt.ending) {
+			t.Errorf("%s: err = %q, want construct %q ending %q", tt.workflow, err, tt.construct, tt.ending)
 		}
 	}
 }

@@ -6,12 +6,16 @@ import (
 	"go/types"
 )
 
-// findUnsupported returns the first construct (in source order) that M2
-// can't map yet; they all arrive in M4 together with their recording.
+// findUnsupported returns the first construct (in source order) that
+// PathKit can't map: either never (never is set), or not until a later
+// M4 slice, which adds it together with its recording.
 func (b *builder) findUnsupported() *UnsupportedError {
 	var found *UnsupportedError
 	report := func(construct string, n ast.Node) {
 		found = &UnsupportedError{Construct: construct, Pos: b.fset.Position(n.Pos())}
+	}
+	never := func(construct string, n ast.Node, reason string) {
+		found = &UnsupportedError{Construct: construct, Pos: b.fset.Position(n.Pos()), Reason: reason}
 	}
 	ast.Inspect(b.wf.Func.Body, func(n ast.Node) bool {
 		if found != nil {
@@ -20,19 +24,15 @@ func (b *builder) findUnsupported() *UnsupportedError {
 		switch n := n.(type) {
 		case *ast.FuncLit:
 			return false // closures (signal receivers, selector callbacks) aren't mapped
-		case *ast.SwitchStmt:
-			report("switch statement", n)
-		case *ast.TypeSwitchStmt:
-			report("type switch", n)
 		case *ast.SelectStmt:
-			report("select statement", n)
+			never("select statement", n, "Temporal workflows must use workflow.Selector instead of Go's select")
 		case *ast.ForStmt:
 			report("for loop", n)
 		case *ast.RangeStmt:
 			report("range loop", n)
 		case *ast.BranchStmt:
 			if n.Tok == token.GOTO {
-				report("goto", n)
+				never("goto", n, "PathKit maps break, continue and return, but not goto")
 			} else if n.Label != nil {
 				report("labeled "+n.Tok.String(), n)
 			}

@@ -47,6 +47,16 @@ func targets(t *testing.T, arg string) []instrument.Target {
 	return out
 }
 
+// allTargets is every mappable workflow in the fixtures and the pilot.
+func allTargets(t *testing.T) []instrument.Target {
+	t.Helper()
+	var out []instrument.Target
+	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", pilot + "/..."} {
+		out = append(out, targets(t, arg)...)
+	}
+	return out
+}
+
 func instrumentAll(t *testing.T, ts []instrument.Target) *instrument.Result {
 	t.Helper()
 	res, err := instrument.Instrument(ts, "/tmp/pathkit-test-traces")
@@ -62,6 +72,7 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 		{fixtures, fixtures + "/rules"},
 		{fixtures, fixtures + "/panics"},
 		{fixtures, fixtures + "/replay"},
+		{fixtures, fixtures + "/switches"},
 		{pilot, pilot + "/..."},
 	}
 	for _, c := range cases {
@@ -87,7 +98,7 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 
 // No line break is ever inserted, so every line keeps its number.
 func TestLineNumbersUnchanged(t *testing.T) {
-	ts := append(targets(t, fixtures+"/rules"), targets(t, pilot+"/...")...)
+	ts := allTargets(t)
 	res := instrumentAll(t, ts)
 	for path, edits := range res.Edits {
 		orig, err := os.ReadFile(path)
@@ -109,7 +120,7 @@ func TestLineNumbersUnchanged(t *testing.T) {
 // exit (via LookupEdge), there is one pathkitStart, and every return of
 // the workflow function is marked.
 func TestEveryExitRecordedOnce(t *testing.T) {
-	ts := append(targets(t, fixtures+"/rules"), targets(t, pilot+"/...")...)
+	ts := allTargets(t)
 	res := instrumentAll(t, ts)
 	for _, tg := range ts {
 		fn := findFunc(t, res.Files[tg.Workflow.Filename], tg.Workflow.Func)
@@ -121,7 +132,7 @@ func TestEveryExitRecordedOnce(t *testing.T) {
 				return true
 			}
 			switch callName(call) {
-			case "pathkitRec.hit":
+			case "pathkitRec.hit", "pathkitRec.hitUnlessFell":
 				id, _ := strconv.Unquote(call.Args[0].(*ast.BasicLit).Value)
 				hits = append(hits, id)
 			case "pathkitStart":

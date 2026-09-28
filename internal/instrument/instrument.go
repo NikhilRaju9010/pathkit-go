@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -124,6 +125,12 @@ func workflowEdits(t Target) ([]Edit, error) {
 	}}
 
 	for _, j := range g.Junctions {
+		var fellInto map[*ast.CaseClause]bool
+		if body := switchBody(j.Stmt); body != nil {
+			var e []Edit
+			e, fellInto = fallthroughEdits(body, off)
+			edits = append(edits, e...)
+		}
 		for _, e := range j.Exits {
 			id, ok := g.ExitFor(j.Stmt, e.Label)
 			if !ok {
@@ -137,8 +144,22 @@ func workflowEdits(t Target) ([]Edit, error) {
 				edits = append(edits,
 					Edit{Offset: off(road), Text: "{ " + hit + "; "},
 					Edit{Offset: end(road), Order: 2, Text: " }"})
-			case nil: // no else: add one
-				edits = append(edits, Edit{Offset: end(j.Stmt.Body), Order: 1, Text: " else { " + hit + " }"})
+			case *ast.CaseClause: // record first thing after "case ...:"
+				if fellInto[road] {
+					// Reached by the previous case's fallthrough, the
+					// run is still on that case's exit: record only when
+					// this case was chosen by the switch itself.
+					hit = fmt.Sprintf("%s.hitUnlessFell(%q)", recVar, id.String())
+				}
+				edits = append(edits, Edit{Offset: fset.Position(road.Colon).Offset + 1, Text: " " + hit + ";"})
+			case nil:
+				switch s := j.Stmt.(type) {
+				case *ast.IfStmt: // no else: add one
+					edits = append(edits, Edit{Offset: end(s.Body), Order: 1, Text: " else { " + hit + " }"})
+				default: // a switch with no default: add one before its "}"
+					body := switchBody(s)
+					edits = append(edits, Edit{Offset: fset.Position(body.Rbrace).Offset, Text: "; default: " + hit + " "})
+				}
 			default:
 				return nil, fmt.Errorf("internal error: unexpected road %T in %s", road, wf.Name)
 			}
@@ -164,6 +185,36 @@ func workflowEdits(t Target) ([]Edit, error) {
 		return true
 	})
 	return edits, retErr
+}
+
+// switchBody returns the { case ... } block of a switch or type switch,
+// or nil for any other statement.
+func switchBody(n ast.Node) *ast.BlockStmt {
+	switch s := n.(type) {
+	case *ast.SwitchStmt:
+		return s.Body
+	case *ast.TypeSwitchStmt:
+		return s.Body
+	}
+	return nil
+}
+
+// fallthroughEdits marks every "fallthrough" in a switch, so the case it
+// falls into doesn't record a second exit, and returns those cases.
+func fallthroughEdits(body *ast.BlockStmt, off func(ast.Node) int) ([]Edit, map[*ast.CaseClause]bool) {
+	var edits []Edit
+	fellInto := map[*ast.CaseClause]bool{}
+	for i, c := range body.List {
+		stmts := c.(*ast.CaseClause).Body
+		if len(stmts) == 0 || i+1 == len(body.List) {
+			continue
+		}
+		if br, ok := stmts[len(stmts)-1].(*ast.BranchStmt); ok && br.Tok == token.FALLTHROUGH {
+			edits = append(edits, Edit{Offset: off(br), Text: recVar + ".fell(); "})
+			fellInto[body.List[i+1].(*ast.CaseClause)] = true
+		}
+	}
+	return edits, fellInto
 }
 
 // returnEdits marks a return so the run counts as complete only after all
@@ -301,8 +352,9 @@ type pathkitTrace struct {
 
 // pathkitRecorder belongs to one call of one workflow function.
 type pathkitRecorder struct {
-	trace pathkitTrace
-	done  bool
+	trace       pathkitTrace
+	done        bool
+	fellThrough bool // a switch case just ended with fallthrough
 }
 
 func pathkitStart(ctx pathkitworkflow.Context, workflow, hash string) *pathkitRecorder {
@@ -315,6 +367,19 @@ func pathkitStart(ctx pathkitworkflow.Context, workflow, hash string) *pathkitRe
 
 // hit records one junction exit, at the moment the decision is made.
 func (r *pathkitRecorder) hit(id string) { r.trace.Steps = append(r.trace.Steps, id) }
+
+// fell and hitUnlessFell handle fallthrough: the case a switch falls into
+// is not a new decision, so its exit is recorded only when the switch
+// chose that case itself.
+func (r *pathkitRecorder) fell() { r.fellThrough = true }
+
+func (r *pathkitRecorder) hitUnlessFell(id string) {
+	if r.fellThrough {
+		r.fellThrough = false
+		return
+	}
+	r.hit(id)
+}
 
 // returned marks that the run finished a return of the workflow function
 // (all return values evaluated). pathkitRetN do the same for "return a, b".
