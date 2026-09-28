@@ -2,7 +2,7 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (M4 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (M5 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`. *(`pathkit prepare`, for adding the overlay flag to your own `go test` command, arrives in M6.)*
@@ -65,6 +65,9 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
 | `--limit <n>` | Print at most `n` paths, plus a "... and N more" note. |
 | `--mermaid` | Print a Mermaid diagram instead (paste into https://mermaid.live). |
 | `--out <path>` | Also write exactly what was printed to a file. |
+| `--config <file>` | Use this config file instead of searching for `.pathkitrc.json` (see section 5). |
+| `--include a,b` / `--exclude a,b` | Only these workflows count / leave these out, for this run (section 5). |
+| `--all` | Show every workflow, ignoring the config file and `--include`/`--exclude`; a line on stderr says the config was ignored. |
 
 **Which functions are workflows:** exported functions (or methods) whose first parameter is `workflow.Context` and whose last result is `error`.
 
@@ -165,7 +168,8 @@ Line numbers stay the same in the copy, so test failures and panics still point 
 
 | Flag | Effect |
 | --- | --- |
-| `--traces <dir>` | Where to write trace files (default `.pathkit/traces`). |
+| `--traces <dir>` | Where to write trace files (default: the config's `"traces"`, else `.pathkit/traces`). |
+| `--config`, `--include`, `--exclude` | Which workflows are recorded (section 5). Excluded workflows' tests still run; they just aren't recorded. |
 | `--keep-traces` | Keep old trace files. By default each run first deletes the old ones (only `*.trace.json` files). |
 | `-- <go test flags>` | Everything after `--` goes to `go test`, e.g. `pathkit test ./... -- -run TestOrder -v`. |
 
@@ -194,7 +198,69 @@ A trace doesn't know which test produced it; to see one test's path, run only th
 
 Add `.pathkit/` to your `.gitignore`. It holds PathKit's marked-up copies (`.pathkit/overlay/`) and your traces. Go's own build and test commands never look inside it, but `gofmt -l .` does, and lists the copies as unformatted. That's harmless; to keep gofmt's output clean, run it on your tracked files only (`gofmt -l $(git ls-files '*.go')`) or on your source folders.
 
-## 5. Errors and exit codes
+## 5. Choose which workflows count (`.pathkitrc.json`)
+
+Some workflows can't be tested yet (say, they need a real bank sandbox). Counting them would drag your coverage down and make the number mean less. A `.pathkitrc.json` file says which workflows count. Think of a report card where some subjects aren't graded this term: they're listed as "not graded, because …", and the average is taken over the rest.
+
+```json
+{
+  "packages": ["./internal/workflows/..."],
+  "workflows": {
+    "exclude": [
+      { "name": "LegacyBillingWorkflow", "reason": "needs real bank sandbox" }
+    ]
+  }
+}
+```
+
+**Where PathKit finds it:**
+- **Default:** in the folder you run PathKit from, then its parent folders, up to the folder that holds your `go.mod`. A file above your module is never used.
+- **`--config <file>`:** uses that file instead.
+- **No file:** every workflow counts, just as without a config.
+- **Paths inside the file** (such as `packages`) are relative to the file's own folder.
+
+**`workflows.exclude`: leave workflows out.** Each entry needs a `"reason"`. `analyze` lists every excluded workflow with its reason at the end, so nothing disappears silently:
+
+```
+Excluded from scope (1), pass --all to show them:
+  shipment.ShipmentWorkflow: needs a real carrier sandbox
+```
+
+**`workflows.include`: only these count.** Every other workflow PathKit finds is listed as excluded with the reason `not in include list`.
+
+`include` can also name a function the automatic rule misses: an unexported one, or one with no `error` result. Its first parameter must be `workflow.Context`. It is then labelled, like this:
+
+```
+Workflow: scope.lowerFlow (added by config)
+```
+
+**Names** can be written as `OrderWorkflow`, `orders.OrderWorkflow`, `Service.Run` or `orders.(*Service).Run`. A name that matches nothing, or more than one workflow, is an error: a typo must never quietly change what counts.
+
+**One-off runs:**
+- `--include a,b` replaces the config's include list for this run.
+- `--exclude a,b` leaves workflows out with the reason `excluded by --exclude flag`.
+- `analyze --all` ignores the config and the flags.
+
+**Scope changes what is counted, never what is tested.** `pathkit test` still runs every test; it records only the workflows in scope.
+
+**Example with the sample project:** excluding `ShipmentWorkflow` changes the project from 38 paths with 20 covered (52.6%) to 29 paths with 17 covered (58.6%). The number went up only because something was taken out. That's why every exclusion shows its reason, and why `report` (M7) will always print how many workflows were excluded.
+
+**A workflow in scope that PathKit can't analyze** (for example one using `goto`) is always printed as `in scope but not analyzable: … (fix it, or exclude it in .pathkitrc.json with a reason)`. From M6/M7, `coverage` and `report` will refuse to run while one is in scope, so the percentage always covers exactly what's in scope.
+
+**All keys:**
+
+| Key | Meaning | Works |
+| --- | --- | --- |
+| `packages` | Where your workflows are (default `./...` from the file's folder). Names are checked against these. It is also the folder `pathkit test`/`traces` use when you give none (only when it lists one). | now |
+| `traces` | Trace folder (default `.pathkit/traces`). | now |
+| `workflows.include` / `workflows.exclude` | See above. | now |
+| `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code. | checked now, used from M6 |
+| `out`, `json`, `noColor` | Report output options. | checked now, used from M7 |
+| `html` | `true` or a file path for the HTML report. | checked now, used from M8 |
+
+Keys marked "checked now" are validated, so a typo or wrong type is still reported, but they do nothing yet, and no command claims to apply them. Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
+
+## 6. Errors and exit codes
 
 Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 
@@ -220,6 +286,15 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `... has no exported workflow functions to analyze` | Nothing in that file matches the workflow rule above. | Check the function is exported, takes `workflow.Context` first and returns `error` last. |
 | `no workflows could be analyzed` | Every workflow found was skipped (see the `skipping ...` lines). | Rewrite the construct named in the `skipping` line (see "Never supported" above), or analyze another file. |
 | `skipping <workflow>: goto at ... is not supported: ...` | The workflow uses `goto` or Go's `select`, which PathKit never maps. | Rewrite with `break`/`continue`/`return`, or `workflow.Selector`; other workflows are still analyzed. |
+| `<path>/.pathkitrc.json: invalid JSON at line 3, column 32: ...` | The config file isn't valid JSON. | Fix the file at that line (a missing comma, say). |
+| `<path>/.pathkitrc.json: unknown key "workflow"` | A misspelled key. | Check the spelling against section 5. |
+| `<path>/.pathkitrc.json: workflows.include is empty: ...` | `"include": []` would be ambiguous. | Remove it, or list the workflows that count. |
+| `<path>/.pathkitrc.json: exclude "X" needs a "reason"` | Every exclusion must say why. | Add `"reason": "..."`. |
+| `... include "X" matches no function ...` / `... exclude "X" matches no workflow ...` | A misspelled or missing name. | Fix the name; `pathkit analyze --all` lists every workflow. |
+| `... include "sendEmail" is not a workflow: its first parameter is not workflow.Context` | `include` can only add workflow-shaped functions. | Remove it from `include`. |
+| `... matches 2 functions (a.Run, b.Run); write it with its package ...` | A short name is ambiguous. | Write it as `a.Run`. |
+| `in scope but not analyzable: <workflow>: ...` | The workflow uses something PathKit never maps. | Fix it, or exclude it with a reason. |
+| `no workflows in scope to analyze (every workflow is excluded)` | The scope left nothing to show. | Check `include`/`exclude`, or use `--all`. |
 | `invalid --limit value: ...` | `--limit` needs a positive whole number. | e.g. `--limit 20`. |
 | `--limit ignored because --summary was passed.` | Both flags together. A note only. | Use one or the other. |
 

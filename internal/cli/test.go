@@ -3,7 +3,6 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,10 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
 	"github.com/NikhilRaju9010/pathkit-go/internal/instrument"
 	"github.com/NikhilRaju9010/pathkit-go/internal/load"
-	"github.com/NikhilRaju9010/pathkit-go/internal/model"
+	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
 )
 
@@ -23,42 +21,10 @@ const (
 	overlayDir      = ".pathkit/overlay"
 )
 
-// recordable is a workflow PathKit can record, with its graph and hash.
-type recordable struct {
-	wf    discover.Workflow
-	graph *model.Graph
-	hash  string
-}
-
-// loadRecordable loads arg and returns the workflows PathKit can map. Each
-// skipped workflow gets one stderr line starting with prefix.
-func loadRecordable(arg, prefix string, stderr io.Writer) (*load.Result, []recordable, error) {
-	res, err := load.Load(arg)
-	if err != nil {
-		return nil, nil, userError("%s", err)
-	}
-	var out []recordable
-	for _, wf := range discover.Find(res.Packages) {
-		if res.File != "" && !load.SameFile(wf.Filename, res.File) {
-			continue
-		}
-		g, err := model.Build(wf)
-		var u *model.UnsupportedError
-		if errors.As(err, &u) {
-			fmt.Fprintf(stderr, "%s%s: %v\n", prefix, wf.Name, err)
-			continue
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-		out = append(out, recordable{wf: wf, graph: g, hash: model.FunctionHash(wf.Pkg.Fset, wf.Func)})
-	}
-	return res, out, nil
-}
-
 func newTestCommand() *cobra.Command {
 	var traceDir string
 	var keep bool
+	var sf scopeFlags
 	cmd := &cobra.Command{
 		Use:   "test [folder | folder/...] [-- go test flags]",
 		Short: "Run your Go tests and record which workflow paths they take",
@@ -68,10 +34,14 @@ Your source files and go.mod are never changed.
 
 Coverage is recorded only by "pathkit test"; plain "go test" records nothing.
 
+Only workflows in scope are recorded (.pathkitrc.json, --include,
+--exclude). Every test still runs: the scope changes what is counted,
+never what is tested.
+
 Everything after "--" is passed to go test, for example:
   pathkit test ./... -- -run TestOrder -count=1`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, goArgs := "./...", []string{}
+			target, goArgs := "", []string{} // "": the config's package, else ./...
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				goArgs = args[dash:]
 				args = args[:dash]
@@ -83,27 +53,50 @@ Everything after "--" is passed to go test, for example:
 			default:
 				return userError("expected at most one folder argument, got %d", len(args))
 			}
-			return runTest(cmd, target, goArgs, traceDir, keep)
+			return runTest(cmd, target, goArgs, traceDir, keep, sf)
 		},
 	}
-	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder to write trace files into")
+	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder to write trace files into (default: the config's \"traces\", else .pathkit/traces)")
 	cmd.Flags().BoolVar(&keep, "keep-traces", false, "keep old trace files instead of clearing them first")
+	addScopeFlags(cmd, &sf, false)
 	return cmd
 }
 
-func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string, keep bool) error {
+// traceDirFor is the trace folder a command uses: --traces when given,
+// else the config's "traces" (relative to the config file), else the
+// default.
+func traceDirFor(cmd *cobra.Command, flagValue string, cfg *scope.Config) string {
+	if !cmd.Flags().Changed("traces") && cfg != nil && cfg.Traces != "" {
+		return cfg.Abs(cfg.Traces)
+	}
+	return flagValue
+}
+
+func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string, keep bool, sf scopeFlags) error {
 	stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
-	dir, pattern, file, err := load.Resolve(target)
-	if err != nil {
-		return userError("%s", err)
+	if target != "" {
+		if _, _, file, err := load.Resolve(target); err != nil {
+			return userError("%s", err)
+		} else if file != "" {
+			return userError("expected a package folder or folder/..., not a file: %s", target)
+		}
 	}
-	if file != "" {
-		return userError("expected a package folder or folder/..., not a file: %s", target)
-	}
-	_, workflows, err := loadRecordable(target, "pathkit test: not recording ", stderr)
+	sc, err := loadScoped("test", target, sf, stderr)
 	if err != nil {
 		return err
 	}
+	dir, pattern, _, err := load.Resolve(sc.target)
+	if err != nil {
+		return userError("%s", err)
+	}
+	for _, e := range sc.excluded {
+		fmt.Fprintf(stderr, "pathkit test: not recording %s: excluded from scope (%s)\n", e.Name, e.Reason)
+	}
+	for _, n := range sc.notAnalyzable {
+		fmt.Fprintf(stderr, "pathkit test: not recording %s: in scope but not analyzable: %v %s\n", n.name, n.err, notAnalyzableHint)
+	}
+	workflows := sc.mapped
+	traceDir = traceDirFor(cmd, traceDir, sc.cfg)
 
 	absTraces, err := filepath.Abs(traceDir)
 	if err != nil {
@@ -131,7 +124,7 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 		}
 		goTest = append(goTest, "-overlay="+overlay)
 	} else {
-		fmt.Fprintln(stderr, "pathkit test: no recordable workflows found; running the tests without recording")
+		fmt.Fprintln(stderr, "pathkit test: no workflows in scope to record; running the tests without recording")
 	}
 	goTest = append(goTest, pattern)
 	// Cached test results would skip running the tests, so no traces would

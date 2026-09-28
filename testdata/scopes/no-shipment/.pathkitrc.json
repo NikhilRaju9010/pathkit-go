@@ -1,0 +1,8 @@
+{
+  "packages": ["../../pilot/..."],
+  "workflows": {
+    "exclude": [
+      { "name": "ShipmentWorkflow", "reason": "needs a real carrier sandbox" }
+    ]
+  }
+}

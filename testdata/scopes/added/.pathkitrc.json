@@ -1,0 +1,6 @@
+{
+  "packages": ["../../fixtures/scope/..."],
+  "workflows": {
+    "include": ["lowerFlow", "VisibleFlow"]
+  }
+}

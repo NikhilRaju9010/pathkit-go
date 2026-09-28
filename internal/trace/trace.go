@@ -103,6 +103,9 @@ const (
 	Stale           Kind = "stale"
 	Incomplete      Kind = "incomplete"
 	UnknownWorkflow Kind = "unknown workflow"
+	// Excluded: the trace's workflow is out of scope (.pathkitrc.json,
+	// --include, --exclude). Such traces are listed, never counted.
+	Excluded Kind = "excluded"
 )
 
 // Outcome is the result of checking one trace.
@@ -118,7 +121,7 @@ type Outcome struct {
 func Check(f File, g *model.Graph, hash string) Outcome {
 	switch {
 	case g == nil:
-		return Outcome{Kind: UnknownWorkflow, Reason: "workflow not found in the analyzed packages (or not recordable yet)"}
+		return Outcome{Kind: UnknownWorkflow, Reason: "workflow not found in the analyzed packages (or not analyzable)"}
 	case f.Status != "complete":
 		return Outcome{Kind: Incomplete, Reason: "the run never reached a return (panic, timeout, or stopped)"}
 	case f.FunctionHash != hash:

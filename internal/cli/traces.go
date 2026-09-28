@@ -14,11 +14,12 @@ import (
 
 func newTracesCommand() *cobra.Command {
 	var traceDir string
+	var sf scopeFlags
 	cmd := &cobra.Command{
 		Use:   "traces [folder | folder/...]",
 		Short: "Show which path each recorded trace took (a debug view; coverage arrives in M6)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target := "./..."
+			target := "" // the config's package, else ./...
 			switch len(args) {
 			case 0:
 			case 1:
@@ -26,14 +27,23 @@ func newTracesCommand() *cobra.Command {
 			default:
 				return userError("expected at most one folder argument, got %d", len(args))
 			}
-			return runTraces(cmd, target, traceDir)
+			return runTraces(cmd, target, traceDir, sf)
 		},
 	}
-	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder the trace files are in")
+	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder the trace files are in (default: the config's \"traces\", else .pathkit/traces)")
+	addScopeFlags(cmd, &sf, false)
 	return cmd
 }
 
-func runTraces(cmd *cobra.Command, target, traceDir string) error {
+func runTraces(cmd *cobra.Command, target, traceDir string, sf scopeFlags) error {
+	sc, err := loadScoped("traces", target, sf, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+	for _, n := range sc.notAnalyzable {
+		fmt.Fprintf(cmd.ErrOrStderr(), "pathkit traces: in scope but not analyzable: %s: %v %s\n", n.name, n.err, notAnalyzableHint)
+	}
+	traceDir = traceDirFor(cmd, traceDir, sc.cfg)
 	files, err := trace.List(traceDir)
 	if err != nil {
 		return userError("%s", err)
@@ -41,13 +51,13 @@ func runTraces(cmd *cobra.Command, target, traceDir string) error {
 	if len(files) == 0 {
 		return userError("%s", trace.NoTracesMessage(traceDir))
 	}
-	_, workflows, err := loadRecordable(target, "pathkit traces: not recordable yet ", cmd.ErrOrStderr())
-	if err != nil {
-		return err
-	}
 	byName := map[string]recordable{}
-	for _, r := range workflows {
+	for _, r := range sc.mapped {
 		byName[r.wf.Name] = r
+	}
+	excluded := map[string]string{}
+	for _, e := range sc.excluded {
+		excluded[e.Name] = e.Reason
 	}
 
 	type line struct{ workflow, text string }
@@ -58,6 +68,11 @@ func runTraces(cmd *cobra.Command, target, traceDir string) error {
 		if err != nil {
 			lines = append(lines, line{"~", fmt.Sprintf("%s: could not read trace: %v", filepath.Base(path), err)})
 			counts["unreadable"]++
+			continue
+		}
+		if reason, out := excluded[f.Workflow]; out {
+			counts[trace.Excluded]++
+			lines = append(lines, line{f.Workflow, fmt.Sprintf("%s: excluded from scope (%s) [%s]", f.Workflow, reason, filepath.Base(path))})
 			continue
 		}
 		r, ok := byName[f.Workflow]
@@ -86,7 +101,7 @@ func runTraces(cmd *cobra.Command, target, traceDir string) error {
 		fmt.Fprintln(w, l.text)
 	}
 	var parts []string
-	for _, k := range []trace.Kind{trace.Matched, trace.Unmatched, trace.Stale, trace.Incomplete, trace.UnknownWorkflow, "unreadable"} {
+	for _, k := range []trace.Kind{trace.Matched, trace.Unmatched, trace.Stale, trace.Incomplete, trace.Excluded, trace.UnknownWorkflow, "unreadable"} {
 		if counts[k] > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", counts[k], k))
 		}

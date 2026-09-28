@@ -103,3 +103,49 @@ func receiverTypeName(expr ast.Expr) string {
 	}
 	return "?"
 }
+
+// Function is one top-level function or method, for looking up the names
+// in a scope config (CLAUDE.md D8).
+type Function struct {
+	Workflow Workflow // the function, described like a discovered workflow
+	// Auto: the automatic rule (Find) finds it as a workflow.
+	Auto bool
+	// TakesContext: its first parameter is workflow.Context, which D8
+	// requires of anything added with "include".
+	TakesContext bool
+}
+
+// All returns every top-level function and method in pkgs, sorted by name.
+func All(pkgs []*packages.Package) []Function {
+	var out []Function
+	for _, p := range pkgs {
+		ctxType := workflowContextType(p.Types)
+		for _, f := range p.Syntax {
+			for _, decl := range f.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok {
+					continue
+				}
+				obj, ok := p.TypesInfo.Defs[fn.Name].(*types.Func)
+				if !ok {
+					continue
+				}
+				sig := obj.Type().(*types.Signature)
+				takesCtx := ctxType != nil && sig.Params().Len() > 0 && types.Identical(sig.Params().At(0).Type(), ctxType)
+				out = append(out, Function{
+					Workflow: Workflow{
+						Name:     name(p.Name, fn),
+						Func:     fn,
+						File:     f,
+						Filename: p.Fset.Position(f.Pos()).Filename,
+						Pkg:      p,
+					},
+					Auto:         takesCtx && fn.Name.IsExported() && isWorkflowSignature(sig, ctxType),
+					TakesContext: takesCtx,
+				})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Workflow.Name < out[j].Workflow.Name })
+	return out
+}

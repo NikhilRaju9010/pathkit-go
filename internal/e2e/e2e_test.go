@@ -10,10 +10,13 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/cli"
@@ -368,5 +371,115 @@ func TestLiveFixtures(t *testing.T) {
 			}
 			t.Logf("%s → %s ✓", c.test, c.want)
 		}
+	}
+}
+
+// The scope example from the M5 plan: excluding ShipmentWorkflow (with a
+// reason) leaves 29 paths, of which the pilot's tests cover 17: 58.6%.
+// The numbers come from real runs (analyze, and one pathkit test of the
+// whole pilot), and must agree with EXPECTED.md, which is never edited.
+func TestScopeExcludesShipment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test on the pilot; skipped with -short")
+	}
+	pilot := abs(t, "../../testdata/pilot")
+	cfg := abs(t, "../../testdata/scopes/no-shipment/.pathkitrc.json")
+	key, err := expected.Read(filepath.Join(pilot, "EXPECTED.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const excluded = "shipment.ShipmentWorkflow"
+	wantPaths, wantCovered := 0, 0
+	for name, w := range key {
+		if name != excluded {
+			wantPaths += w.Count
+			wantCovered += w.Covered
+		}
+	}
+	if wantPaths != 29 || wantCovered != 17 {
+		t.Fatalf("EXPECTED.md without shipment: %d paths, %d covered; the plan says 29 and 17", wantPaths, wantCovered)
+	}
+	t.Chdir(t.TempDir())
+
+	// 1. analyze: 29 paths, shipment listed with its reason.
+	stdout, stderr, code := pathkit(t, "analyze", pilot+"/...", "--summary", "--config", cfg)
+	if code != 0 || stderr != "" {
+		t.Fatalf("analyze: exit %d\n%s", code, stderr)
+	}
+	paths := 0
+	for _, line := range strings.Split(stdout, "\n") {
+		if n, ok := strings.CutPrefix(line, "Total paths: "); ok {
+			v, _ := strconv.Atoi(n)
+			paths += v
+		}
+	}
+	if paths != 29 || !strings.Contains(stdout, "  shipment.ShipmentWorkflow: needs a real carrier sandbox\n") {
+		t.Errorf("analyze: %d paths (want 29), excluded list:\n%s", paths, stdout)
+	}
+
+	// 2. One pathkit test of the whole pilot (the folder comes from the
+	// config's "packages"): every test runs, shipment's are not recorded.
+	traces := t.TempDir()
+	stdout, stderr, code = pathkit(t, "test", "--config", cfg, "--traces", traces)
+	if code != 0 {
+		t.Fatalf("pathkit test: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "pathkit test: not recording shipment.ShipmentWorkflow: excluded from scope (needs a real carrier sandbox)\n") ||
+		!strings.Contains(stdout, "ok  \texample.com/pilot/shipment") {
+		t.Errorf("shipment's tests must run but not be recorded:\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+
+	// 3. Count the distinct covered paths.
+	res, err := load.Load(pilot + "/...")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflows := map[string]discover.Workflow{}
+	for _, wf := range discover.Find(res.Packages) {
+		workflows[wf.Name] = wf
+	}
+	covered := map[string]bool{}
+	for _, f := range readTraces(t, traces) {
+		if f.Workflow == excluded {
+			t.Fatalf("a trace was recorded for the excluded %s", excluded)
+		}
+		g, err := expected.Build(workflows, f.Workflow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := trace.Check(f, g, model.FunctionHash(workflows[f.Workflow].Pkg.Fset, workflows[f.Workflow].Func))
+		if out.Kind != trace.Matched {
+			t.Fatalf("%s trace %v: %s (%s)", f.Workflow, f.Steps, out.Kind, out.Reason)
+		}
+		covered[f.Workflow+" "+out.Path.Key()] = true
+	}
+	pct := fmt.Sprintf("%.1f%%", float64(len(covered))/float64(paths)*100)
+	if len(covered) != 17 || pct != "58.6%" {
+		t.Errorf("covered %d of %d paths = %s; want 17 of 29 = 58.6%%", len(covered), paths, pct)
+	}
+	t.Logf("scope without shipment: %d paths, %d covered = %s", paths, len(covered), pct)
+}
+
+// A workflow only "include" added (unexported lowerFlow) is recorded and
+// matched like any other.
+func TestAddedByConfigRecorded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test; skipped with -short")
+	}
+	cfg := abs(t, "../../testdata/scopes/added/.pathkitrc.json")
+	dir := abs(t, "../../testdata/fixtures/scope")
+	t.Chdir(t.TempDir())
+	traces := t.TempDir()
+	stdout, stderr, code := pathkit(t, "test", dir, "--config", cfg, "--traces", traces)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	files := readTraces(t, traces)
+	if len(files) != 1 || files[0].Workflow != "scope.lowerFlow" || files[0].Status != "complete" {
+		t.Fatalf("want one complete trace for scope.lowerFlow, got %+v", files)
+	}
+	stdout, _, code = pathkit(t, "traces", dir, "--config", cfg, "--traces", traces)
+	if code != 0 || !strings.Contains(stdout, "scope.lowerFlow: path 1 (J1.true → End (completed))\n") {
+		t.Errorf("traces: exit %d\n%s", code, stdout)
 	}
 }

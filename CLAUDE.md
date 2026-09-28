@@ -191,15 +191,16 @@ The TS config only matched whole file names and only in `report`, so untestable 
 }
 ```
 
-- Entries name **workflows**, not files: `FuncName`, or `pkg.FuncName` / `pkg.(*Type).Method` when a name is ambiguous.
+- Entries name **workflows**, not files: `FuncName`, or `pkg.FuncName` / `pkg.(*Type).Method` when a name is ambiguous. (Also accepted: `Type.Method` and `pkg.Type.Method`. A short name that matches two workflows is an error, not a guess.)
+- **The exact `include` rule (owner's clarification, M5, 2026-09-28): `include` means "only these count".** When `workflows.include` is given, the scope is exactly the workflows it lists. Every automatically found workflow that it leaves out is **excluded with the reason `not in include list`**, and listed like any other exclusion. So a workflow can only leave the scope visibly. A listed function the automatic rule missed is added (see below). An empty list (`"include": []`) is an error. With no `include`, every automatically found workflow is in scope. `exclude` then takes workflows out, each with its own required `reason`; `--exclude` adds exclusions with the reason `excluded by --exclude flag`. A name in both lists is an error.
 - `include` can also name a function the automatic rule (D3) missed, e.g. an unexported workflow or one returning no `error`, as long as its first parameter is `workflow.Context`. This is how the scope config "covers the rest" now that `RegisterWorkflow` detection is out of v1. Two rules (approved 2026-09-28):
   - If an `include` name matches no function, or matches a function whose first parameter is not `workflow.Context`, that is an **error** (exit 1), the same as a misspelled workflow name. Example: `pathkit report: .pathkitrc.json: include "sendEmail" is not a workflow: its first parameter is not workflow.Context`.
   - Workflows that are in scope only because `include` added them are labelled **`added by config`** in `report` (text, `--json` and HTML) and in `analyze`, so it's always visible which workflows the automatic rule found and which a person added by hand.
 - The same scope is applied by `analyze`, `coverage`, `report`, and `pathkit test` (only in-scope workflows are instrumented).
 - The coverage % is computed **only over in-scope workflows**. `report` always prints a line like `2 workflows excluded by .pathkitrc.json (see "reason")`, so nobody can quietly raise coverage by excluding things.
-- `analyze` shows a note `N workflows hidden by scope; pass --all to show them`.
+- `analyze` shows a note `N workflows hidden by scope; pass --all to show them`. (Built in M5 as a list with every excluded workflow and its reason: `Excluded from scope (N), pass --all to show them:`. `--all` ignores the config and the flags, and prints a line saying the config file is ignored.)
 - An `include`/`exclude` name that matches no workflow is an **error**, not a warning (TS warned). A misspelled include would otherwise silently shrink the scope and inflate the %.
-- The config file is looked up in the current folder, then parent folders up to the folder containing `go.mod`. (TS only checked the current folder.)
+- The config file is looked up in the current folder, then parent folders up to the folder containing `go.mod`. (TS only checked the current folder.) If there is no `go.mod` anywhere above, only the current folder is checked. `--config <file>` (added in M5) names the file instead. Relative paths inside the file are relative to the file's own folder.
 - The `--include`/`--exclude` flags stay for one-off runs and now take workflow names.
 
 ### D9 — `--fail-under` and trace cleanup — APPROVED (2026-09-28)
@@ -738,3 +739,39 @@ Two decisions changed along the way, both approved by the owner:
 - junctions are treated as independent;
 - an added `default` can be impossible (a possible `//pathkit:exhaustive` is noted, not built);
 - `goto`, Go's `select` and unsafe selector shapes are refused.
+
+## 2026-09-28 — M5: workflow-level scope config (`.pathkitrc.json`)
+
+**Decisions (owner, 2026-09-28; D8 updated above):**
+1. **`include` means "only these count".** Every automatically found workflow left out is excluded with the reason `not in include list`. An empty `include` is an error.
+2. **An in-scope workflow PathKit can't analyze is an error unless excluded.** `analyze`, `pathkit test` and `pathkit traces` keep working and always print `in scope but not analyzable: <workflow>: <reason> (fix it, or exclude it in .pathkitrc.json with a reason)`. From M6/M7, `coverage` and `report` must stop with exit 1 while one is in scope, so the % is always over exactly the in-scope set. M5 builds the shared list (`scoped.notAnalyzable`); M6/M7 make it fatal.
+3. **New `--config <file>` flag** on `analyze`, `test` and `traces` (later `coverage`/`report`), with no search when given. It is a new flag name, not in the TS list.
+4. **`--exclude` reason is `excluded by --exclude flag`**, and **`--all` prints `--all: <config path> is ignored; showing every workflow`**.
+5. **`failUnder`, `html`, `out`, `json`, `noColor` and `allowStale` are validated but ignored until M6–M8.** No command applies or mentions them. `TestLaterKeysAreNotApplied` checks that a config setting all six changes no output and writes no file.
+
+**Other choices made while building:**
+- **Names are checked against the config's `packages`** (default `./...` from the config's folder), loaded once per command, so a typo is caught even when `analyze` gets a single file. With no config, the `--include`/`--exclude` flags are checked against what the command loaded.
+- **`packages` and `traces` already work.** `packages` is the folder `pathkit test` and `pathkit traces` use when none is given; with more than one entry, pass the folder as an argument. `traces` is the default trace folder. Both are read relative to the config file.
+- **The file is read strictly:**
+  - unknown keys (`"workflow"`) are refused;
+  - wrong types say what was expected in plain words (`expected a number, found text`), with the line;
+  - JSON syntax errors give the line and the column of the bad character;
+  - an exclude must be `{"name", "reason"}` with a non-empty reason.
+
+  Every error starts with the file's absolute path.
+- **Scope changes what is counted, never what is tested.** `pathkit test` still runs an excluded workflow's tests; it just doesn't record them (`not recording <wf>: excluded from scope (<reason>)`).
+- **`pathkit traces`** lists a trace from an excluded workflow as `excluded from scope (<reason>)`, a new trace kind, instead of `unknown workflow`.
+- **One code path.** `internal/scope` reads the file and resolves the names; the CLI's `loadScoped` applies the result. `analyze`, `test` and `traces` all go through `loadScoped`, which replaced M3's `loadRecordable`. `discover.All` lists every top-level function, so `include` can find the ones the automatic rule misses.
+- **Wording change:** a workflow PathKit can't map now shows as `in scope but not analyzable: …` instead of `skipping …`.
+
+**Tests added:**
+- `internal/scope`: `TestFind` (search, the stop at `go.mod`, a config above the module ignored, the no-`go.mod` case), `TestLoad`, `TestReadValid`, `TestReadErrors` (14 cases), `TestScopeRules` (8 cases plus 4 name forms), `TestScopeErrors` (9 exact messages, including D8's `sendEmail` one and an ambiguous `Run`), `TestAbs`.
+- `internal/cli`: no config file (all 8 workflows, 38 paths, no scope output); the no-shipment config (7 workflows, 29 paths, the exact excluded list) plus `--all`; the upward search; `--exclude`/`--include`; `added by config`; config errors, each with the file path; not-analyzable, and then excluded with a reason; `TestLaterKeysAreNotApplied`; an excluded trace.
+- `internal/e2e`:
+  - `TestScopeExcludesShipment`: real `analyze` gives 29 paths, and one real `pathkit test` of the whole pilot through `--config` gives 17 distinct covered paths = **58.6%**. Shipment's tests ran but weren't recorded, and the numbers agree with `EXPECTED.md` (38 − 9, 20 − 3).
+  - `TestAddedByConfigRecorded`: the unexported `scope.lowerFlow`, added only by `include`, is recorded and matched.
+- **New fixtures:**
+  - `testdata/fixtures/scope`: `VisibleFlow`, `lowerFlow` (with a real test), `NoErrorFlow`, `sendEmail`, the method `Svc.Handle`, and `a.Run`/`b.Run`;
+  - config folders `testdata/scopes/no-shipment` and `testdata/scopes/added`.
+
+  `EXPECTED.md` was not edited.

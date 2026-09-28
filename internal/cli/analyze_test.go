@@ -159,7 +159,7 @@ func TestAnalyzeErrors(t *testing.T) {
 		{"does not compile", []string{"analyze", fixtures + "/broken"},
 			"pathkit analyze: package does not compile: "},
 		{"every workflow skipped", []string{"analyze", fixtures + "/rules/selectors_unsupported.go"},
-			"pathkit analyze: skipping rules.Selector"},
+			"pathkit analyze: in scope but not analyzable: rules.Selector"},
 		{"missing folder", []string{"analyze", "nowhere/..."},
 			"pathkit analyze: Directory not found: nowhere"},
 	}

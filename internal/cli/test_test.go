@@ -83,7 +83,7 @@ func TestTracesOutcomes(t *testing.T) {
 		"orders.OrderWorkflow: unmatched: step 1 \"J2.failure\" does not fit: the path is at J1 (if in.AmountCents <= 0) [b-unmatched.trace.json]\n",
 		"orders.OrderWorkflow: stale: recorded for a different version of the workflow function; re-record it [c-stale.trace.json]\n",
 		"orders.OrderWorkflow: incomplete: the run never reached a return (panic, timeout, or stopped) [d-incomplete.trace.json]\n",
-		"nope.Nope: unknown workflow: workflow not found in the analyzed packages (or not recordable yet) [e-unknown.trace.json]\n",
+		"nope.Nope: unknown workflow: workflow not found in the analyzed packages (or not analyzable) [e-unknown.trace.json]\n",
 		"f-broken.trace.json: could not read trace: not a valid trace file: ",
 		"\n6 traces: 1 matched, 1 unmatched, 1 stale, 1 incomplete, 1 unknown workflow, 1 unreadable\n",
 	} {

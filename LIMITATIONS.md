@@ -2,7 +2,7 @@
 
 PathKit either detects a pattern correctly or clearly does not detect it; it never silently guesses. This file is the honest list of what it does and doesn't cover.
 
-**Status:** building (M4 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
+**Status:** building (M5 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
 
 ## Carried over from the TypeScript version (planned)
 
@@ -14,6 +14,13 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 - **Only code that runs in the workflow function itself is on the map.** Signal/Query/Update handlers registered with `SetQueryHandler`, `SetUpdateHandler` or a callback are separate entry points and are not followed.
 
 ## Found while building
+
+- **`include` means "only these count" (M5).** With `workflows.include` in `.pathkitrc.json` (or `--include`), only the listed workflows are in scope. Every other workflow PathKit finds is listed as excluded with the reason `not in include list`, never dropped silently. To add one hidden workflow while keeping all the others, list them all in `include`, or leave `include` out and use `exclude` for the ones you don't want.
+- **An in-scope workflow PathKit can't analyze is always printed (M5), and will block `coverage`/`report` (M6/M7).** `analyze`, `pathkit test` and `pathkit traces` show `in scope but not analyzable: <workflow>: <reason>`. Fix it, or exclude it with a reason; then it appears in the excluded list instead.
+- **Some config keys are checked but not used yet (M5).** `failUnder`, `html`, `out`, `json`, `noColor` and `allowStale` are validated, so a typo or wrong type is an error. But they have no effect until the features they belong to exist (`coverage` M6, `report` M7, HTML M8). No command claims to apply them.
+- **Names are checked against the whole configured `packages` (M5).** So a misspelled name is caught even when you analyze one file. The cost is that PathKit loads those packages once more when a config has `include` or `exclude`, which takes a moment longer on a big project.
+- **`pathkit test` and `pathkit traces` without a folder use the config's `packages` only when it lists exactly one (M5).** With several, pass the folder as an argument.
+- **The config search stops at the folder with `go.mod` (M5).** A `.pathkitrc.json` above your module is never used. With no `go.mod` anywhere above the current folder, only the current folder is checked. Use `--config <file>` to name a file anywhere.
 
 - **`--version` shows a commit-based version for local builds (M0).** A `go build` inside a git checkout prints something like `v0.0.0-20260928070644-65ea0f53be27+dirty` (Go stamps it from git automatically); `go run` prints `dev`. Only release builds (M9) and `go install ...@vX.Y.Z` show a clean `vX.Y.Z`. This is how Go works, not a bug.
 - **The race detector (`go test -race`) needs a C compiler (M0).** CI runs it on Linux, macOS and Windows, where one is installed. On the development machine there is no C compiler, so the local check is plain `go test ./...`.
@@ -60,7 +67,7 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 ## New in Go, because of the proposed design (planned)
 
 - **The package must compile.** PathKit uses Go's real type checker (`go/types` via `go/packages`), so a package with a compile error, or with modules not downloaded, can't be analyzed. A Go toolchain must be installed where PathKit runs (minimum version to be confirmed in M0; research points to 1.26).
-- **Workflows are recognized by signature.** A function or method counts as a workflow when its first parameter is `workflow.Context`, its last result is `error`, and it's exported. `RegisterWorkflow` calls are not looked at in v1. An unexported workflow, or one that breaks one of these rules, has to be listed in `.pathkitrc.json`'s `workflows.include`. Dynamic workflows are not supported.
+- **Workflows are recognized by signature.** A function or method counts as a workflow when its first parameter is `workflow.Context`, its last result is `error`, and it's exported. `RegisterWorkflow` calls are not looked at in v1. An unexported workflow, or one that breaks one of these rules, has to be listed in `.pathkitrc.json`'s `workflows.include` (its first parameter must still be `workflow.Context`). It is then labelled `added by config`. **Confirmed in M5** (`TestAddedByConfigRecorded`). Dynamic workflows are not supported.
 - **Only error checks right after a Temporal call are junctions.** An `if err != nil` counts only when `err` last came from an activity, child workflow, timer, sleep, await or external-signal call **in the same function** (or, inside a selector callback, in that callback or the function around it; M4c). Other error checks are assumed to take the "no error" side. An `err` passed through several variables may not be traced back; use `//pathkit:branch` to force it.
 - **Selectors are understood only in the simple shape.** **Confirmed and made exact in M4c:** see "A `workflow.Selector` is mapped only in one safe shape" under "Found while building". Unsafe shapes are skipped with a reason, never shown with guessed exits.
 - **Saga compensation in `defer` is noted, not branched.** **Confirmed in M4d** (`TestRules` saga fixtures, `TestLiveFixtures` `BookTripWorkflow`, the fulfillment pilot). Paths show that a compensation `defer` exists, but "compensation ran" vs "didn't run" is not a separate path in v1, because counting it would create impossible paths (a successful order that also compensated) that could never be covered.
@@ -79,5 +86,5 @@ These TS limitations should not exist in Go. Each needs a test in its milestone 
 - Relative trace folder depending on where the test ran (the absolute path is baked into the recorder by `pathkit test`). **Proven in M3.**
 - Any edit to the file, even a comment, making all its traces stale (per-workflow, format-insensitive hash). **Proven in M3** (`TestFunctionHash`).
 - Success and failure ending at one generic `End` (end kinds: completed / failed / continued-as-new). **Proven in M2** (`TestRules/EndKinds`).
-- Scope config matching only file names and only in `report` (workflow names, applied to `analyze` and `report`).
+- Scope config matching only file names and only in `report` (workflow names, applied to `analyze` and `report`). **Proven in M5** for `analyze`, `pathkit test` and `pathkit traces` (`TestScopeExcludesShipment`); `report` uses the same code from M7.
 - No CI threshold (`--fail-under`, exit code 2) and no trace cleanup (`pathkit clean`, cleared per `pathkit test` run).
