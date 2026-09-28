@@ -32,7 +32,7 @@ const RecorderFile = "zz_pathkit_recorder.go"
 
 // Names the generated code adds. If the user's code already uses one,
 // instrumenting stops with a clear error instead of producing broken code.
-var packageNames = []string{"pathkitStart", "pathkitRecorder", "pathkitTrace", "pathkitTraceDir"}
+var packageNames = []string{"pathkitStart", "pathkitRecorder", "pathkitTrace", "pathkitTraceDir", "pathkitLoop"}
 
 // maxResults is how many results a workflow function may have; the
 // recorder declares one pathkitRetN helper for each N up to it.
@@ -124,7 +124,16 @@ func workflowEdits(t Target) ([]Edit, error) {
 		Text:   fmt.Sprintf(" %s := pathkitStart(%s, %q, %q); defer %s.flush();", recVar, ctxName, wf.Name, hash, recVar),
 	}}
 
+	labels := labelsOf(wf.Func.Body)
 	for _, j := range g.Junctions {
+		if j.Kind == model.Loop {
+			e, err := loopEdits(g, j, labels, off, end)
+			if err != nil {
+				return nil, fmt.Errorf("%v in %s", err, wf.Name)
+			}
+			edits = append(edits, e...)
+			continue
+		}
 		var fellInto map[*ast.CaseClause]bool
 		if body := switchBody(j.Stmt); body != nil {
 			var e []Edit
@@ -215,6 +224,115 @@ func fallthroughEdits(body *ast.BlockStmt, off func(ast.Node) int) ([]Edit, map[
 		}
 	}
 	return edits, fellInto
+}
+
+// loopEdits records a loop junction (the loop rule, CLAUDE.md D3). Just
+// before the loop statement (before its label, if it has one), enter
+// hands the recorder the loop's three exit IDs from the model and resets
+// the loop. After that, every decision at the loop's head goes through
+// pathkitRec.loop, which records "retry" when the body already ran, then
+// "iterate" or "exit":
+//   - "for init; cond; post" and "for cond": the condition is wrapped,
+//     so each time it is checked is one decision (continue included);
+//   - "for {}" and range: loop(key, true) at the top of the body, since
+//     every time the body starts, the loop chose to go in;
+//   - range also gets rangeDone after its "}", which records the run-out
+//     (retry, exit), and broke before every break that leaves it, because
+//     a break leaves without an "exit" step.
+func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.LabeledStmt, off, end func(ast.Node) int) ([]Edit, error) {
+	id := func(label string) (string, error) {
+		e, ok := g.ExitFor(j.Stmt, label)
+		if !ok {
+			return "", fmt.Errorf("internal error: no ID for %s exit %q", j.ID, label)
+		}
+		return e.String(), nil
+	}
+	iterate, err := id("iterate")
+	if err != nil {
+		return nil, err
+	}
+	retry, err := id("retry")
+	if err != nil {
+		return nil, err
+	}
+	exit := "" // a "for {}" has no exit
+	if e, ok := g.ExitFor(j.Stmt, "exit"); ok {
+		exit = e.String()
+	}
+
+	stmt := j.Stmt.(ast.Stmt)
+	start := ast.Node(stmt)
+	if l := labels[stmt]; l != nil {
+		start = l
+	}
+	key := j.ID
+	edits := []Edit{{Offset: off(start), Text: fmt.Sprintf("%s.enter(%q, %q, %q, %q); ", recVar, key, iterate, exit, retry)}}
+	atBodyTop := func(body *ast.BlockStmt) Edit {
+		return Edit{Offset: off(body) + 1, Text: fmt.Sprintf(" %s.loop(%q, true);", recVar, key)}
+	}
+
+	switch s := stmt.(type) {
+	case *ast.ForStmt:
+		if s.Cond == nil {
+			return append(edits, atBodyTop(s.Body)), nil
+		}
+		return append(edits,
+			Edit{Offset: off(s.Cond), Text: fmt.Sprintf("%s.loop(%q, ", recVar, key)},
+			Edit{Offset: end(s.Cond), Order: 3, Text: ")"}), nil
+	case *ast.RangeStmt:
+		edits = append(edits, atBodyTop(s.Body), Edit{Offset: end(s), Text: fmt.Sprintf("; %s.rangeDone(%q)", recVar, key)})
+		name := ""
+		if l := labels[stmt]; l != nil {
+			name = l.Label.Name
+		}
+		for _, br := range breaksLeaving(s.Body, name) {
+			edits = append(edits, Edit{Offset: off(br), Text: fmt.Sprintf("%s.broke(%q); ", recVar, key)})
+		}
+		return edits, nil
+	}
+	return nil, fmt.Errorf("internal error: %s is a loop junction but not a loop", j.ID)
+}
+
+// labelsOf maps each labeled statement in body to its label.
+func labelsOf(body *ast.BlockStmt) map[ast.Stmt]*ast.LabeledStmt {
+	out := map[ast.Stmt]*ast.LabeledStmt{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		if l, ok := n.(*ast.LabeledStmt); ok {
+			out[l.Stmt] = l
+		}
+		return true
+	})
+	return out
+}
+
+// breaksLeaving lists the break statements in a loop's body that leave
+// that loop: an unlabeled break not inside a nested for, range, switch
+// or select (those take unlabeled breaks for themselves), or a break
+// naming the loop's label.
+func breaksLeaving(body *ast.BlockStmt, label string) []*ast.BranchStmt {
+	var out []*ast.BranchStmt
+	var visit func(n ast.Node, nested bool)
+	visit = func(root ast.Node, nested bool) {
+		ast.Inspect(root, func(n ast.Node) bool {
+			if n == root {
+				return true
+			}
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+				visit(n, true)
+				return false
+			case *ast.BranchStmt:
+				if n.Tok == token.BREAK && ((n.Label == nil && !nested) || (n.Label != nil && n.Label.Name == label)) {
+					out = append(out, n)
+				}
+			}
+			return true
+		})
+	}
+	visit(body, false)
+	return out
 }
 
 // returnEdits marks a return so the run counts as complete only after all
@@ -354,7 +472,15 @@ type pathkitTrace struct {
 type pathkitRecorder struct {
 	trace       pathkitTrace
 	done        bool
-	fellThrough bool // a switch case just ended with fallthrough
+	fellThrough bool                    // a switch case just ended with fallthrough
+	loops       map[string]*pathkitLoop // by junction ID, e.g. "J1"
+}
+
+// pathkitLoop is one loop's state in this run (the loop rule, CLAUDE.md D3).
+type pathkitLoop struct {
+	iterate, exit, retry string // the loop's exit IDs, from pathkit's model
+	entered              bool   // the body started since the loop statement began
+	broke                bool   // a break just left this range loop
 }
 
 func pathkitStart(ctx pathkitworkflow.Context, workflow, hash string) *pathkitRecorder {
@@ -380,6 +506,46 @@ func (r *pathkitRecorder) hitUnlessFell(id string) {
 	}
 	r.hit(id)
 }
+
+// enter runs just before a loop statement starts (again, when an outer
+// loop goes round), with the loop's exit IDs.
+func (r *pathkitRecorder) enter(key, iterate, exit, retry string) {
+	if r.loops == nil {
+		r.loops = map[string]*pathkitLoop{}
+	}
+	r.loops[key] = &pathkitLoop{iterate: iterate, exit: exit, retry: retry}
+}
+
+// loop records one decision at a loop's head: "retry" first if the body
+// already ran (the loop came round again), then "iterate" or "exit". It
+// returns more, so it can wrap the loop's condition.
+func (r *pathkitRecorder) loop(key string, more bool) bool {
+	l := r.loops[key]
+	if l.entered {
+		r.hit(l.retry)
+	}
+	l.entered = more
+	if more {
+		r.hit(l.iterate)
+	} else {
+		r.hit(l.exit)
+	}
+	return more
+}
+
+// rangeDone runs after a range loop's "}". Reached by a break, it records
+// nothing; reached because the range ran out, that is the loop's exit.
+func (r *pathkitRecorder) rangeDone(key string) {
+	l := r.loops[key]
+	if l.broke {
+		l.broke = false
+		return
+	}
+	r.loop(key, false)
+}
+
+// broke runs just before a break that leaves a range loop.
+func (r *pathkitRecorder) broke(key string) { r.loops[key].broke = true }
 
 // returned marks that the run finished a return of the workflow function
 // (all return values evaluated). pathkitRetN do the same for "return a, b".

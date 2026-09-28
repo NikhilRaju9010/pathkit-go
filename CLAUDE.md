@@ -535,3 +535,78 @@ Every error names the file and line. The only free text is the "Disagreements" s
 - `go test -count=1 ./...`: all packages ok
 - fixtures `go vet` (every package except `broken`): clean
 - pilot `go vet` and `go test`: ok
+
+## 2026-09-28 — M4b: loops and the loop rule
+
+**What was built:**
+- **Loops are junctions** (`internal/model/loop.go`): `for init; cond; post`, `for cond`, `for {}` and `range`, with `break`, `continue`, labels, `continue outer` and `break outer`. The rule is the amended D3 one: a loop is a junction if it contains a Temporal call (any call into the Temporal SDK, including in closures inside it) or any junction (an `if` that counts under D2, or a `switch` with a case). Otherwise it is transparent and walked once.
+- **Labels and exits.** A loop junction is labelled `for <cond>`, `for` or `for range <x>`. Its exits are `iterate` and `exit` (a `for {}` has no `exit`), plus a separate `Retry` edge (`J1.retry`). Retry is not in `Exits`, because it is never chosen at the loop's head: the end of the body, or a `continue`, leads to it.
+- **Model.** go/cfg's blocks give each loop's head (where `continue` and the back-edge land), body and done block. Reaching the head again from inside the body becomes the new `Target.Retry`. The graph now has a cycle (retry leads back to the loop), and `Paths()` and `Match()` handle it.
+- **Analyzer half of the loop rule** (`Paths()`): each exit and each retry edge is used at most once per path. So a loop adds exactly D3's paths (a), (b) and (c); a road that would need a second retry isn't listed. `LoopReasons(wf)` reports, for every loop, whether it has a Temporal call and whether it has a junction; tests use it.
+- **Matcher half** (`Match()`): a `retry` step must come exactly where the graph goes round. A repeated `iterate` of a loop the trace is already in drops every step since that loop's previous `iterate`, including nested loops' steps, and carries on. **Bug found and fixed while building:** the first version accepted a lone `J1.retry` at the loop's head as if it could be chosen there. `TestMatchLoopMismatches` now requires `step 1 "J1.retry" does not fit`.
+- **Recording** (`internal/instrument`):
+  - just before the loop statement (before its label, if any), `pathkitRec.enter("J1", "J1.iterate", "J1.exit", "J1.retry");` hands over the model's IDs;
+  - for `for init; cond; post` and `for cond`, the condition is wrapped as `pathkitRec.loop("J1", <cond>)`, which records `retry` when the body already ran, then `iterate` or `exit`;
+  - `for {}` and `range` get `pathkitRec.loop("J1", true);` at the top of the body;
+  - `range` also gets `; pathkitRec.rangeDone("J1")` after its `}` (the range ran out: `retry`, `exit`), and `pathkitRec.broke("J1");` before each `break` that leaves it, so a break records no `exit`. The breaks are found with Go's rules: an unlabelled `break` belongs to the innermost for, range, switch or select; a labelled one to its label.
+  - `enter` also resets an inner loop each time the outer one goes round.
+
+  Everything is still inserted on existing lines. The generated file adds the type `pathkitLoop`, now a reserved name.
+- **Output:** a retry prints as `retry -->` (exactly how `EXPECTED.md` writes it). Mermaid draws it as `-->|default, then retry|` back to the loop.
+- **Skip messages:** loops and labels are no longer skipped. `goto` stays never-supported.
+
+**Tests added:**
+- `TestPilotLoopRuleChangeIsNeutral`, the owner's condition: the pilot has exactly two loops (`subscription.go:20`, `polling.go:21`), and both contain a Temporal call. So the old rule and the amended rule classify them the same way. Together with the path-by-path comparison, this pins that the rule change moves none of the 38 paths.
+- `TestRules`: 10 loop fixtures (`testdata/fixtures/rules/loops.go`):
+  - 4 transparent loops, including one whose only `if` is a transparent error check and one whose `if` is `//pathkit:ignore`d;
+  - a loop with an activity;
+  - a loop with only a plain `if` (the new rule);
+  - `for {}` with `break`;
+  - `continue`;
+  - nested loops;
+  - labelled `continue outer` / `break outer`.
+- `TestMatchFoldsLoopTrips`: 13 hand-written traces:
+  - zero trips;
+  - several trips ending in a return (b);
+  - one and many trips then leaving (c);
+  - trips with different choices;
+  - `for {}`;
+  - three nested cases (the inner loop going round twice on each of three outer trips; a failure on a later trip; the inner loop not entered on the last trip);
+  - labelled `continue` and `break`;
+  - the two pilot polling traces.
+
+  Each folded result must also be one of the listed paths.
+- `TestMatchLoopMismatches`: 4 new mismatch messages.
+- `TestLiveFixtures`: 15 real runs in the new `testdata/fixtures/loops` package:
+  - `NestedWorkflow` (3 outer × 2 inner trips; a failure on the 3rd outer trip; the inner loop empty; none);
+  - `ScanWorkflow` (`range` with `continue` and `break`);
+  - `WaitWorkflow` (`for {}` + `Sleep` + `break`);
+  - `GridWorkflow` (`continue outer`, `break outer`);
+  - `SumWorkflow` (a transparent loop over 3 items records nothing for the loop);
+  - `CountBigWorkflow` (no Temporal call but an `if` inside: folds under the new rule).
+- `TestIDsRoundTrip` now checks switch, loop and retry IDs. The consistency test counts the IDs handed over in `enter(...)` as recording sites.
+
+**Answer key after M4b:**
+- **Match (5):**
+  - `orders.OrderWorkflow`, `fulfillment.PaymentWorkflow`, `reports.DailyReportWorkflow`;
+  - `polling.ReportPollingWorkflow`: 5/5 paths, with the `retry` step exactly as the key writes it;
+  - `billing.SubscriptionWorkflow`: 3/3 paths, `End (continued-as-new)` proven end to end.
+
+  That is 21 of 38 paths. 14 of 21 tests land on their `EXPECTED.md` path, including `TestPollingPendingThenComplete` (two trips, folded onto path 3) and `TestPollingGivesUp` (two trips, folded onto path 5).
+- **Still skipped (3):**
+  - approval: the `AwaitWithTimeout` result, M4c;
+  - shipment: `workflow.Selector`, M4c;
+  - order fulfillment: the saga `defer`, M4d.
+- No disagreements, and `EXPECTED.md` was not edited.
+
+**Two notes the owner asked to record** (in `LIMITATIONS.md` and `SETUP-GUIDE.md`):
+- `gofmt -l .` lists the generated files in `.pathkit/`, which Go's own tools otherwise ignore; add `.pathkit/` to `.gitignore`.
+- The `default` exit PathKit adds to a `switch` with no `default` can be impossible when the cases already cover every possible value. That path is then never covered and lowers coverage. A possible future fix is an override comment on the `switch` (for example `//pathkit:exhaustive`). It is **not built**.
+
+**Checks run:**
+- `gofmt` on all tracked and new Go files: clean
+- `go vet ./...`: clean
+- staticcheck v0.8.1 (root and pilot): clean
+- `go test -count=1 ./...`: all packages ok
+- fixtures `go vet` (every package except `broken`): clean
+- pilot `go vet` and `go test`: ok

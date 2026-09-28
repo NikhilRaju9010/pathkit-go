@@ -16,6 +16,10 @@ func PathText(p model.Path) string {
 	var b strings.Builder
 	b.WriteString("Start ->")
 	for _, s := range p.Steps {
+		if s.Exit == s.Junction.Retry {
+			b.WriteString(" retry -->") // the loop goes round again; its head comes next
+			continue
+		}
 		fmt.Fprintf(&b, " %s --%s-->", s.Junction.Label, s.Exit.Label)
 	}
 	b.WriteString(" " + p.End.String())
@@ -70,6 +74,9 @@ func Mermaid(g *model.Graph, ps model.PathList, max int) string {
 	var ends []model.EndKind
 	endID := map[model.EndKind]string{}
 	target := func(t model.Target) string {
+		if t.Retry != nil {
+			return ids[t.Retry.Junction]
+		}
 		if t.Junction != nil {
 			return ids[t.Junction]
 		}
@@ -89,7 +96,11 @@ func Mermaid(g *model.Graph, ps model.PathList, max int) string {
 			if e.To.Dead() {
 				continue
 			}
-			edges = append(edges, fmt.Sprintf("  %s -->|%s| %s", ids[j], escape(e.Label), target(e.To)))
+			label := e.Label
+			if e.To.Retry != nil {
+				label += ", then retry" // back to the loop's head
+			}
+			edges = append(edges, fmt.Sprintf("  %s -->|%s| %s", ids[j], escape(label), target(e.To)))
 		}
 	}
 	for _, k := range ends {

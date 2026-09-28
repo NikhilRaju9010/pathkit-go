@@ -2,6 +2,8 @@ package model_test
 
 import (
 	"errors"
+	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -17,16 +19,17 @@ import (
 
 const expectedFile = "../../testdata/pilot/EXPECTED.md"
 
-// m2Workflows are compared path by path. The rest use constructs planned
-// for M4 and must be skipped, naming that construct.
-var m2Workflows = []string{"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow"}
+// mappedWorkflows are compared path by path. The rest use constructs
+// planned for a later M4 slice and must be skipped, naming that construct.
+var mappedWorkflows = []string{
+	"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow", // M2
+	"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", // M4b
+}
 
 var m4Workflows = map[string]string{
 	"approval.ApprovalWorkflow":            "result of AwaitWithTimeout used in an if",
-	"polling.ReportPollingWorkflow":        "for loop",
 	"shipment.ShipmentWorkflow":            "workflow.Selector",
 	"fulfillment.OrderFulfillmentWorkflow": "defer with a Temporal call (saga compensation)",
-	"billing.SubscriptionWorkflow":         "for loop",
 }
 
 func TestPilotMatchesExpected(t *testing.T) {
@@ -45,7 +48,7 @@ func TestPilotMatchesExpected(t *testing.T) {
 		}
 	}
 
-	for _, name := range m2Workflows {
+	for _, name := range mappedWorkflows {
 		t.Run(name, func(t *testing.T) {
 			wf, ok := workflows[name]
 			if !ok {
@@ -85,9 +88,37 @@ func TestPilotMatchesExpected(t *testing.T) {
 			_, err := model.Build(wf)
 			var u *model.UnsupportedError
 			if !errors.As(err, &u) || u.Construct != construct {
-				t.Fatalf("want skipped for %q (planned for M4), got %v", construct, err)
+				t.Fatalf("want skipped for %q (planned for a later M4 slice), got %v", construct, err)
 			}
 			t.Logf("%s: skipped until M4 (%v)", name, err)
 		})
+	}
+}
+
+// The loop rule was widened on 2026-09-28: a loop is a junction if it
+// contains a Temporal call (the original D3 rule) or any junction (new).
+// This pins that the change can't move any EXPECTED.md path: every loop
+// in every pilot workflow contains a Temporal call, so it was a junction
+// under the old rule and still is under the new one. (And the path lists
+// above are compared with EXPECTED.md as they are.)
+func TestPilotLoopRuleChangeIsNeutral(t *testing.T) {
+	workflows := workflowsIn(t, "../../testdata/pilot/...")
+	if len(workflows) != 8 {
+		t.Fatalf("found %d pilot workflows, want 8", len(workflows))
+	}
+	var seen []string
+	for name, wf := range workflows {
+		for _, l := range model.LoopReasons(wf) {
+			where := fmt.Sprintf("%s (%s:%d)", name, filepath.Base(l.Pos.Filename), l.Pos.Line)
+			seen = append(seen, where)
+			if !l.Temporal {
+				t.Errorf("%s: loop without a Temporal call; the old and new loop rules could disagree here", where)
+			}
+		}
+	}
+	slices.Sort(seen)
+	want := []string{"billing.SubscriptionWorkflow (subscription.go:20)", "polling.ReportPollingWorkflow (polling.go:21)"}
+	if !slices.Equal(seen, want) {
+		t.Errorf("pilot loops = %v, want exactly %v", seen, want)
 	}
 }

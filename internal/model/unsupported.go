@@ -26,18 +26,10 @@ func (b *builder) findUnsupported() *UnsupportedError {
 			return false // closures (signal receivers, selector callbacks) aren't mapped
 		case *ast.SelectStmt:
 			never("select statement", n, "Temporal workflows must use workflow.Selector instead of Go's select")
-		case *ast.ForStmt:
-			report("for loop", n)
-		case *ast.RangeStmt:
-			report("range loop", n)
 		case *ast.BranchStmt:
 			if n.Tok == token.GOTO {
 				never("goto", n, "PathKit maps break, continue and return, but not goto")
-			} else if n.Label != nil {
-				report("labeled "+n.Tok.String(), n)
 			}
-		case *ast.LabeledStmt:
-			report("label", n)
 		case *ast.DeferStmt:
 			if b.containsTemporalCall(n.Call) {
 				report("defer with a Temporal call (saga compensation)", n)

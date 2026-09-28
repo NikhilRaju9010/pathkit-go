@@ -29,27 +29,37 @@ const (
 	// Switch is a switch or type switch: one exit per case ("case x"),
 	// plus "default" (written, or added when none is written).
 	Switch
+	// Loop is a for or range loop with a Temporal call or a junction in
+	// it: exits "iterate" (go into the body) and "exit" (the condition is
+	// false, or the range ran out; a "for {}" has none), plus its Retry
+	// edge (the body finished and the loop goes round again). See the
+	// loop rule in CLAUDE.md D3.
+	Loop
 )
 
 // Junction is one decision point in a workflow.
 type Junction struct {
 	ID    string // "J1", "J2", ... in source order
 	Kind  JunctionKind
-	Label string   // "if x > 0", "ChargeCard (activity)", "switch status"
-	Stmt  ast.Node // the *ast.IfStmt, *ast.SwitchStmt or *ast.TypeSwitchStmt
+	Label string   // "if x > 0", "ChargeCard (activity)", "switch status", "for i < n"
+	Stmt  ast.Node // the *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.ForStmt or *ast.RangeStmt
 	Pos   token.Position
-	Exits []*Exit // display order: true before false, failure before success, cases in source order
+	Exits []*Exit // display order: true before false, failure before success, cases in source order, iterate before exit
+	// Retry is a loop's back-edge, "J1.retry". It is not in Exits because
+	// it is not chosen at the loop's head: the end of the body leads to it.
+	Retry *Exit
 }
 
 // Exit is one way out of a junction.
 type Exit struct {
 	ID       EdgeID
-	Label    string // "true", "false", "failure", "success", "case x", "default"
+	Label    string // "true", "false", "failure", "success", "case x", "default", "iterate", "exit", "retry"
 	Junction *Junction
 	// Road is the statement this exit leads into, where the recorder
 	// inserts its call: the if's body or else branch (nil when there is
 	// no else), or the switch's case clause (nil for a default PathKit
-	// added because none is written).
+	// added because none is written). Loop exits have no Road: the
+	// recorder handles loops as a whole.
 	Road ast.Stmt
 	To   Target
 }
@@ -73,15 +83,22 @@ func (k EndKind) String() string {
 	return "End (" + string(k) + ")"
 }
 
-// Target is where a road leads: a junction, or an end station. A dead
+// Target is where a road leads: a junction, an end station, or a loop's
+// retry edge (the body finished; the loop goes round again). A dead
 // target (after a panic) is not a path at all.
 type Target struct {
 	Junction *Junction
 	End      EndKind
+	// Retry, when set, means "take this loop's retry edge (a step on the
+	// path), then continue at Retry.To, the loop's head".
+	Retry *Exit
 }
 
 // Dead reports a road that ends in a panic or os.Exit: not a path at all.
-func (t Target) Dead() bool { return t.Junction == nil && t.End == endDead }
+func (t Target) Dead() bool { return t.Junction == nil && t.Retry == nil && t.End == endDead }
+
+// IsEnd reports a target that is an end station.
+func (t Target) IsEnd() bool { return t.Junction == nil && t.Retry == nil && t.End != endDead }
 
 // Graph is the junction map of one workflow function.
 type Graph struct {
@@ -105,6 +122,9 @@ func (g *Graph) ExitFor(stmt ast.Node, label string) (EdgeID, bool) {
 		if e.Label == label {
 			return e.ID, true
 		}
+	}
+	if j.Retry != nil && j.Retry.Label == label {
+		return j.Retry.ID, true
 	}
 	return EdgeID{}, false
 }

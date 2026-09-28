@@ -24,8 +24,11 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
 )
 
-// m2Workflows are the workflows M3 can record.
-var m2Workflows = []string{"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow"}
+// mappedWorkflows are the pilot workflows PathKit can record so far.
+var mappedWorkflows = []string{
+	"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow", // M3
+	"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", // M4b
+}
 
 func abs(t *testing.T, rel string) string {
 	t.Helper()
@@ -119,7 +122,7 @@ func TestAnswerKey(t *testing.T) {
 	t.Chdir(t.TempDir()) // pathkit writes .pathkit/ here, never into the pilot
 
 	checked := 0
-	for _, name := range m2Workflows {
+	for _, name := range mappedWorkflows {
 		ew := key[name]
 		if ew == nil || len(ew.Tests) == 0 {
 			t.Fatalf("EXPECTED.md has no tests listed for %s", name)
@@ -146,8 +149,8 @@ func TestAnswerKey(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 8 {
-		t.Errorf("checked %d tests against EXPECTED.md, want 8 (3 orders, 2 payment, 3 daily report)", checked)
+	if checked != 14 {
+		t.Errorf("checked %d tests against EXPECTED.md, want 14 (3 orders, 2 payment, 3 daily report, 4 polling, 2 billing)", checked)
 	}
 
 	after := hashTree(t, pilot)
@@ -256,6 +259,32 @@ var liveFixtures = map[string][]liveCase{
 		{"TestLedgerRefund", "switches.LedgerWorkflow", "J1.case Refund|completed"},
 		{"TestLedgerCharge", "switches.LedgerWorkflow", "J1.case Charge|completed"},
 		{"TestLedgerUnknown", "switches.LedgerWorkflow", "J1.default|failed"},
+	},
+	// Several trips are folded by the loop rule: only the last trip is kept.
+	"loops": {
+		{"TestNestedNoTrips", "loops.NestedWorkflow", "J1.exit|completed"},
+		// 3 outer trips, each with 2 inner trips
+		{"TestNestedManyTrips", "loops.NestedWorkflow", "J1.iterate J2.iterate J3.success J2.retry J2.exit J1.retry J1.exit|completed"},
+		// fails on the 2nd inner trip of the 3rd outer trip
+		{"TestNestedFailsLate", "loops.NestedWorkflow", "J1.iterate J2.iterate J3.failure|failed"},
+		{"TestNestedInnerEmpty", "loops.NestedWorkflow", "J1.iterate J2.exit J1.retry J1.exit|completed"},
+		// skips a zero (continue), checks 5, finds 7 (break: no exit step)
+		{"TestScanFindsAfterSkips", "loops.ScanWorkflow", "J1.iterate J2.false J3.success J4.true|completed"},
+		{"TestScanNothing", "loops.ScanWorkflow", "J1.iterate J2.false J3.success J4.false J1.retry J1.exit|completed"},
+		{"TestScanEmpty", "loops.ScanWorkflow", "J1.exit|completed"},
+		{"TestScanOnlyZeros", "loops.ScanWorkflow", "J1.iterate J2.true J1.retry J1.exit|completed"},
+		{"TestScanCheckFails", "loops.ScanWorkflow", "J1.iterate J2.false J3.failure|failed"},
+		// for {}: 3 trips, left by break
+		{"TestWaitThreeHours", "loops.WaitWorkflow", "J1.iterate J2.success J3.true|completed"},
+		// continue outer on the first row, the second row runs out
+		{"TestGridSkipsRowThenFinishes", "loops.GridWorkflow", "J1.iterate J2.iterate J3.false J4.false J5.success J2.retry J2.exit J1.retry J1.exit|completed"},
+		// break outer on the second row: neither loop records an exit
+		{"TestGridStopsAtZero", "loops.GridWorkflow", "J1.iterate J2.iterate J3.false J4.true|completed"},
+		// transparent loop: 3 items, nothing recorded for the loop
+		{"TestSumManyItems", "loops.SumWorkflow", "J1.true|completed"},
+		{"TestSumNoItems", "loops.SumWorkflow", "J1.false|completed"},
+		// no Temporal call but an if inside: a loop junction, folded
+		{"TestCountBigMixed", "loops.CountBigWorkflow", "J1.iterate J2.false J1.retry J1.exit|completed"},
 	},
 }
 

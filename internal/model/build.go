@@ -42,11 +42,27 @@ type builder struct {
 	busy      map[*cfg.Block]bool
 	junctions map[ast.Node]*Junction
 	switchOf  map[*ast.CaseClause]ast.Stmt // case clause -> its switch
+	loopHeads map[*cfg.Block]*loopInfo     // a loop's head block -> the loop
 	err       error
 }
 
 // Build makes the junction map of one workflow.
 func Build(wf discover.Workflow) (*Graph, error) {
+	b := newBuilder(wf)
+	if u := b.findUnsupported(); u != nil {
+		return nil, u
+	}
+
+	c := cfg.New(wf.Func.Body, b.mayReturn)
+	b.indexLoops(c)
+	start := b.road(c.Blocks[0])
+	if b.err != nil {
+		return nil, b.err
+	}
+	return b.finish(start), nil
+}
+
+func newBuilder(wf discover.Workflow) *builder {
 	b := &builder{
 		wf:        wf,
 		info:      wf.Pkg.TypesInfo,
@@ -58,16 +74,7 @@ func Build(wf discover.Workflow) (*Graph, error) {
 	}
 	b.pragmas = b.readPragmas()
 	b.indexSwitches()
-	if u := b.findUnsupported(); u != nil {
-		return nil, u
-	}
-
-	c := cfg.New(wf.Func.Body, b.mayReturn)
-	start := b.road(c.Blocks[0])
-	if b.err != nil {
-		return nil, b.err
-	}
-	return b.finish(start), nil
+	return b
 }
 
 // finish numbers the junctions in source order and assigns every ID.
@@ -79,7 +86,11 @@ func (b *builder) finish(start Target) *Graph {
 	sort.Slice(g.Junctions, func(i, k int) bool { return g.Junctions[i].Stmt.Pos() < g.Junctions[k].Stmt.Pos() })
 	for i, j := range g.Junctions {
 		j.ID = fmt.Sprintf("J%d", i+1)
-		for _, e := range j.Exits {
+		exits := j.Exits
+		if j.Retry != nil {
+			exits = append(exits[:len(exits):len(exits)], j.Retry)
+		}
+		for _, e := range exits {
 			e.ID = EdgeID{j.ID + "." + e.Label}
 			g.byID[e.ID.s] = e
 		}
@@ -92,9 +103,13 @@ func (b *builder) road(blk *cfg.Block) Target {
 	if t, ok := b.memo[blk]; ok {
 		return t
 	}
+	if l := b.loopHeads[blk]; l != nil {
+		return b.loopRoad(l)
+	}
 	if b.busy[blk] {
-		// Only loops or goto can make a cycle, and those are rejected
-		// before building; reaching here is a bug.
+		// Only loops or goto can make a cycle; loop heads are handled
+		// above and goto is rejected before building. Reaching here is a
+		// bug.
 		b.fail(fmt.Errorf("internal error: unexpected cycle in %s", b.wf.Name))
 		return Target{End: endDead}
 	}
@@ -133,11 +148,7 @@ func (b *builder) computeRoad(blk *cfg.Block) Target {
 // decide turns one if statement into a junction, or walks straight
 // through it when it is transparent or ignored (CLAUDE.md D2).
 func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
-	pragma := b.pragmas[b.line(ifs)]
-	if pragma == "" {
-		pragma = b.pragmas[b.line(ifs)-1]
-	}
-
+	pragma := b.ifPragma(ifs)
 	if obj, neq, isErrForm := b.errForm(ifs.Cond); isErrForm {
 		label, temporal := b.errSource(obj, ifs)
 		noErrorIsThen := !neq
@@ -171,6 +182,29 @@ func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
 	j.Exits[0].To = b.road(then)
 	j.Exits[1].To = b.road(other)
 	return Target{Junction: j}
+}
+
+// ifPragma returns "ignore" or "branch" when that pragma is on the if's
+// own line or the line above, else "".
+func (b *builder) ifPragma(ifs *ast.IfStmt) string {
+	if p := b.pragmas[b.line(ifs)]; p != "" {
+		return p
+	}
+	return b.pragmas[b.line(ifs)-1]
+}
+
+// ifIsJunction reports whether decide makes ifs a junction, without
+// building anything. It must follow exactly the same rules as decide.
+func (b *builder) ifIsJunction(ifs *ast.IfStmt) bool {
+	pragma := b.ifPragma(ifs)
+	if pragma == "ignore" {
+		return false
+	}
+	if obj, _, isErrForm := b.errForm(ifs.Cond); isErrForm {
+		_, temporal := b.errSource(obj, ifs)
+		return temporal || pragma == "branch"
+	}
+	return true
 }
 
 func (b *builder) transparent(takeThen bool, then, other *cfg.Block) Target {

@@ -10,19 +10,6 @@ import (
 // goto and Go's select), so it must be skipped with a clear message
 // instead of drawn with a half-right map.
 
-func UsesFor(ctx workflow.Context, n int) (string, error) {
-	for i := 0; i < n; i++ {
-		_ = i
-	}
-	return "ok", nil
-}
-
-func UsesRange(ctx workflow.Context, items []string) (string, error) {
-	for range items {
-	}
-	return "ok", nil
-}
-
 func UsesGoSelect(ctx workflow.Context, ch chan int) (string, error) {
 	select {
 	case <-ch:

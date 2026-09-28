@@ -45,8 +45,12 @@ type PathList struct {
 }
 
 // Paths lists every path, depth first, taking exits in display order.
-// Each exit is used at most once per path (the analyzer half of the loop
-// rule, CLAUDE.md D3). At most max paths are listed.
+// Each exit, and each loop's retry edge, is used at most once per path
+// (the analyzer half of the loop rule, CLAUDE.md D3): so a loop adds the
+// paths "not entered" (exit), "entered and left from inside the body"
+// (iterate, then return or break) and "entered, went round, then left"
+// (iterate, body, retry, exit). A road that would need a second retry is
+// not listed. At most max paths are listed.
 func (g *Graph) Paths(max int) PathList {
 	var out PathList
 	used := map[EdgeID]bool{}
@@ -54,6 +58,17 @@ func (g *Graph) Paths(max int) PathList {
 	var walk func(t Target)
 	walk = func(t Target) {
 		if out.Truncated || t.Dead() {
+			return
+		}
+		if r := t.Retry; r != nil {
+			if used[r.ID] {
+				return
+			}
+			used[r.ID] = true
+			steps = append(steps, Step{Junction: r.Junction, Exit: r})
+			walk(r.To)
+			steps = steps[:len(steps)-1]
+			used[r.ID] = false
 			return
 		}
 		if t.Junction == nil {

@@ -2,7 +2,7 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (milestone M4a of M9).** `pathkit analyze` and `pathkit test` work for workflows made of `if`/`else`, Temporal error checks and `switch`. Loops, selectors and the rest arrive in the remaining M4 slices. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (milestone M4b of M9).** `pathkit analyze` and `pathkit test` work for workflows made of `if`/`else`, Temporal error checks, `switch` and loops. Selectors, wait results and saga `defer` arrive in the remaining M4 slices. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`. *(`pathkit prepare`, for adding the overlay flag to your own `go test` command, arrives in M6.)*
@@ -79,10 +79,23 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
   Start -> Measure (activity) --success--> switch size --case "huge"--> if lane == "" --false--> End (completed)
   ```
 
+  **Watch out:** when you don't write a `default` but your cases already cover every possible value, the added `default` path can never happen. It then shows as never covered and lowers your coverage. For now, write the `default` yourself (for example one that returns an error) so it's a real, testable path. (An override comment for this may come later; it doesn't exist yet.)
+- A `for` or `range` loop is a junction when it contains a Temporal call (any call into the Temporal SDK) or any junction, such as an `if`. It has the exits `iterate` (go into the loop) and `exit` (the condition is false, or the range ran out). When the loop body finishes, or hits `continue`, the path goes `retry -->` back to the loop. A loop with neither a Temporal call nor a junction inside is not a junction: PathKit walks through it once.
+
+  **The loop rule.** PathKit never counts trips. Think of a roundabout: it only matters which exit you finally took, not how many times you went round. So a loop gives at most three kinds of path:
+  1. never went in: `--exit-->`;
+  2. went in and left from inside, by `return` or `break`: `--iterate--> ... End`;
+  3. went round, then left normally: `--iterate--> ... retry --> for ... --exit-->`.
+
+  A test run that went round five times is matched by keeping only its **last** trip. So "the job was still pending twice, then complete" counts as the same path as "complete at once". A `for {}` loop has no `exit`; it leaves only by `break` or `return`. Example:
+
+  ```
+  Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --default--> retry --> for attempt <= in.MaxPolls --exit--> End (completed)
+  ```
+
 **How paths end:** `End (completed)` for `return ..., nil`; `End (failed)` for a returned error; `End (continued-as-new)` for `workflow.NewContinueAsNewError`. It's a plain `End` when PathKit can't tell.
 
 **Not yet supported (arrives in the rest of M4):**
-- loops;
 - `workflow.Selector`;
 - using the result of `AwaitWithTimeout`/`ReceiveWithTimeout`/`ReceiveAsync` in an `if`;
 - `defer` with Temporal calls (saga compensation).
@@ -90,13 +103,13 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
 A workflow that uses one of these is skipped with a note on stderr, and the other workflows are still printed:
 
 ```
-pathkit analyze: skipping polling.ReportPollingWorkflow: for loop at polling.go:21 is supported from M4
+pathkit analyze: skipping approval.ApprovalWorkflow: result of AwaitWithTimeout used in an if at approval.go:37 is supported from M4
 ```
 
 **Never supported:** `goto`, and Go's own `select` statement (Temporal workflows must use `workflow.Selector`). The note says why:
 
 ```
-pathkit analyze: skipping rules.UsesLabel: goto at unsupported.go:36 is not supported: PathKit maps break, continue and return, but not goto
+pathkit analyze: skipping rules.UsesLabel: goto at unsupported.go:23 is not supported: PathKit maps break, continue and return, but not goto
 ```
 
 ## 4. Record which paths your tests run (`pathkit test`)
@@ -152,7 +165,7 @@ The path numbers are the ones `pathkit analyze` prints. A trace can also show as
 
 A trace doesn't know which test produced it; to see one test's path, run only that test (`-- -run '^TestName$'`).
 
-Add `.pathkit/` to your `.gitignore`.
+Add `.pathkit/` to your `.gitignore`. It holds PathKit's marked-up copies (`.pathkit/overlay/`) and your traces. Go's own build and test commands never look inside it, but `gofmt -l .` does, and lists the copies as unformatted. That's harmless; to keep gofmt's output clean, run it on your tracked files only (`gofmt -l $(git ls-files '*.go')`) or on your source folders.
 
 ## 5. Errors and exit codes
 

@@ -51,7 +51,7 @@ func targets(t *testing.T, arg string) []instrument.Target {
 func allTargets(t *testing.T) []instrument.Target {
 	t.Helper()
 	var out []instrument.Target
-	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", pilot + "/..."} {
+	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", fixtures + "/loops", pilot + "/..."} {
 		out = append(out, targets(t, arg)...)
 	}
 	return out
@@ -73,6 +73,7 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 		{fixtures, fixtures + "/panics"},
 		{fixtures, fixtures + "/replay"},
 		{fixtures, fixtures + "/switches"},
+		{fixtures, fixtures + "/loops"},
 		{pilot, pilot + "/..."},
 	}
 	for _, c := range cases {
@@ -135,6 +136,12 @@ func TestEveryExitRecordedOnce(t *testing.T) {
 			case "pathkitRec.hit", "pathkitRec.hitUnlessFell":
 				id, _ := strconv.Unquote(call.Args[0].(*ast.BasicLit).Value)
 				hits = append(hits, id)
+			case "pathkitRec.enter": // a loop's iterate, exit ("" for "for {}") and retry IDs
+				for _, arg := range call.Args[1:] {
+					if id, _ := strconv.Unquote(arg.(*ast.BasicLit).Value); id != "" {
+						hits = append(hits, id)
+					}
+				}
 			case "pathkitStart":
 				starts++
 			case "pathkitRec.returned":
@@ -151,6 +158,9 @@ func TestEveryExitRecordedOnce(t *testing.T) {
 		for _, j := range tg.Graph.Junctions {
 			for _, e := range j.Exits {
 				want = append(want, e.ID.String())
+			}
+			if j.Retry != nil {
+				want = append(want, j.Retry.ID.String())
 			}
 		}
 		slices.Sort(hits)

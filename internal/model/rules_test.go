@@ -114,6 +114,42 @@ func TestRules(t *testing.T) {
 		}},
 		{"DuplicateCases", []string{"J1.case x > 0|completed", "J1.case x > 0 #2|completed", "J1.default|completed"}},
 		{"QualifiedTypeCase", []string{"J1.case *types.Basic|completed", "J1.default|completed"}},
+
+		{"UsesFor", []string{"|completed"}},
+		{"UsesRange", []string{"|completed"}},
+		{"TransparentLoopBeforeIf", []string{"J1.true|completed", "J1.false|completed"}},
+		{"IgnoredIfInLoop", []string{"|completed"}},
+		{"LoopWithActivity", []string{
+			"J1.iterate J2.failure|failed",
+			"J1.iterate J2.success J1.retry J1.exit|completed",
+			"J1.exit|completed",
+		}},
+		{"LoopWithOnlyIf", []string{
+			"J1.iterate J2.true J1.retry J1.exit|completed",
+			"J1.iterate J2.false J1.retry J1.exit|completed",
+			"J1.exit|completed",
+		}},
+		{"ForeverWithBreak", []string{"J1.iterate J2.failure|failed", "J1.iterate J2.success J3.true|completed"}},
+		{"ContinueInLoop", []string{
+			"J1.iterate J2.true J1.retry J1.exit|completed",
+			"J1.iterate J2.false J3.failure|failed",
+			"J1.iterate J2.false J3.success J1.retry J1.exit|completed",
+			"J1.exit|completed",
+		}},
+		{"NestedLoops", []string{
+			"J1.iterate J2.iterate J3.failure|failed",
+			"J1.iterate J2.iterate J3.success J2.retry J2.exit J1.retry J1.exit|completed",
+			"J1.iterate J2.exit J1.retry J1.exit|completed",
+			"J1.exit|completed",
+		}},
+		{"LabeledBreakContinue", []string{
+			"J1.iterate J2.iterate J3.true J1.retry J1.exit|completed",
+			"J1.iterate J2.iterate J3.false J4.true|completed",
+			"J1.iterate J2.iterate J3.false J4.false J5.failure|failed",
+			"J1.iterate J2.iterate J3.false J4.false J5.success J2.retry J2.exit J1.retry J1.exit|completed",
+			"J1.iterate J2.exit J1.retry J1.exit|completed",
+			"J1.exit|completed",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.workflow, func(t *testing.T) {
@@ -144,6 +180,9 @@ func TestJunctionLabels(t *testing.T) {
 		{"UsesTypeSwitch", "switch v.(type)"},
 		{"TaglessSwitchWithInit", "switch"},
 		{"TypeSwitchAssign", "switch v.(type)"},
+		{"LoopWithActivity", "for i < n"},
+		{"LoopWithOnlyIf", "for range xs"},
+		{"ForeverWithBreak", "for"},
 	}
 	for _, tt := range tests {
 		g, err := buildRule(t, tt.workflow)
@@ -163,8 +202,6 @@ func TestJunctionLabels(t *testing.T) {
 func TestUnsupported(t *testing.T) {
 	const planned = "is supported from M4"
 	tests := []struct{ workflow, construct, ending string }{
-		{"UsesFor", "for loop", planned},
-		{"UsesRange", "range loop", planned},
 		{"UsesSelector", "workflow.Selector", planned},
 		{"UsesAwaitResult", "result of AwaitWithTimeout used in an if", planned},
 		{"UsesReceiveWithTimeout", "result of ReceiveWithTimeout used in an if", planned},

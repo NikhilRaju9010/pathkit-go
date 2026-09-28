@@ -13,19 +13,35 @@ import (
 // how M3's recorder and trace matcher will get IDs, with no second way in.
 func TestIDsRoundTrip(t *testing.T) {
 	workflows := workflowsIn(t, "../../testdata/pilot/...")
-	for _, name := range m2Workflows {
+	for _, name := range mappedWorkflows {
 		g, err := model.Build(workflows[name])
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, j := range g.Junctions {
-			wantLabels := []string{"true", "false"}
-			if j.Kind == model.ErrCheck {
+			var wantLabels []string
+			switch j.Kind {
+			case model.PlainIf:
+				wantLabels = []string{"true", "false"}
+			case model.ErrCheck:
 				wantLabels = []string{"failure", "success"}
+			case model.Switch: // polling's switch status
+				wantLabels = []string{`case "complete"`, `case "failed"`, "default"}
+			case model.Loop:
+				wantLabels = []string{"iterate", "exit"}
+				if j.Retry == nil || j.Retry.Label != "retry" {
+					t.Errorf("%s %s: loop without a retry edge", name, j.ID)
+				}
+			}
+			exits := j.Exits
+			if j.Retry != nil {
+				exits = append(exits[:len(exits):len(exits)], j.Retry)
 			}
 			var labels []string
-			for _, e := range j.Exits {
-				labels = append(labels, e.Label)
+			for _, e := range exits {
+				if e != j.Retry {
+					labels = append(labels, e.Label)
+				}
 				id, ok := g.ExitFor(j.Stmt, e.Label)
 				if !ok || id != e.ID || id.String() != j.ID+"."+e.Label {
 					t.Errorf("%s: ExitFor(%s, %s) = %v, %v; want %v", name, j.ID, e.Label, id, ok, e.ID)
