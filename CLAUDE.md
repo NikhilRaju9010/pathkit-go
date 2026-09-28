@@ -610,3 +610,62 @@ Every error names the file and line. The only free text is the "Disagreements" s
 - `go test -count=1 ./...`: all packages ok
 - fixtures `go vet` (every package except `broken`): clean
 - pilot `go vet` and `go test`: ok
+
+## 2026-09-28 — M4c: `workflow.Selector`, timeouts and wait results
+
+**What was built:**
+- **Selector junction** (`internal/model/selector.go`) at `sel.Select(ctx)`, labelled `select (Selector)`. There is one exit per `Add…` call, in source order:
+  - `signal "<name>"`: `AddReceive` on `workflow.GetSignalChannel(ctx, "<name>")` or `GetSignalChannelWithOptions`, directly or through a variable; a string constant is printed as its value;
+  - `timeout`: `AddFuture` on a `workflow.NewTimer` or `NewTimerWithOptions` future;
+  - `activity <Name>`, `local activity <Name>`, `child <Name>`: `AddFuture` on those futures;
+  - `default`: `AddDefault`;
+  - otherwise, as written: `receive <expr>`, `send <expr>`, `future <expr>`.
+
+  Repeated labels get ` #2`, and chained `Add…` calls in one statement are fine.
+- **Selector roads.** Each exit's road is its callback's body, walked with its own go/cfg graph. A `return` in the callback, or its end, goes on to the code right after `Select`. For that, the model's roads can now start in the middle of a block (`roadFrom`).
+- **Selector numbering.** A selector is numbered at its **first `Add…` call** (the junction's new `order`), so it comes before any junction inside its callbacks. That's why shipment's selector is J2 and the `switch` in its callback is J3, as `EXPECTED.md` says.
+- **Where `err` came from.** `nearestAssign` now looks in the innermost function first (for example a callback), then outward. An `if err != nil` inside a callback on an `err` set there is a Temporal error check when the `err` comes from `f.Get` (fixture `ErrCheckInCallback`, live `LookupWorkflow`).
+- **The one shape PathKit maps** (never guessed at). Anything else is skipped with `workflow.Selector at <file>:<line> is not supported: <reason>`, and each case has a fixture in `testdata/fixtures/rules/selectors_unsupported.go`, 11 in all:
+  - The selector is created exactly once, with `workflow.NewSelector` or `NewNamedSelector`, in this function. A parameter, a helper's return value, or a second assignment is rejected.
+  - Every `Add…` call is a plain statement in the same block as the creation, before the `Select`. An `Add…` in an `if`, a loop or a closure, or after `Select`, is rejected, because then the exits would depend on the path.
+  - Every callback is an inline func literal.
+  - There is exactly one `Select` call. It may sit inside a loop (fixture `SelectInLoop`, live `CollectWorkflow`).
+  - The selector variable is used for nothing else: passing it to a function, storing it or capturing it is rejected.
+  - A selector with no `Add…` calls, or one not kept in a variable, is rejected.
+
+  The owner asked for precise reasons, and the wording was fixed before the M4c commit:
+  - A selector made by a helper gets the same reason as one passed in as a parameter: `must be created in this function, …`. `must be created exactly once` is kept for a second assignment only.
+  - An `Add…` in the wrong place names what it is inside: `an if`, `a loop`, `a switch`, `a select`, `a function literal`, or `a nested block`.
+- **Wait results.** An `if` whose condition is exactly `ok` or `!ok` is a `WaitResult` junction when `ok` is the first result of `AwaitWithTimeout` (exits `signaled` / `timeout`), `ReceiveWithTimeout` or `ReceiveAsyncWithMoreFlag`, or the inline form `c.ReceiveAsync(&v)` / `!c.ReceiveAsync(&v)` (exits `received` / `not received`). Its label is, for example, `if !ok (AwaitWithTimeout)`. A compound condition such as `ok && x > 0` is an ordinary `true`/`false` junction: less descriptive, never wrong. `//pathkit:ignore` works as on any `if`.
+- **Recording** needed no new kind of insertion: a selector exit records at the top of its callback, and a wait result records like any `if`. The skip messages for Selector and the wait results are gone; only the saga `defer` still says "supported from M4".
+
+**Tests added:**
+- `TestRules`: 7 selector fixtures and 6 wait fixtures, with every label kind, a return inside a callback, an error check inside a callback, `Select` in a loop, chained adds, a compound condition and a pragma.
+- `TestUnsupported`: the 11 unsupported selector shapes, each checked word for word.
+- `TestJunctionLabels`: 4 more labels.
+- `TestLiveFixtures`: 12 real runs in the new `testdata/fixtures/waits` package, **both sides of every race**:
+  - Selector: signal wins and timer wins;
+  - `AddDefault`: a signal waiting and nothing waiting;
+  - an activity future winning, with its error check in the callback;
+  - `Select` in a loop over 3 rounds (signal, nothing, signal), folded;
+  - `AwaitWithTimeout`: arrived and timed out;
+  - `ReceiveWithTimeout`: arrived and timed out;
+  - `ReceiveAsync`: found and not found.
+- The CLI "every workflow skipped" test now uses `selectors_unsupported.go`, which stays skipped forever, instead of the approval pilot, which is now supported.
+
+**Not covered by a live test:** a timer beating an *activity* in a selector. In the Temporal test environment, the fake clock doesn't jump forward while an activity is running, so the activity always wins unless it is mocked with a delay (`OnActivity(...).After(...)`), which needs testify's `mock` in the fixtures module. Timer-wins is covered live by `RaceWorkflow` (a timer against a signal), and the activity/timer selector shape is covered by analysis fixtures.
+
+**Answer key after M4c:**
+- **Match (7):** orders, payment, daily report, polling, billing, and now:
+  - `shipment.ShipmentWorkflow`: 9/9 paths, with the selector J2 and the `switch` J3 inside its callback;
+  - `approval.ApprovalWorkflow`: 4/4 paths.
+
+  That is 34 of 38 paths, and 19 of 21 tests land on their `EXPECTED.md` path, including `TestShipmentDelivered` → 3, `TestShipmentTimerFiresLost` → 9 and `TestApprovalTimesOut` → 2.
+- **Still skipped (1):** `fulfillment.OrderFulfillmentWorkflow`, for the saga `defer` (M4d).
+- No disagreements, and `EXPECTED.md` was not edited.
+
+**Planned for M4d (owner's requirement, written into `PLAN.md`).** Once all 8 pilot workflows are supported, a skipped pilot workflow must make `TestPilotMatchesExpected` and the e2e `TestAnswerKey` **fail**:
+- both take their workflow and test lists from `EXPECTED.md` itself;
+- a workflow that doesn't build fails immediately, naming the construct;
+- the checked-test count must equal the key's own count (21);
+- the "must build" check is itself tested with a fixture that is always skipped.

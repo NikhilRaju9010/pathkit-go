@@ -103,16 +103,8 @@ func (b *builder) errSource(obj types.Object, ifs *ast.IfStmt) (label string, te
 // futureLabel names the Temporal call that produced a future: the activity
 // or child workflow name for ExecuteActivity/ExecuteChildWorkflow, and so on.
 func (b *builder) futureLabel(x ast.Expr, at ast.Node, depth int) string {
-	x = ast.Unparen(x)
-	if id, ok := x.(*ast.Ident); ok && depth < 3 {
-		if obj := b.info.Uses[id]; obj != nil {
-			if rhs, _, ok := b.nearestAssign(obj, at.Pos()); ok {
-				return b.futureLabel(rhs, at, depth+1)
-			}
-		}
-	}
-	call, ok := x.(*ast.CallExpr)
-	if !ok {
+	call := b.originCall(x, at, depth)
+	if call == nil {
 		return "Future (future)"
 	}
 	f := b.calledFunc(call)
@@ -123,7 +115,7 @@ func (b *builder) futureLabel(x ast.Expr, at ast.Node, depth int) string {
 		return argName(call.Args[1]) + " (local activity)"
 	case isPkgFunc(f, workflowPkg, "ExecuteChildWorkflow") && len(call.Args) > 1:
 		return argName(call.Args[1]) + " (child workflow)"
-	case isPkgFunc(f, workflowPkg, "NewTimer"):
+	case isPkgFunc(f, workflowPkg, "NewTimer", "NewTimerWithOptions"):
 		return "NewTimer (timer)"
 	case isPkgFunc(f, workflowPkg, "SignalExternalWorkflow"):
 		return "SignalExternalWorkflow (signal)"
@@ -131,6 +123,22 @@ func (b *builder) futureLabel(x ast.Expr, at ast.Node, depth int) string {
 		return "RequestCancelExternalWorkflow (cancel)"
 	}
 	return "Future (future)"
+}
+
+// originCall follows x back to the call that produced its value: x itself
+// when it is a call, or, for a variable, the call in its nearest
+// assignment before at (up to 3 variables deep). nil when there is none.
+func (b *builder) originCall(x ast.Expr, at ast.Node, depth int) *ast.CallExpr {
+	x = ast.Unparen(x)
+	if id, ok := x.(*ast.Ident); ok && depth < 3 {
+		if obj := b.info.Uses[id]; obj != nil {
+			if rhs, _, ok := b.nearestAssign(obj, at.Pos()); ok {
+				return b.originCall(rhs, at, depth+1)
+			}
+		}
+	}
+	call, _ := x.(*ast.CallExpr)
+	return call
 }
 
 // argName prints an activity/workflow argument: a function name, or the

@@ -24,11 +24,10 @@ const expectedFile = "../../testdata/pilot/EXPECTED.md"
 var mappedWorkflows = []string{
 	"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow", // M2
 	"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", // M4b
+	"shipment.ShipmentWorkflow", "approval.ApprovalWorkflow", // M4c
 }
 
 var m4Workflows = map[string]string{
-	"approval.ApprovalWorkflow":            "result of AwaitWithTimeout used in an if",
-	"shipment.ShipmentWorkflow":            "workflow.Selector",
 	"fulfillment.OrderFulfillmentWorkflow": "defer with a Temporal call (saga compensation)",
 }
 

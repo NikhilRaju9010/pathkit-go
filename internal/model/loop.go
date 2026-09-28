@@ -30,7 +30,6 @@ func (l *loopInfo) junction() bool { return l.temporal || l.inner }
 
 // indexLoops finds every loop's head, body and done blocks in c.
 func (b *builder) indexLoops(c *cfg.CFG) {
-	b.loopHeads = map[*cfg.Block]*loopInfo{}
 	loops := map[ast.Stmt]*loopInfo{}
 	get := func(s ast.Stmt) *loopInfo {
 		if loops[s] == nil {

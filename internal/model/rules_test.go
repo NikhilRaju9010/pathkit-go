@@ -150,6 +150,40 @@ func TestRules(t *testing.T) {
 			"J1.iterate J2.exit J1.retry J1.exit|completed",
 			"J1.exit|completed",
 		}},
+
+		{"UsesSelector", []string{"J1.timeout|completed"}},
+		{"SignalOrTimer", []string{`J1.signal "go"|completed`, "J1.timeout|completed"}},
+		{"SelectorAllKinds", []string{
+			`J1.signal "approve"|completed`,
+			"J1.activity Charge|completed",
+			"J1.child ChildFlow|completed",
+			"J1.local activity Notify|completed",
+			"J1.receive ch|completed",
+			"J1.send out|completed",
+			"J1.default|completed",
+		}},
+		{"CallbackBranches", []string{
+			`J1.signal "s" J2.true J3.true|completed`,
+			`J1.signal "s" J2.true J3.false|completed`,
+			`J1.signal "s" J2.false J3.true|completed`,
+			`J1.signal "s" J2.false J3.false|completed`,
+			"J1.default J3.true|completed",
+			"J1.default J3.false|completed",
+		}},
+		{"ErrCheckInCallback", []string{"J1.activity Charge J2.failure|completed", "J1.activity Charge J2.success|completed", "J1.timeout|completed"}},
+		{"SelectInLoop", []string{
+			`J2.iterate J1.signal "s" J2.retry J2.exit|completed`,
+			"J2.iterate J1.timeout J2.retry J2.exit|completed",
+			"J2.exit|completed",
+		}},
+		{"ChainedAdds", []string{"J1.timeout|completed", "J1.timeout #2|completed"}},
+
+		{"UsesAwaitResult", []string{"J1.failure|failed", "J1.success J2.signaled|completed", "J1.success J2.timeout|completed"}},
+		{"UsesReceiveWithTimeout", []string{"J1.received|completed", "J1.not received|completed"}},
+		{"ReceiveAsyncInline", []string{"J1.received|completed", "J1.not received|completed"}},
+		{"ReceiveAsyncMoreFlag", []string{"J1.received|completed", "J1.not received|completed"}},
+		{"AwaitCompound", []string{"J1.true|completed", "J1.false|completed"}},
+		{"AwaitIgnored", []string{"|completed"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.workflow, func(t *testing.T) {
@@ -183,6 +217,10 @@ func TestJunctionLabels(t *testing.T) {
 		{"LoopWithActivity", "for i < n"},
 		{"LoopWithOnlyIf", "for range xs"},
 		{"ForeverWithBreak", "for"},
+		{"SignalOrTimer", "select (Selector)"},
+		{"UsesReceiveWithTimeout", "if ok (ReceiveWithTimeout)"},
+		{"ReceiveAsyncInline", `if !workflow.GetSignalChannel(ctx, "s").ReceiveAsync(&v) (ReceiveAsync)`},
+		{"AwaitCompound", "if ok && x > 0"},
 	}
 	for _, tt := range tests {
 		g, err := buildRule(t, tt.workflow)
@@ -202,13 +240,23 @@ func TestJunctionLabels(t *testing.T) {
 func TestUnsupported(t *testing.T) {
 	const planned = "is supported from M4"
 	tests := []struct{ workflow, construct, ending string }{
-		{"UsesSelector", "workflow.Selector", planned},
-		{"UsesAwaitResult", "result of AwaitWithTimeout used in an if", planned},
-		{"UsesReceiveWithTimeout", "result of ReceiveWithTimeout used in an if", planned},
 		{"UsesDeferCompensation", "defer with a Temporal call (saga compensation)", planned},
 		// never supported: the message says why, and promises nothing
 		{"UsesGoSelect", "select statement", "is not supported: Temporal workflows must use workflow.Selector instead of Go's select"},
 		{"UsesLabel", "goto", "is not supported: PathKit maps break, continue and return, but not goto"},
+
+		// Selector shapes PathKit can't map safely (M4c)
+		{"SelectorFromParam", "workflow.Selector", "is not supported: the selector sel must be created in this function, with workflow.NewSelector or NewNamedSelector"},
+		{"SelectorFromHelper", "workflow.Selector", "is not supported: the selector sel must be created in this function, with workflow.NewSelector or NewNamedSelector"},
+		{"SelectorCreatedTwice", "workflow.Selector", "is not supported: the selector sel must be created exactly once, with workflow.NewSelector or NewNamedSelector"},
+		{"SelectorAddInIf", "workflow.Selector", "is not supported: AddDefault is inside an if; PathKit needs every Add… call in the same block as NewSelector, so every Select has the same exits"},
+		{"SelectorAddInClosure", "workflow.Selector", "is not supported: AddReceive is inside a function literal; PathKit needs every Add… call in the same block as NewSelector, so every Select has the same exits"},
+		{"SelectorNamedCallback", "workflow.Selector", "is not supported: the callback of AddFuture must be an inline func literal, so PathKit can follow it"},
+		{"SelectorTwoSelects", "workflow.Selector", "is not supported: the selector sel has 2 Select calls; PathKit maps exactly one"},
+		{"SelectorPassedToHelper", "workflow.Selector", "is not supported: the selector sel is also used here (passed on, stored or captured); PathKit can't see what is added to it there"},
+		{"SelectorAddAfterSelect", "workflow.Selector", "is not supported: AddDefault comes after the Select call"},
+		{"SelectorNoAdds", "workflow.Selector", "is not supported: the selector sel has no Add… calls"},
+		{"SelectorNotInVariable", "workflow.Selector", "is not supported: the selector must be kept in a variable created with workflow.NewSelector in this function"},
 	}
 	for _, tt := range tests {
 		_, err := buildRule(t, tt.workflow)

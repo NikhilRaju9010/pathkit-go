@@ -51,7 +51,7 @@ func targets(t *testing.T, arg string) []instrument.Target {
 func allTargets(t *testing.T) []instrument.Target {
 	t.Helper()
 	var out []instrument.Target
-	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", fixtures + "/loops", pilot + "/..."} {
+	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", fixtures + "/loops", fixtures + "/waits", pilot + "/..."} {
 		out = append(out, targets(t, arg)...)
 	}
 	return out
@@ -74,6 +74,7 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 		{fixtures, fixtures + "/replay"},
 		{fixtures, fixtures + "/switches"},
 		{fixtures, fixtures + "/loops"},
+		{fixtures, fixtures + "/waits"},
 		{pilot, pilot + "/..."},
 	}
 	for _, c := range cases {

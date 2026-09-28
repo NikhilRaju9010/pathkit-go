@@ -43,7 +43,18 @@ type builder struct {
 	junctions map[ast.Node]*Junction
 	switchOf  map[*ast.CaseClause]ast.Stmt // case clause -> its switch
 	loopHeads map[*cfg.Block]*loopInfo     // a loop's head block -> the loop
-	err       error
+	selectAt  map[ast.Stmt]*selectorInfo   // a checked Select statement -> its selector
+	// contOf marks the blocks of a selector callback: a return in the
+	// callback, or its end, goes on to the code after the Select call.
+	contOf map[*cfg.Block]func() Target
+	memoAt map[blockPos]Target // roads that start in the middle of a block
+	err    error
+}
+
+// blockPos is a place inside a block: before its node i.
+type blockPos struct {
+	blk *cfg.Block
+	i   int
 }
 
 // Build makes the junction map of one workflow.
@@ -71,6 +82,10 @@ func newBuilder(wf discover.Workflow) *builder {
 		busy:      map[*cfg.Block]bool{},
 		junctions: map[ast.Node]*Junction{},
 		switchOf:  map[*ast.CaseClause]ast.Stmt{},
+		loopHeads: map[*cfg.Block]*loopInfo{},
+		selectAt:  map[ast.Stmt]*selectorInfo{},
+		contOf:    map[*cfg.Block]func() Target{},
+		memoAt:    map[blockPos]Target{},
 	}
 	b.pragmas = b.readPragmas()
 	b.indexSwitches()
@@ -83,7 +98,7 @@ func (b *builder) finish(start Target) *Graph {
 	for _, j := range b.junctions {
 		g.Junctions = append(g.Junctions, j)
 	}
-	sort.Slice(g.Junctions, func(i, k int) bool { return g.Junctions[i].Stmt.Pos() < g.Junctions[k].Stmt.Pos() })
+	sort.Slice(g.Junctions, func(i, k int) bool { return g.Junctions[i].order < g.Junctions[k].order })
 	for i, j := range g.Junctions {
 		j.ID = fmt.Sprintf("J%d", i+1)
 		exits := j.Exits
@@ -120,14 +135,40 @@ func (b *builder) road(blk *cfg.Block) Target {
 	return t
 }
 
-func (b *builder) computeRoad(blk *cfg.Block) Target {
-	for _, n := range blk.Nodes {
+// roadFrom returns where execution goes from before node i of blk.
+func (b *builder) roadFrom(blk *cfg.Block, i int) Target {
+	if i == 0 {
+		return b.road(blk)
+	}
+	at := blockPos{blk, i}
+	if t, ok := b.memoAt[at]; ok {
+		return t
+	}
+	t := b.computeRoadFrom(blk, i)
+	b.memoAt[at] = t
+	return t
+}
+
+func (b *builder) computeRoad(blk *cfg.Block) Target { return b.computeRoadFrom(blk, 0) }
+
+func (b *builder) computeRoadFrom(blk *cfg.Block, from int) Target {
+	cont := b.contOf[blk] // set inside a selector callback
+	for i, n := range blk.Nodes[from:] {
 		if ret, ok := n.(*ast.ReturnStmt); ok {
+			if cont != nil {
+				return cont() // returns from the callback, not the workflow
+			}
 			return Target{End: b.endKind(ret)}
+		}
+		if s, ok := n.(ast.Stmt); ok && b.selectAt[s] != nil {
+			return b.selectorJunction(b.selectAt[s], blk, from+i)
 		}
 	}
 	switch len(blk.Succs) {
 	case 0:
+		if cont != nil && !b.endsInNoReturn(blk) {
+			return cont() // the callback's end
+		}
 		return Target{End: endDead} // a panic, os.Exit, ...
 	case 1:
 		return b.road(blk.Succs[0])
@@ -174,6 +215,26 @@ func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
 	if pragma == "ignore" {
 		return b.transparent(false, then, other) // assume a defensive check doesn't fire
 	}
+	if name, arrivedIsTrue, ok := b.waitResult(ifs.Cond); ok {
+		arrived, missed := "received", "not received"
+		if name == "AwaitWithTimeout" {
+			arrived, missed = "signaled", "timeout"
+		}
+		j := b.newJunction(ifs, WaitResult, "if "+types.ExprString(ifs.Cond)+" ("+name+")")
+		arrivedBlk, missedBlk := then, other
+		arrivedRoad, missedRoad := ast.Stmt(ifs.Body), ifs.Else
+		if !arrivedIsTrue {
+			arrivedBlk, missedBlk = other, then
+			arrivedRoad, missedRoad = ifs.Else, ifs.Body
+		}
+		j.Exits = []*Exit{
+			{Label: arrived, Junction: j, Road: arrivedRoad},
+			{Label: missed, Junction: j, Road: missedRoad},
+		}
+		j.Exits[0].To = b.road(arrivedBlk)
+		j.Exits[1].To = b.road(missedBlk)
+		return Target{Junction: j}
+	}
 	j := b.newJunction(ifs, PlainIf, "if "+types.ExprString(ifs.Cond))
 	j.Exits = []*Exit{
 		{Label: "true", Junction: j, Road: ifs.Body},
@@ -215,7 +276,7 @@ func (b *builder) transparent(takeThen bool, then, other *cfg.Block) Target {
 }
 
 func (b *builder) newJunction(stmt ast.Node, kind JunctionKind, label string) *Junction {
-	j := &Junction{Kind: kind, Label: label, Stmt: stmt, Pos: b.fset.Position(stmt.Pos())}
+	j := &Junction{Kind: kind, Label: label, Stmt: stmt, Pos: b.fset.Position(stmt.Pos()), order: stmt.Pos()}
 	b.junctions[stmt] = j
 	return j
 }
@@ -272,22 +333,45 @@ func (b *builder) nearestAssign(obj types.Object, pos token.Pos) (rhs ast.Expr, 
 			best, found = at, true
 		}
 	}
-	ast.Inspect(b.wf.Func.Body, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.FuncLit:
-			return false
-		case *ast.AssignStmt:
-			consider(n.Lhs, n.Rhs, n.Pos())
-		case *ast.ValueSpec:
-			lhs := make([]ast.Expr, len(n.Names))
-			for i, name := range n.Names {
-				lhs[i] = name
+	// Look in the function pos is in first (a selector callback, say),
+	// then in the functions around it, out to the workflow function.
+	for _, body := range b.bodiesAround(pos) {
+		ast.Inspect(body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.AssignStmt:
+				consider(n.Lhs, n.Rhs, n.Pos())
+			case *ast.ValueSpec:
+				lhs := make([]ast.Expr, len(n.Names))
+				for i, name := range n.Names {
+					lhs[i] = name
+				}
+				consider(lhs, n.Values, n.Pos())
 			}
-			consider(lhs, n.Values, n.Pos())
+			return true
+		})
+		if found {
+			break
+		}
+	}
+	return rhs, idx, found
+}
+
+// bodiesAround lists the bodies of the functions pos is inside: the
+// innermost function literal first, the workflow function last.
+func (b *builder) bodiesAround(pos token.Pos) []*ast.BlockStmt {
+	out := []*ast.BlockStmt{b.wf.Func.Body}
+	ast.Inspect(b.wf.Func.Body, func(n ast.Node) bool {
+		if n == nil || pos < n.Pos() || pos >= n.End() {
+			return false
+		}
+		if lit, ok := n.(*ast.FuncLit); ok {
+			out = append([]*ast.BlockStmt{lit.Body}, out...)
 		}
 		return true
 	})
-	return rhs, idx, found
+	return out
 }
 
 // endKind works out how a return statement ends the workflow.
@@ -338,6 +422,20 @@ func (b *builder) knownNonNil(obj types.Object, ret *ast.ReturnStmt) bool {
 		}
 	}
 	return false
+}
+
+// endsInNoReturn reports a block cut short by a call that never returns
+// (panic, os.Exit, ...).
+func (b *builder) endsInNoReturn(blk *cfg.Block) bool {
+	if len(blk.Nodes) == 0 {
+		return false
+	}
+	es, ok := blk.Nodes[len(blk.Nodes)-1].(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := ast.Unparen(es.X).(*ast.CallExpr)
+	return ok && !b.mayReturn(call)
 }
 
 // mayReturn tells go/cfg which calls never return (panic, os.Exit,

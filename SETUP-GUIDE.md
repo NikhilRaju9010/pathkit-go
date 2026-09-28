@@ -2,7 +2,7 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (milestone M4b of M9).** `pathkit analyze` and `pathkit test` work for workflows made of `if`/`else`, Temporal error checks, `switch` and loops. Selectors, wait results and saga `defer` arrive in the remaining M4 slices. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (milestone M4c of M9).** `pathkit analyze` and `pathkit test` work for workflows made of `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races and timed waits. Saga `defer` arrives in M4d. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`. *(`pathkit prepare`, for adding the overlay flag to your own `go test` command, arrives in M6.)*
@@ -92,24 +92,48 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
   ```
   Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --default--> retry --> for attempt <= in.MaxPolls --exit--> End (completed)
   ```
+- A `workflow.Selector`'s `Select(ctx)` is a junction: a race between the things you added to it. It has one exit per `Add…` call, named after what it waits for:
+  - `signal "<name>"`: `AddReceive` on `workflow.GetSignalChannel(ctx, "<name>")`;
+  - `timeout`: `AddFuture` on a `workflow.NewTimer`;
+  - `activity <Name>` / `child <Name>`: `AddFuture` on an activity or child-workflow future;
+  - `default`: `AddDefault`, meaning nothing was ready.
+
+  What your callback does comes next on the path, then the code after `Select`:
+
+  ```
+  Start -> CreateLabel (activity) --success--> select (Selector) --timeout--> NotifyCustomer (activity) --success--> End (completed)
+  ```
+
+  PathKit needs the simple, common shape:
+  - create the selector with `workflow.NewSelector` in the workflow function;
+  - call its `Add…` methods one after another, right there (not inside an `if`, a loop or another function), each with an inline `func(...) { ... }` callback;
+  - then call `Select` once (it may be inside a loop).
+
+  Anything else is skipped with a reason, for example:
+
+  ```
+  pathkit analyze: skipping rules.SelectorNamedCallback: workflow.Selector at selectors_unsupported.go:61 is not supported: the callback of AddFuture must be an inline func literal, so PathKit can follow it
+  ```
+- An `if` on the "did it arrive in time?" answer is a junction:
+  - `if !ok` after `ok, err := workflow.AwaitWithTimeout(...)` has the exits `signaled` / `timeout`;
+  - `if ok` after `ch.ReceiveWithTimeout(...)`, or `if ch.ReceiveAsync(&v)`, has the exits `received` / `not received`.
+
+  Write the check as plain `ok` or `!ok`; a combined condition like `ok && x > 0` is shown with ordinary `true` / `false` exits instead.
+
+  **Testing a timer that beats an activity:** the test environment's clock doesn't jump forward while an activity runs, so make the activity slow with `env.OnActivity(MyActivity, ...).After(2 * time.Hour).Return(...)`. A timer racing a signal needs nothing special.
 
 **How paths end:** `End (completed)` for `return ..., nil`; `End (failed)` for a returned error; `End (continued-as-new)` for `workflow.NewContinueAsNewError`. It's a plain `End` when PathKit can't tell.
 
-**Not yet supported (arrives in the rest of M4):**
-- `workflow.Selector`;
-- using the result of `AwaitWithTimeout`/`ReceiveWithTimeout`/`ReceiveAsync` in an `if`;
-- `defer` with Temporal calls (saga compensation).
-
-A workflow that uses one of these is skipped with a note on stderr, and the other workflows are still printed:
+**Not yet supported (arrives in M4d):** `defer` with Temporal calls (saga compensation). A workflow that uses it is skipped with a note on stderr, and the other workflows are still printed:
 
 ```
-pathkit analyze: skipping approval.ApprovalWorkflow: result of AwaitWithTimeout used in an if at approval.go:37 is supported from M4
+pathkit analyze: skipping fulfillment.OrderFulfillmentWorkflow: defer with a Temporal call (saga compensation) at fulfillment.go:27 is supported from M4
 ```
 
 **Never supported:** `goto`, and Go's own `select` statement (Temporal workflows must use `workflow.Selector`). The note says why:
 
 ```
-pathkit analyze: skipping rules.UsesLabel: goto at unsupported.go:23 is not supported: PathKit maps break, continue and return, but not goto
+pathkit analyze: skipping rules.UsesLabel: goto at unsupported.go:21 is not supported: PathKit maps break, continue and return, but not goto
 ```
 
 ## 4. Record which paths your tests run (`pathkit test`)

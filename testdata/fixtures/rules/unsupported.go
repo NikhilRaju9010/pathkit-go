@@ -1,8 +1,6 @@
 package rules
 
 import (
-	"time"
-
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -24,33 +22,6 @@ func UsesLabel(ctx workflow.Context, x int) (string, error) {
 	}
 done:
 	return "ok", nil
-}
-
-func UsesSelector(ctx workflow.Context) (string, error) {
-	sel := workflow.NewSelector(ctx)
-	sel.AddFuture(workflow.NewTimer(ctx, time.Minute), func(f workflow.Future) {})
-	sel.Select(ctx)
-	return "ok", nil
-}
-
-func UsesAwaitResult(ctx workflow.Context) (string, error) {
-	done := false
-	ok, err := workflow.AwaitWithTimeout(ctx, time.Hour, func() bool { return done })
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "timeout", nil
-	}
-	return "done", nil
-}
-
-func UsesReceiveWithTimeout(ctx workflow.Context) (string, error) {
-	var v string
-	if ok, _ := workflow.GetSignalChannel(ctx, "s").ReceiveWithTimeout(ctx, time.Minute, &v); ok {
-		return v, nil
-	}
-	return "none", nil
 }
 
 func UsesDeferCompensation(ctx workflow.Context) (err error) {

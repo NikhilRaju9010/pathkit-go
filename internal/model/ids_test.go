@@ -25,8 +25,10 @@ func TestIDsRoundTrip(t *testing.T) {
 				wantLabels = []string{"true", "false"}
 			case model.ErrCheck:
 				wantLabels = []string{"failure", "success"}
-			case model.Switch: // polling's switch status
-				wantLabels = []string{`case "complete"`, `case "failed"`, "default"}
+			case model.Switch, model.Selector: // labels come from the code; checked by the rules tests
+				wantLabels = nil
+			case model.WaitResult: // approval's if !ok after AwaitWithTimeout
+				wantLabels = []string{"signaled", "timeout"}
 			case model.Loop:
 				wantLabels = []string{"iterate", "exit"}
 				if j.Retry == nil || j.Retry.Label != "retry" {
@@ -51,7 +53,7 @@ func TestIDsRoundTrip(t *testing.T) {
 					t.Errorf("%s: LookupEdge(%s) did not return the same exit", name, e.ID)
 				}
 			}
-			if !slices.Equal(labels, wantLabels) {
+			if wantLabels != nil && !slices.Equal(labels, wantLabels) {
 				t.Errorf("%s %s: exits %v, want %v", name, j.ID, labels, wantLabels)
 			}
 		}

@@ -28,6 +28,7 @@ import (
 var mappedWorkflows = []string{
 	"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow", // M3
 	"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", // M4b
+	"shipment.ShipmentWorkflow", "approval.ApprovalWorkflow", // M4c
 }
 
 func abs(t *testing.T, rel string) string {
@@ -149,8 +150,8 @@ func TestAnswerKey(t *testing.T) {
 			checked++
 		}
 	}
-	if checked != 14 {
-		t.Errorf("checked %d tests against EXPECTED.md, want 14 (3 orders, 2 payment, 3 daily report, 4 polling, 2 billing)", checked)
+	if checked != 19 {
+		t.Errorf("checked %d tests against EXPECTED.md, want 19 (3 orders, 2 payment, 3 daily report, 4 polling, 2 billing, 3 shipment, 2 approval)", checked)
 	}
 
 	after := hashTree(t, pilot)
@@ -285,6 +286,23 @@ var liveFixtures = map[string][]liveCase{
 		{"TestSumNoItems", "loops.SumWorkflow", "J1.false|completed"},
 		// no Temporal call but an if inside: a loop junction, folded
 		{"TestCountBigMixed", "loops.CountBigWorkflow", "J1.iterate J2.false J1.retry J1.exit|completed"},
+	},
+	// Both sides of every race.
+	"waits": {
+		{"TestRaceSignalWins", "waits.RaceWorkflow", `J1.signal "answer"|completed`},
+		{"TestRaceTimerWins", "waits.RaceWorkflow", "J1.timeout|completed"},
+		{"TestPendingSignalWaiting", "waits.PendingWorkflow", `J1.signal "note"|completed`},
+		{"TestPendingNothing", "waits.PendingWorkflow", "J1.default|completed"},
+		// the activity's error check inside its callback is J2
+		{"TestLookupActivityWins", "waits.LookupWorkflow", "J1.activity Lookup J2.success|completed"},
+		// signal, nothing, signal: three rounds folded onto the last one
+		{"TestCollectThreeRounds", "waits.CollectWorkflow", `J2.iterate J1.signal "item" J2.retry J2.exit|completed`},
+		{"TestApproveArrives", "waits.ApproveWorkflow", "J1.success J2.signaled|completed"},
+		{"TestApproveTimesOut", "waits.ApproveWorkflow", "J1.success J2.timeout|completed"},
+		{"TestReadArrives", "waits.ReadWorkflow", "J1.received|completed"},
+		{"TestReadTimesOut", "waits.ReadWorkflow", "J1.not received|completed"},
+		{"TestPeekFindsSignal", "waits.PeekWorkflow", "J1.received|completed"},
+		{"TestPeekFindsNothing", "waits.PeekWorkflow", "J1.not received|completed"},
 	},
 }
 

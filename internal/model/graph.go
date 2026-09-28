@@ -35,6 +35,14 @@ const (
 	// edge (the body finished and the loop goes round again). See the
 	// loop rule in CLAUDE.md D3.
 	Loop
+	// Selector is a workflow.Selector's Select call: one exit per Add…
+	// call ("signal \"name\"", "timeout", "activity Name", "default", ...).
+	// Each exit's road is that callback's body.
+	Selector
+	// WaitResult is an if on the "did it arrive?" result of
+	// AwaitWithTimeout (exits "signaled", "timeout") or of
+	// ReceiveWithTimeout / ReceiveAsync ("received", "not received").
+	WaitResult
 )
 
 // Junction is one decision point in a workflow.
@@ -42,12 +50,17 @@ type Junction struct {
 	ID    string // "J1", "J2", ... in source order
 	Kind  JunctionKind
 	Label string   // "if x > 0", "ChargeCard (activity)", "switch status", "for i < n"
-	Stmt  ast.Node // the *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.ForStmt or *ast.RangeStmt
+	Stmt  ast.Node // the *ast.IfStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.ForStmt, *ast.RangeStmt, or the Select call's *ast.ExprStmt
 	Pos   token.Position
 	Exits []*Exit // display order: true before false, failure before success, cases in source order, iterate before exit
 	// Retry is a loop's back-edge, "J1.retry". It is not in Exits because
 	// it is not chosen at the loop's head: the end of the body leads to it.
 	Retry *Exit
+
+	// order is where the decision starts in the source, for numbering:
+	// Stmt's position, except for a Selector, which starts at its first
+	// Add… call (so it comes before any junction inside its callbacks).
+	order token.Pos
 }
 
 // Exit is one way out of a junction.

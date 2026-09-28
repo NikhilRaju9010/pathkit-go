@@ -86,16 +86,16 @@ func TestAnalyzeWholePilotSkipsM4Workflows(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, stderr)
 	}
 	for _, name := range []string{"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow",
-		"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow"} {
+		"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", "shipment.ShipmentWorkflow", "approval.ApprovalWorkflow"} {
 		if !strings.Contains(stdout, "Workflow: "+name+"\n") {
 			t.Errorf("stdout is missing %s", name)
 		}
 	}
-	if n := strings.Count(stdout, "Workflow: "); n != 5 {
-		t.Errorf("printed %d workflows, want 5", n)
+	if n := strings.Count(stdout, "Workflow: "); n != 7 {
+		t.Errorf("printed %d workflows, want 7", n)
 	}
-	if n := strings.Count(stderr, "pathkit analyze: skipping "); n != 3 || strings.Count(stderr, "is supported from M4\n") != 3 {
-		t.Errorf("stderr should have 3 skip lines (approval, shipment, fulfillment saga), got:\n%s", stderr)
+	if n := strings.Count(stderr, "pathkit analyze: skipping "); n != 1 || strings.Count(stderr, "is supported from M4\n") != 1 {
+		t.Errorf("stderr should have 1 skip line (fulfillment saga), got:\n%s", stderr)
 	}
 	for _, notWorkflow := range []string{"newChildCtx", "AuditLog"} {
 		if strings.Contains(stdout+stderr, notWorkflow) {
@@ -154,8 +154,8 @@ func TestAnalyzeErrors(t *testing.T) {
 			"pathkit analyze: " + fixtures + "/rules/noworkflows.go has no exported workflow functions to analyze"},
 		{"does not compile", []string{"analyze", fixtures + "/broken"},
 			"pathkit analyze: package does not compile: "},
-		{"every workflow skipped", []string{"analyze", pilot + "/approval/approval.go"},
-			"pathkit analyze: skipping approval.ApprovalWorkflow: "},
+		{"every workflow skipped", []string{"analyze", fixtures + "/rules/selectors_unsupported.go"},
+			"pathkit analyze: skipping rules.Selector"},
 		{"missing folder", []string{"analyze", "nowhere/..."},
 			"pathkit analyze: Directory not found: nowhere"},
 	}
@@ -168,7 +168,7 @@ func TestAnalyzeErrors(t *testing.T) {
 		})
 	}
 	// The every-workflow-skipped case ends with this line.
-	_, stderr, _ := run(t, "analyze", pilot+"/approval/approval.go")
+	_, stderr, _ := run(t, "analyze", fixtures+"/rules/selectors_unsupported.go")
 	if !strings.HasSuffix(stderr, "pathkit analyze: no workflows could be analyzed\n") {
 		t.Errorf("stderr = %q", stderr)
 	}

@@ -35,13 +35,19 @@ func (b *builder) findUnsupported() *UnsupportedError {
 				report("defer with a Temporal call (saga compensation)", n)
 			}
 			return false
-		case *ast.CallExpr:
-			if isSDKMethod(b.calledFunc(n), []string{"Selector"}, "Select") {
-				report("workflow.Selector", n)
+		case *ast.ExprStmt:
+			if call, ok := ast.Unparen(n.X).(*ast.CallExpr); ok && b.isSelectorMethod(call, "Select") {
+				info, u := b.checkSelector(n, call)
+				if u != nil {
+					found = u
+				} else {
+					b.selectAt[n] = info
+				}
+				return false
 			}
-		case *ast.IfStmt:
-			if name := b.waitResultIn(n); name != "" {
-				report("result of "+name+" used in an if", n)
+		case *ast.CallExpr:
+			if b.isSelectorMethod(n, "Select") { // not a statement of its own
+				never("workflow.Selector", n, "Select must be a statement of its own")
 			}
 		}
 		return found == nil
@@ -62,37 +68,42 @@ func (b *builder) containsTemporalCall(n ast.Node) bool {
 	return hit
 }
 
-var receiveMethods = []string{"ReceiveWithTimeout", "ReceiveAsync", "ReceiveAsyncWithMoreFlag"}
 var channelTypes = []string{"ReceiveChannel", "Channel"}
 
-// waitResultIn returns the name of the call whose "did it arrive / did it
-// time out" result the if's condition uses (AwaitWithTimeout's ok,
-// ReceiveWithTimeout's ok, ReceiveAsync's result), or "".
-func (b *builder) waitResultIn(ifs *ast.IfStmt) string {
-	name := ""
-	ast.Inspect(ifs.Cond, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.CallExpr:
-			if f := b.calledFunc(n); isSDKMethod(f, channelTypes, receiveMethods...) {
-				name = f.Name()
-			}
-		case *ast.Ident:
-			obj, ok := b.info.Uses[n].(*types.Var)
-			if !ok {
-				break
-			}
-			rhs, idx, found := b.nearestAssign(obj, ifs.Cond.Pos())
-			if !found || idx != 0 {
-				break
-			}
-			if call, ok := ast.Unparen(rhs).(*ast.CallExpr); ok {
-				f := b.calledFunc(call)
-				if isPkgFunc(f, workflowPkg, "AwaitWithTimeout") || isSDKMethod(f, channelTypes, receiveMethods...) {
-					name = f.Name()
-				}
+// waitResult reports an if condition that is exactly the "did it arrive?"
+// result of AwaitWithTimeout, ReceiveWithTimeout or ReceiveAsync: "ok" or
+// "!ok" where ok is the first result of such a call (nearest assignment),
+// or an inline "c.ReceiveAsync(&v)" / "!c.ReceiveAsync(&v)". It returns
+// the call's name and whether the condition is true when the thing
+// arrived. Any other use (say "ok && x > 0") is a plain if.
+func (b *builder) waitResult(cond ast.Expr) (name string, arrivedIsTrue, ok bool) {
+	e := ast.Unparen(cond)
+	arrivedIsTrue = true
+	if u, isNot := e.(*ast.UnaryExpr); isNot && u.Op == token.NOT {
+		arrivedIsTrue = false
+		e = ast.Unparen(u.X)
+	}
+	switch x := e.(type) {
+	case *ast.CallExpr:
+		if f := b.calledFunc(x); isSDKMethod(f, channelTypes, "ReceiveAsync") {
+			return f.Name(), arrivedIsTrue, true
+		}
+	case *ast.Ident:
+		obj, isVar := b.info.Uses[x].(*types.Var)
+		if !isVar {
+			break
+		}
+		rhs, idx, found := b.nearestAssign(obj, cond.Pos())
+		if !found || idx != 0 {
+			break
+		}
+		if call, isCall := ast.Unparen(rhs).(*ast.CallExpr); isCall {
+			f := b.calledFunc(call)
+			if isPkgFunc(f, workflowPkg, "AwaitWithTimeout") ||
+				isSDKMethod(f, channelTypes, "ReceiveWithTimeout", "ReceiveAsync", "ReceiveAsyncWithMoreFlag") {
+				return f.Name(), arrivedIsTrue, true
 			}
 		}
-		return name == ""
-	})
-	return name
+	}
+	return "", false, false
 }
