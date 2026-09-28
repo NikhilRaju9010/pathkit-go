@@ -24,13 +24,6 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
 )
 
-// mappedWorkflows are the pilot workflows PathKit can record so far.
-var mappedWorkflows = []string{
-	"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow", // M3
-	"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", // M4b
-	"shipment.ShipmentWorkflow", "approval.ApprovalWorkflow", // M4c
-}
-
 func abs(t *testing.T, rel string) string {
 	t.Helper()
 	p, err := filepath.Abs(rel)
@@ -118,14 +111,35 @@ func TestAnswerKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := graphs(t, pilot+"/...")
+	// Every workflow and test comes from the key. A key workflow that
+	// PathKit skips (or can't find) fails here, before any test runs.
+	res, err := load.Load(pilot + "/...")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflows := map[string]discover.Workflow{}
+	for _, wf := range discover.Find(res.Packages) {
+		workflows[wf.Name] = wf
+	}
+	now := map[string]current{}
+	for _, name := range expected.Names(key) {
+		g, err := expected.Build(workflows, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now[name] = current{g, model.FunctionHash(workflows[name].Pkg.Fset, workflows[name].Func)}
+	}
+	wantTests := expected.TestCount(key)
+	if wantTests != 21 {
+		t.Fatalf("EXPECTED.md lists %d tests, want 21", wantTests)
+	}
 	before := hashTree(t, pilot)
 	t.Chdir(t.TempDir()) // pathkit writes .pathkit/ here, never into the pilot
 
 	checked := 0
-	for _, name := range mappedWorkflows {
+	for _, name := range expected.Names(key) {
 		ew := key[name]
-		if ew == nil || len(ew.Tests) == 0 {
+		if len(ew.Tests) == 0 {
 			t.Fatalf("EXPECTED.md has no tests listed for %s", name)
 		}
 		pkgDir := filepath.Join(pilot, filepath.Dir(ew.File))
@@ -140,18 +154,19 @@ func TestAnswerKey(t *testing.T) {
 				t.Fatalf("%s: want exactly one trace for %s, got %+v", test.Name, name, files)
 			}
 			out := trace.Check(files[0], now[name].graph, now[name].hash)
-			want := ew.Paths[test.Path-1].Key
-			if out.Kind != trace.Matched || out.Path.Key() != want {
+			wantPath := ew.Paths[test.Path-1]
+			want := withNote(wantPath.Key, wantPath.Compensation)
+			if got := withNote(out.Path.Key(), out.Path.Compensation); out.Kind != trace.Matched || got != want {
 				t.Errorf("%s: trace %v → %s %q (%s); EXPECTED.md says path %d = %q",
-					test.Name, files[0].Steps, out.Kind, out.Path.Key(), out.Reason, test.Path, want)
+					test.Name, files[0].Steps, out.Kind, got, out.Reason, test.Path, want)
 				continue
 			}
 			t.Logf("%s → EXPECTED path %d (%s) ✓", test.Name, test.Path, want)
 			checked++
 		}
 	}
-	if checked != 19 {
-		t.Errorf("checked %d tests against EXPECTED.md, want 19 (3 orders, 2 payment, 3 daily report, 4 polling, 2 billing, 3 shipment, 2 approval)", checked)
+	if checked != wantTests {
+		t.Errorf("%d of the %d tests in EXPECTED.md landed on their path", checked, wantTests)
 	}
 
 	after := hashTree(t, pilot)
@@ -241,6 +256,14 @@ func TestFixturesUnderOverlay(t *testing.T) {
 	}
 }
 
+// withNote is a path's key plus its compensation note, when it has one.
+func withNote(key string, compensation bool) string {
+	if compensation {
+		return key + " " + model.CompensationNote
+	}
+	return key
+}
+
 // liveCase is one fixture test and the path its single run must take.
 type liveCase struct {
 	test, workflow, want string
@@ -295,6 +318,8 @@ var liveFixtures = map[string][]liveCase{
 		{"TestPendingNothing", "waits.PendingWorkflow", "J1.default|completed"},
 		// the activity's error check inside its callback is J2
 		{"TestLookupActivityWins", "waits.LookupWorkflow", "J1.activity Lookup J2.success|completed"},
+		// the activity is mocked to take 2 hours against a 1-hour timer
+		{"TestLookupTimerWins", "waits.LookupWorkflow", "J1.timeout|completed"},
 		// signal, nothing, signal: three rounds folded onto the last one
 		{"TestCollectThreeRounds", "waits.CollectWorkflow", `J2.iterate J1.signal "item" J2.retry J2.exit|completed`},
 		{"TestApproveArrives", "waits.ApproveWorkflow", "J1.success J2.signaled|completed"},
@@ -303,6 +328,15 @@ var liveFixtures = map[string][]liveCase{
 		{"TestReadTimesOut", "waits.ReadWorkflow", "J1.not received|completed"},
 		{"TestPeekFindsSignal", "waits.PeekWorkflow", "J1.received|completed"},
 		{"TestPeekFindsNothing", "waits.PeekWorkflow", "J1.not received|completed"},
+	},
+	// The compensation defer is a note on the paths past it, never a branch.
+	"saga": {
+		// fails before the defer: no note (and nothing compensated)
+		{"TestBookTripFull", "saga.BookTripWorkflow", "J1.failure|failed"},
+		// fails after the defer: the note; the compensation really runs
+		{"TestBookTripPaymentFails", "saga.BookTripWorkflow", "J1.success J2.failure|failed [compensation (defer)]"},
+		// succeeds: still the note (the defer is registered), not a branch
+		{"TestBookTripSucceeds", "saga.BookTripWorkflow", "J1.success J2.success|completed [compensation (defer)]"},
 	},
 }
 
@@ -328,8 +362,8 @@ func TestLiveFixtures(t *testing.T) {
 				t.Fatalf("%s: want exactly one trace for %s, got %+v", c.test, c.workflow, files)
 			}
 			out := trace.Check(files[0], now[c.workflow].graph, now[c.workflow].hash)
-			if out.Kind != trace.Matched || out.Path.Key() != c.want {
-				t.Errorf("%s: trace %v → %s %q (%s); want %q", c.test, files[0].Steps, out.Kind, out.Path.Key(), out.Reason, c.want)
+			if got := withNote(out.Path.Key(), out.Path.Compensation); out.Kind != trace.Matched || got != c.want {
+				t.Errorf("%s: trace %v → %s %q (%s); want %q", c.test, files[0].Steps, out.Kind, got, out.Reason, c.want)
 				continue
 			}
 			t.Logf("%s → %s ✓", c.test, c.want)

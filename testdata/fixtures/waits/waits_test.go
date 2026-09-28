@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"go.temporal.io/sdk/testsuite"
 )
 
@@ -103,4 +104,23 @@ func TestPeekFindsSignal(t *testing.T) {
 
 func TestPeekFindsNothing(t *testing.T) {
 	want(t, run[string](t, PeekWorkflow, nil), "none")
+}
+
+// Selector with an activity future: the timer wins. The test
+// environment's clock doesn't jump forward while an activity runs, so the
+// activity is mocked to take two hours (After) against a one-hour timer.
+func TestLookupTimerWins(t *testing.T) {
+	var s testsuite.WorkflowTestSuite
+	env := s.NewTestWorkflowEnvironment()
+	env.RegisterActivity(Lookup)
+	env.OnActivity(Lookup, mock.Anything, "k").After(2*time.Hour).Return("late value", nil)
+	env.ExecuteWorkflow(LookupWorkflow, "k")
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := env.GetWorkflowResult(&got); err != nil {
+		t.Fatal(err)
+	}
+	want(t, got, "too slow")
 }

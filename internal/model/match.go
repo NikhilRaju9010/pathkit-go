@@ -116,5 +116,6 @@ func (g *Graph) Match(steps []string) (Path, *Mismatch) {
 		return Path{}, &Mismatch{0, fmt.Sprintf("the trace stops at %s (%s) before reaching an end", at.Junction.ID, at.Junction.Label)}
 	}
 	path.End = at.End
+	path.Compensation = g.compensationOn(path.Steps)
 	return path, nil
 }

@@ -7,6 +7,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
+	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 )
 
 // The real answer key is read completely, including the parts the M2/M3
@@ -154,5 +157,32 @@ func TestRejectsWhatItCannotRead(t *testing.T) {
 				t.Errorf("error %q does not name line %d", err, tt.line)
 			}
 		})
+	}
+}
+
+// The rule "a skipped EXPECTED.md workflow fails the answer-key tests" is
+// only as good as Build, so Build is tested here: a workflow that is
+// always skipped (rules.UsesLabel uses goto) and a missing one must both
+// be errors, never a quiet pass.
+func TestBuildRejectsSkippedAndMissing(t *testing.T) {
+	res, err := load.Load("../../testdata/fixtures/rules")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := map[string]discover.Workflow{}
+	for _, wf := range discover.Find(res.Packages) {
+		ws[wf.Name] = wf
+	}
+
+	if _, err := Build(ws, "rules.UsesLabel"); err == nil ||
+		!strings.Contains(err.Error(), "rules.UsesLabel is skipped (goto at unsupported.go:21 is not supported") ||
+		!strings.Contains(err.Error(), "every EXPECTED.md workflow must be mapped") {
+		t.Errorf("Build(skipped workflow) error = %v, want it to say the workflow is skipped and why", err)
+	}
+	if _, err := Build(ws, "rules.NoSuchWorkflow"); err == nil || !strings.Contains(err.Error(), "discovery didn't find it") {
+		t.Errorf("Build(missing workflow) error = %v, want \"discovery didn't find it\"", err)
+	}
+	if g, err := Build(ws, "rules.PlainIfElse"); err != nil || g == nil {
+		t.Errorf("Build(mapped workflow) = %v, %v; want a graph", g, err)
 	}
 }

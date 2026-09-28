@@ -18,19 +18,13 @@ import (
 // UnsupportedError means the workflow uses a construct PathKit can't map.
 // The workflow is skipped rather than shown with a half-right map.
 type UnsupportedError struct {
-	Construct string // e.g. "for loop"
+	Construct string // e.g. "goto"
 	Pos       token.Position
-	// Reason says why PathKit never maps this construct. Empty means
-	// support is planned for a later M4 slice.
-	Reason string
+	Reason    string // why PathKit doesn't map it
 }
 
 func (e *UnsupportedError) Error() string {
-	where := fmt.Sprintf("%s at %s:%d", e.Construct, filepath.Base(e.Pos.Filename), e.Pos.Line)
-	if e.Reason != "" {
-		return where + " is not supported: " + e.Reason
-	}
-	return where + " is supported from M4"
+	return fmt.Sprintf("%s at %s:%d is not supported: %s", e.Construct, filepath.Base(e.Pos.Filename), e.Pos.Line, e.Reason)
 }
 
 type builder struct {
@@ -151,39 +145,57 @@ func (b *builder) roadFrom(blk *cfg.Block, i int) Target {
 
 func (b *builder) computeRoad(blk *cfg.Block) Target { return b.computeRoadFrom(blk, 0) }
 
+// computeRoadFrom is where execution goes from before node from of blk.
+// A road that passes a saga compensation defer carries the note (CLAUDE.md
+// D3: noted, never a branch).
 func (b *builder) computeRoadFrom(blk *cfg.Block, from int) Target {
+	t, passed := b.roadThrough(blk, from)
+	if passed {
+		t.Compensation = true
+	}
+	return t
+}
+
+// roadThrough does the work of computeRoadFrom; passed reports whether
+// the nodes it went through register a compensation defer.
+func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool) {
 	cont := b.contOf[blk] // set inside a selector callback
 	for i, n := range blk.Nodes[from:] {
+		// A defer in a selector callback runs when the callback ends, not
+		// when the workflow does: only the workflow's own defers count.
+		if d, ok := n.(*ast.DeferStmt); ok && cont == nil && b.isCompensation(d) {
+			passed = true
+		}
 		if ret, ok := n.(*ast.ReturnStmt); ok {
 			if cont != nil {
-				return cont() // returns from the callback, not the workflow
+				return cont(), passed // returns from the callback, not the workflow
 			}
-			return Target{End: b.endKind(ret)}
+			return Target{End: b.endKind(ret)}, passed
 		}
 		if s, ok := n.(ast.Stmt); ok && b.selectAt[s] != nil {
-			return b.selectorJunction(b.selectAt[s], blk, from+i)
+			return b.selectorJunction(b.selectAt[s], blk, from+i), passed
 		}
 	}
 	switch len(blk.Succs) {
 	case 0:
 		if cont != nil && !b.endsInNoReturn(blk) {
-			return cont() // the callback's end
+			return cont(), passed // the callback's end
 		}
-		return Target{End: endDead} // a panic, os.Exit, ...
+		return Target{End: endDead}, passed // a panic, os.Exit, ...
 	case 1:
-		return b.road(blk.Succs[0])
+		return b.road(blk.Succs[0]), passed
 	}
 	then, other := blk.Succs[0], blk.Succs[1]
 	if ifs, ok := then.Stmt.(*ast.IfStmt); ok && then.Kind == cfg.KindIfThen {
-		return b.decide(ifs, then, other)
+		return b.decide(ifs, then, other), passed
 	}
 	if clause, ok := then.Stmt.(*ast.CaseClause); ok && then.Kind == cfg.KindSwitchCaseBody {
 		if sw := b.switchOf[clause]; sw != nil {
-			return b.switchJunction(sw, blk)
+			return b.switchJunction(sw, blk), passed
 		}
 	}
 	b.fail(fmt.Errorf("internal error: unexpected branch (%s) in %s", then.Kind, b.wf.Name))
-	return Target{End: endDead}
+	return Target{End: endDead}, passed
 }
 
 // decide turns one if statement into a junction, or walks straight

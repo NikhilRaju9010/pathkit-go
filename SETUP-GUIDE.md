@@ -2,7 +2,7 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (milestone M4c of M9).** `pathkit analyze` and `pathkit test` work for workflows made of `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races and timed waits. Saga `defer` arrives in M4d. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (M4 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`. *(`pathkit prepare`, for adding the overlay flag to your own `go test` command, arrives in M6.)*
@@ -11,7 +11,7 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 
 | Command | What it does | Available |
 | --- | --- | --- |
-| `pathkit analyze <file>` | Lists every possible path through the workflows in one file (or a package folder, or `folder/...`). | yes (M2; some constructs from M4) |
+| `pathkit analyze <file>` | Lists every possible path through the workflows in one file (or a package folder, or `folder/...`). | yes (M2; all constructs since M4) |
 | `pathkit test [folder \| folder/...]` | Runs your Go tests and records which path each workflow run took. | yes (M3) |
 | `pathkit traces [folder \| folder/...]` | Shows which path each recorded run took (a debug view until `coverage` exists). | yes (M3) |
 | `pathkit coverage <file> --traces <dir>` | Shows which of one workflow's paths your tests ran. | coming in M6 |
@@ -122,13 +122,16 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
 
   **Testing a timer that beats an activity:** the test environment's clock doesn't jump forward while an activity runs, so make the activity slow with `env.OnActivity(MyActivity, ...).After(2 * time.Hour).Return(...)`. A timer racing a signal needs nothing special.
 
+- A child workflow is one step, labelled with its name, e.g. `PaymentWorkflow (child workflow)`, with the exits `failure` / `success` when you check its error. PathKit doesn't follow into the child's own code; it has its own map. A child mocked with `env.OnWorkflow` in a test records nothing for the child.
+- **Saga compensation is a note, not a branch.** A `defer` that starts an activity, local activity or child workflow (usually "undo the earlier steps if we fail") puts `[compensation (defer)]` after the end station of every path that gets past that `defer`:
+
+  ```
+  Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --failure--> End (failed) [compensation (defer)]
+  ```
+
+  Why not a branch? Whether the undo runs depends on how the workflow ended: it runs on failures and not on success. Counting "undo ran / didn't run" as separate paths would invent impossible paths (such as "the order succeeded **and** was undone") that no test could ever cover. Other `defer`s, such as `defer cancel()`, get no note.
+
 **How paths end:** `End (completed)` for `return ..., nil`; `End (failed)` for a returned error; `End (continued-as-new)` for `workflow.NewContinueAsNewError`. It's a plain `End` when PathKit can't tell.
-
-**Not yet supported (arrives in M4d):** `defer` with Temporal calls (saga compensation). A workflow that uses it is skipped with a note on stderr, and the other workflows are still printed:
-
-```
-pathkit analyze: skipping fulfillment.OrderFulfillmentWorkflow: defer with a Temporal call (saga compensation) at fulfillment.go:27 is supported from M4
-```
 
 **Never supported:** `goto`, and Go's own `select` statement (Temporal workflows must use `workflow.Selector`). The note says why:
 
@@ -215,7 +218,7 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `Workflow file not found: ...` / `Directory not found: ...` | Wrong path. | Check the path and your working directory. |
 | `package does not compile: ...` | PathKit needs code that builds. | Fix the compile error shown (run `go build ./...`). |
 | `... has no exported workflow functions to analyze` | Nothing in that file matches the workflow rule above. | Check the function is exported, takes `workflow.Context` first and returns `error` last. |
-| `no workflows could be analyzed` | Every workflow found was skipped (see the `skipping ...` lines). | Wait for the rest of M4, or analyze another file. |
+| `no workflows could be analyzed` | Every workflow found was skipped (see the `skipping ...` lines). | Rewrite the construct named in the `skipping` line (see "Never supported" above), or analyze another file. |
 | `skipping <workflow>: goto at ... is not supported: ...` | The workflow uses `goto` or Go's `select`, which PathKit never maps. | Rewrite with `break`/`continue`/`return`, or `workflow.Selector`; other workflows are still analyzed. |
 | `invalid --limit value: ...` | `--limit` needs a positive whole number. | e.g. `--limit 20`. |
 | `--limit ignored because --summary was passed.` | Both flags together. A note only. | Use one or the other. |

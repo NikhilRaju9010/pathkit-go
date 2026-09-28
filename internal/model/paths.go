@@ -19,6 +19,28 @@ type Step struct {
 type Path struct {
 	Steps []Step
 	End   EndKind
+	// Compensation: the path registers a saga compensation defer, shown
+	// as the note "[compensation (defer)]". It is not part of Key: the
+	// steps decide it (see compensationOn).
+	Compensation bool
+}
+
+// CompensationNote is how the note is printed after the end station.
+const CompensationNote = "[compensation (defer)]"
+
+// compensationOn reports whether a path with these steps passes a saga
+// compensation defer: on the road from Start, or on the road after any
+// step. Paths and Match both use it, so the listing and the matcher agree.
+func (g *Graph) compensationOn(steps []Step) bool {
+	if g.Start.Compensation {
+		return true
+	}
+	for _, s := range steps {
+		if s.Exit.To.Compensation {
+			return true
+		}
+	}
+	return false
 }
 
 // Key is the path's identity: its exit IDs and its end kind, e.g.
@@ -76,7 +98,9 @@ func (g *Graph) Paths(max int) PathList {
 				out.Truncated = true
 				return
 			}
-			out.List = append(out.List, Path{Steps: append([]Step(nil), steps...), End: t.End})
+			p := Path{Steps: append([]Step(nil), steps...), End: t.End}
+			p.Compensation = g.compensationOn(p.Steps)
+			out.List = append(out.List, p)
 			return
 		}
 		for _, e := range t.Junction.Exits {

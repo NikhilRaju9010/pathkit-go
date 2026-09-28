@@ -13,7 +13,7 @@ import (
 // how M3's recorder and trace matcher will get IDs, with no second way in.
 func TestIDsRoundTrip(t *testing.T) {
 	workflows := workflowsIn(t, "../../testdata/pilot/...")
-	for _, name := range mappedWorkflows {
+	for _, name := range keyWorkflows(t) {
 		g, err := model.Build(workflows[name])
 		if err != nil {
 			t.Fatal(err)

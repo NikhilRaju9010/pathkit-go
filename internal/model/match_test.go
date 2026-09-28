@@ -21,7 +21,7 @@ func pilotGraph(t *testing.T, name string) *model.Graph {
 
 // Every listed path, replayed as a trace, must land on itself.
 func TestMatchEveryListedPath(t *testing.T) {
-	for _, name := range mappedWorkflows {
+	for _, name := range keyWorkflows(t) {
 		g := pilotGraph(t, name)
 		for _, p := range g.Paths(model.DefaultMaxPaths).List {
 			var steps []string

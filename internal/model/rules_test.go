@@ -42,11 +42,12 @@ func buildRule(t *testing.T, name string) (*model.Graph, error) {
 	return model.Build(wf)
 }
 
-// pathKeys renders each path as "J1.true J2.failure|failed" in listing order.
+// pathKeys renders each path as "J1.true J2.failure|failed" in listing
+// order, with " [compensation (defer)]" when the path carries the note.
 func pathKeys(g *model.Graph) []string {
 	var out []string
 	for _, p := range g.Paths(model.DefaultMaxPaths).List {
-		out = append(out, p.Key())
+		out = append(out, withNote(p.Key(), p.Compensation))
 	}
 	return out
 }
@@ -91,7 +92,6 @@ func TestRules(t *testing.T) {
 		{"NamedBare", []string{"|"}},
 		{"UncheckedVar", []string{"|"}},
 		{"ReturnsCall", []string{"J1.true|", "J1.false|completed"}},
-		{"PlainDefer", []string{"|completed"}},
 
 		{"UsesSwitch", []string{`J1.case "a"|completed`, "J1.default|completed"}},
 		{"UsesTypeSwitch", []string{"J1.case int|completed", "J1.default|completed"}},
@@ -184,6 +184,22 @@ func TestRules(t *testing.T) {
 		{"ReceiveAsyncMoreFlag", []string{"J1.received|completed", "J1.not received|completed"}},
 		{"AwaitCompound", []string{"J1.true|completed", "J1.false|completed"}},
 		{"AwaitIgnored", []string{"|completed"}},
+
+		{"UsesDeferCompensation", []string{"|completed [compensation (defer)]"}},
+		{"PlainDefer", []string{"|completed"}},
+		{"SagaTwoSteps", []string{
+			"J1.failure|failed",
+			"J1.success J2.failure|failed [compensation (defer)]",
+			"J1.success J2.success|completed [compensation (defer)]",
+		}},
+		{"DeferDirectActivity", []string{"|completed [compensation (defer)]"}},
+		{"DeferCancelAndLog", []string{"|completed"}},
+		{"DeferInCallback", []string{"J1.timeout|completed"}},
+		{"DeferInLoop", []string{
+			"J1.iterate J2.failure|failed",
+			"J1.iterate J2.success J1.retry J1.exit|completed [compensation (defer)]",
+			"J1.exit|completed",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.workflow, func(t *testing.T) {
@@ -238,9 +254,7 @@ func TestJunctionLabels(t *testing.T) {
 }
 
 func TestUnsupported(t *testing.T) {
-	const planned = "is supported from M4"
 	tests := []struct{ workflow, construct, ending string }{
-		{"UsesDeferCompensation", "defer with a Temporal call (saga compensation)", planned},
 		// never supported: the message says why, and promises nothing
 		{"UsesGoSelect", "select statement", "is not supported: Temporal workflows must use workflow.Selector instead of Go's select"},
 		{"UsesLabel", "goto", "is not supported: PathKit maps break, continue and return, but not goto"},

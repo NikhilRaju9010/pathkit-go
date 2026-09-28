@@ -7,13 +7,9 @@ import (
 )
 
 // findUnsupported returns the first construct (in source order) that
-// PathKit can't map: either never (never is set), or not until a later
-// M4 slice, which adds it together with its recording.
+// PathKit can't map, with the reason.
 func (b *builder) findUnsupported() *UnsupportedError {
 	var found *UnsupportedError
-	report := func(construct string, n ast.Node) {
-		found = &UnsupportedError{Construct: construct, Pos: b.fset.Position(n.Pos())}
-	}
 	never := func(construct string, n ast.Node, reason string) {
 		found = &UnsupportedError{Construct: construct, Pos: b.fset.Position(n.Pos()), Reason: reason}
 	}
@@ -30,11 +26,6 @@ func (b *builder) findUnsupported() *UnsupportedError {
 			if n.Tok == token.GOTO {
 				never("goto", n, "PathKit maps break, continue and return, but not goto")
 			}
-		case *ast.DeferStmt:
-			if b.containsTemporalCall(n.Call) {
-				report("defer with a Temporal call (saga compensation)", n)
-			}
-			return false
 		case *ast.ExprStmt:
 			if call, ok := ast.Unparen(n.X).(*ast.CallExpr); ok && b.isSelectorMethod(call, "Select") {
 				info, u := b.checkSelector(n, call)
@@ -53,6 +44,22 @@ func (b *builder) findUnsupported() *UnsupportedError {
 		return found == nil
 	})
 	return found
+}
+
+// isCompensation reports a saga compensation defer: the deferred call
+// starts an activity, local activity or child workflow, directly or
+// inside a deferred function literal. Other defers (defer cancel(), a
+// deferred log call) are not compensation. (CLAUDE.md D3: noted on the
+// path, never a branch.)
+func (b *builder) isCompensation(d *ast.DeferStmt) bool {
+	hit := false
+	ast.Inspect(d.Call, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok && isPkgFunc(b.calledFunc(call), workflowPkg, "ExecuteActivity", "ExecuteLocalActivity", "ExecuteChildWorkflow") {
+			hit = true
+		}
+		return !hit
+	})
+	return hit
 }
 
 // containsTemporalCall reports whether n (including closures inside it)

@@ -669,3 +669,72 @@ Every error names the file and line. The only free text is the "Disagreements" s
 - a workflow that doesn't build fails immediately, naming the construct;
 - the checked-test count must equal the key's own count (21);
 - the "must build" check is itself tested with a fixture that is always skipped.
+
+## 2026-09-28 — M4d: saga compensation note, child label, final answer-key check
+
+**What was built:**
+- **Saga compensation is a note, never a branch** (D3). A `defer` is compensation when the deferred call starts an activity, local activity or child workflow (`ExecuteActivity`, `ExecuteLocalActivity`, `ExecuteChildWorkflow`), directly or inside a deferred func literal (`isCompensation`). No other defer counts:
+  - `defer cancel()`, a deferred log call, or a deferred call to the user's own helper function;
+  - a `defer` inside a selector callback, which runs when the callback ends, not the workflow.
+- **How the note is attached.** A road that passes a compensation defer carries `Target.Compensation`. A path gets `Path.Compensation` when any road on it does. One helper (`Graph.compensationOn`) works it out from the steps for both `Paths()` and `Match()`, so the listing and the matcher always agree, including after the loop rule folds a trace. The note is not part of `Path.Key()`: the steps decide it.
+- **Output.** The note prints as `End (failed) [compensation (defer)]` in `analyze` and in `pathkit traces`. Mermaid output doesn't show it.
+- **Recording** needed nothing new. The deferred compensation runs after the `return`'s values are evaluated, so the run is already `complete`, and the recorder's own `flush` defer, registered first, runs last.
+- **Child workflow label, end to end:** `PaymentWorkflow (child workflow)`, pinned by `TestPilotChildWorkflowLabel` and by the fulfillment tests landing on their paths.
+- **No more planned skips.** `UnsupportedError` always carries a reason and prints `… is not supported: <reason>`. The "is supported from M4" wording is gone from the code, tests and user docs. It survives only in earlier Decisions Log entries, which record history and were not rewritten.
+
+**The answer-key tests can no longer pass while a workflow is skipped** (owner's requirement, planned in M4c):
+- `TestPilotMatchesExpected` takes its workflows from `EXPECTED.md`. The discovered pilot workflows must equal that list, and every workflow must build through the new `expected.Build`: not found, or skipped as unsupported, is a failure naming the construct. The paths must match with their notes, and 38 paths must match in all.
+- The e2e `TestAnswerKey` builds every key workflow the same way before running anything, fails at once if one doesn't build, and requires the checked-test count to equal the key's own count (`expected.TestCount`, which must be 21).
+- `TestBuildRejectsSkippedAndMissing` proves the rule itself: the always-skipped fixture `rules.UsesLabel` (it uses `goto`) and a missing name must both come back as errors.
+- The hand-written pilot lists (`mappedWorkflows`, `m4Workflows`) are gone. `TestIDsRoundTrip` and `TestMatchEveryListedPath` also take the key's list.
+
+**Timer beats an activity, run for real.** `OnActivity(...).After(...)` needs testify's `mock.Anything`. testify v1.10.0 was already required by the fixtures module (indirectly, with its full checksum in `go.sum`), so no new module was needed. An offline `go mod tidy` (`GOPROXY=off`) only moved it from indirect to direct, and left `go.sum` byte-for-byte unchanged. `TestLookupTimerWins` mocks the activity to take 2 hours against a 1-hour timer, and lands on `J1.timeout`.
+
+**Tests added:**
+- `TestRules`: 7 saga fixtures (`testdata/fixtures/rules/saga.go`):
+  - compensation in a deferred func;
+  - a plain defer;
+  - a two-step saga where the note appears only after the defer;
+  - a deferred activity call;
+  - `defer cancel()` and a deferred log call, with no note;
+  - a defer in a selector callback, with no note;
+  - a defer in a loop, with the note only on the path that reaches it.
+- `TestLiveFixtures`: 3 real runs of the new `testdata/fixtures/saga` `BookTripWorkflow`, all landing on their path, and 1 more wait run (`TestLookupTimerWins`):
+  - reservation fails: no note, nothing compensated;
+  - payment fails: the note, and the compensation really ran once;
+  - success: the note, and the compensation did not run. The note is not a branch.
+- `TestAnalyzeWholePilot` (renamed): all 8 printed, stderr empty.
+- `TestBuildRejectsSkippedAndMissing` and `TestPilotChildWorkflowLabel`.
+
+**Final answer key:**
+- all **8 of 8** workflows mapped;
+- **38 of 38** paths match (steps, end kinds and the 3 compensation notes);
+- **21 of 21** tests land on their `EXPECTED.md` path;
+- **20** paths covered, **52.6%**, exactly as the M1 key predicted.
+
+There were no disagreements in all of M4, and `EXPECTED.md` was never edited.
+
+## 2026-09-28 — M4 summary
+
+M4 was built in four slices, each committed separately, with a stop for the owner after each one:
+- **M4a:** `switch` and type switch (with `fallthrough`), and a strict answer-key reader that fails on anything it can't read. It found that the old reader was silently dropping `retry` steps and bullet-listed tests.
+- **M4b:** loops and the loop rule, both halves: listing and folding. The owner widened D3: a loop is a junction if it contains a Temporal call *or any junction*; this was pinned to change none of the 38 paths.
+- **M4c:** `workflow.Selector`, in one safe shape. 11 unsafe shapes are refused with a precise reason.
+- **M4c:** `AwaitWithTimeout` / `ReceiveWithTimeout` / `ReceiveAsync` results.
+- **M4d:** the saga note, the child label, and the final check.
+
+Two decisions changed along the way, both approved by the owner:
+- the D3 loop rule above;
+- edge IDs keep the single `J<n>.<label>` rule, replacing D5's `case:"x"` sketch.
+
+**Evidence:**
+- every pilot workflow is mapped and recorded, and the whole answer key matches;
+- 39 live fixture runs cover each construct under `pathkit test`, including both sides of every race;
+- the consistency test proves every model exit has its recording site in every instrumented copy.
+
+**What M4 does not do** (all in `LIMITATIONS.md`):
+- concurrency (`workflow.Go`) is not modelled;
+- trips round a loop are not counted;
+- junctions are treated as independent;
+- an added `default` can be impossible (a possible `//pathkit:exhaustive` is noted, not built);
+- `goto`, Go's `select` and unsafe selector shapes are refused.

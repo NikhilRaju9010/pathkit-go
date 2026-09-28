@@ -80,22 +80,26 @@ func TestAnalyzeOut(t *testing.T) {
 	}
 }
 
-func TestAnalyzeWholePilotSkipsM4Workflows(t *testing.T) {
+// Since M4 every pilot workflow is mapped: all 8 are printed, nothing is
+// skipped, and the two helpers that take a workflow.Context are never
+// treated as workflows.
+func TestAnalyzeWholePilot(t *testing.T) {
 	stdout, stderr, code := run(t, "analyze", pilot+"/...")
 	if code != ExitOK {
 		t.Fatalf("code=%d stderr=%s", code, stderr)
 	}
-	for _, name := range []string{"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow",
-		"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", "shipment.ShipmentWorkflow", "approval.ApprovalWorkflow"} {
+	for _, name := range []string{"orders.OrderWorkflow", "approval.ApprovalWorkflow", "polling.ReportPollingWorkflow",
+		"shipment.ShipmentWorkflow", "fulfillment.OrderFulfillmentWorkflow", "fulfillment.PaymentWorkflow",
+		"billing.SubscriptionWorkflow", "reports.DailyReportWorkflow"} {
 		if !strings.Contains(stdout, "Workflow: "+name+"\n") {
 			t.Errorf("stdout is missing %s", name)
 		}
 	}
-	if n := strings.Count(stdout, "Workflow: "); n != 7 {
-		t.Errorf("printed %d workflows, want 7", n)
+	if n := strings.Count(stdout, "Workflow: "); n != 8 {
+		t.Errorf("printed %d workflows, want 8", n)
 	}
-	if n := strings.Count(stderr, "pathkit analyze: skipping "); n != 1 || strings.Count(stderr, "is supported from M4\n") != 1 {
-		t.Errorf("stderr should have 1 skip line (fulfillment saga), got:\n%s", stderr)
+	if stderr != "" {
+		t.Errorf("stderr should be empty (nothing skipped), got:\n%s", stderr)
 	}
 	for _, notWorkflow := range []string{"newChildCtx", "AuditLog"} {
 		if strings.Contains(stdout+stderr, notWorkflow) {

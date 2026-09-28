@@ -105,6 +105,9 @@ type Target struct {
 	// Retry, when set, means "take this loop's retry edge (a step on the
 	// path), then continue at Retry.To, the loop's head".
 	Retry *Exit
+	// Compensation: the road to this target registers a saga
+	// compensation defer. It is a note on the path, never a branch.
+	Compensation bool
 }
 
 // Dead reports a road that ends in a panic or os.Exit: not a path at all.

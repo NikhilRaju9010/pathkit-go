@@ -1,7 +1,6 @@
 package model_test
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -19,78 +18,85 @@ import (
 
 const expectedFile = "../../testdata/pilot/EXPECTED.md"
 
-// mappedWorkflows are compared path by path. The rest use constructs
-// planned for a later M4 slice and must be skipped, naming that construct.
-var mappedWorkflows = []string{
-	"orders.OrderWorkflow", "fulfillment.PaymentWorkflow", "reports.DailyReportWorkflow", // M2
-	"polling.ReportPollingWorkflow", "billing.SubscriptionWorkflow", // M4b
-	"shipment.ShipmentWorkflow", "approval.ApprovalWorkflow", // M4c
-}
-
-var m4Workflows = map[string]string{
-	"fulfillment.OrderFulfillmentWorkflow": "defer with a Temporal call (saga compensation)",
-}
-
-func TestPilotMatchesExpected(t *testing.T) {
-	expected, err := expectedkey.Read(expectedFile)
+// pilotKey reads the answer key. Every list of pilot workflows and tests
+// comes from it, never from a hand-written list.
+func pilotKey(t *testing.T) map[string]*expectedkey.Workflow {
+	t.Helper()
+	key, err := expectedkey.Read(expectedFile)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return key
+}
+
+// keyWorkflows lists the answer key's workflows, sorted.
+func keyWorkflows(t *testing.T) []string {
+	t.Helper()
+	return expectedkey.Names(pilotKey(t))
+}
+
+// withNote is a path's key plus its compensation note, when it has one:
+// the note is part of what must match.
+func withNote(key string, compensation bool) string {
+	if compensation {
+		return key + " " + model.CompensationNote
+	}
+	return key
+}
+
+// Every workflow in EXPECTED.md must be mapped and match the key path for
+// path (steps, end kind and note). A workflow that is skipped, or that
+// discovery doesn't find, FAILS this test (expectedkey.Build).
+func TestPilotMatchesExpected(t *testing.T) {
+	key := pilotKey(t)
 	workflows := workflowsIn(t, "../../testdata/pilot/...")
 
-	if len(expected) != 8 {
-		t.Fatalf("EXPECTED.md: parsed %d workflow sections, want 8", len(expected))
+	names := expectedkey.Names(key)
+	var found []string
+	for name := range workflows {
+		found = append(found, name)
 	}
-	for name, ew := range expected {
-		if len(ew.Paths) != ew.Count {
-			t.Errorf("EXPECTED.md, %s: says %d paths but lists %d", name, ew.Count, len(ew.Paths))
-		}
+	slices.Sort(found)
+	if !slices.Equal(names, found) {
+		t.Errorf("EXPECTED.md lists %v, but discovery found %v", names, found)
 	}
 
-	for _, name := range mappedWorkflows {
+	paths := 0
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
-			wf, ok := workflows[name]
-			if !ok {
-				t.Fatalf("%s not found by discovery", name)
-			}
-			g, err := model.Build(wf)
+			g, err := expectedkey.Build(workflows, name)
 			if err != nil {
-				t.Fatalf("Build: %v", err)
+				t.Fatal(err)
 			}
-			got := pathKeys(g)
-			var want []string
-			for _, p := range expected[name].Paths {
-				// The note is part of what must match: a note in the key
-				// that the model doesn't produce is a disagreement.
-				k := p.Key
-				if p.Compensation {
-					k += " [compensation (defer)]"
-				}
-				want = append(want, k)
+			var got, want []string
+			for _, p := range g.Paths(model.DefaultMaxPaths).List {
+				got = append(got, withNote(p.Key(), p.Compensation))
+			}
+			for _, p := range key[name].Paths {
+				want = append(want, withNote(p.Key, p.Compensation))
 			}
 			slices.Sort(got)
 			slices.Sort(want)
 			if !slices.Equal(got, want) {
 				t.Errorf("analyzer and EXPECTED.md disagree for %s\n analyzer (%d paths):\n   %s\n EXPECTED.md (%d paths):\n   %s",
 					name, len(got), strings.Join(got, "\n   "), len(want), strings.Join(want, "\n   "))
+				return
 			}
+			paths += len(got)
 			t.Logf("%s: %d paths match EXPECTED.md", name, len(got))
 		})
 	}
+	if paths != 38 {
+		t.Errorf("%d paths matched EXPECTED.md, want all 38", paths)
+	}
+}
 
-	for name, construct := range m4Workflows {
-		t.Run(name, func(t *testing.T) {
-			wf, ok := workflows[name]
-			if !ok {
-				t.Fatalf("%s not found by discovery", name)
-			}
-			_, err := model.Build(wf)
-			var u *model.UnsupportedError
-			if !errors.As(err, &u) || u.Construct != construct {
-				t.Fatalf("want skipped for %q (planned for a later M4 slice), got %v", construct, err)
-			}
-			t.Logf("%s: skipped until M4 (%v)", name, err)
-		})
+// The child workflow step is labelled with the child's name (M4d: child
+// label end to end; the match above checks its exits).
+func TestPilotChildWorkflowLabel(t *testing.T) {
+	g := pilotGraph(t, "fulfillment.OrderFulfillmentWorkflow")
+	if got := g.Junctions[1].Label; got != "PaymentWorkflow (child workflow)" {
+		t.Errorf("fulfillment J2 label = %q, want %q", got, "PaymentWorkflow (child workflow)")
 	}
 }
 

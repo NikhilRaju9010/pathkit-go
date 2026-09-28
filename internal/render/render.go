@@ -23,6 +23,9 @@ func PathText(p model.Path) string {
 		fmt.Fprintf(&b, " %s --%s-->", s.Junction.Label, s.Exit.Label)
 	}
 	b.WriteString(" " + p.End.String())
+	if p.Compensation {
+		b.WriteString(" " + model.CompensationNote)
+	}
 	return b.String()
 }
 

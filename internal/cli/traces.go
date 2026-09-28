@@ -111,8 +111,12 @@ func describe(p model.Path) string {
 	for i, s := range p.Steps {
 		ids[i] = s.Exit.ID.String()
 	}
-	if len(ids) == 0 {
-		return "no junctions → " + p.End.String()
+	end := p.End.String()
+	if p.Compensation {
+		end += " " + model.CompensationNote
 	}
-	return strings.Join(ids, " ") + " → " + p.End.String()
+	if len(ids) == 0 {
+		return "no junctions → " + end
+	}
+	return strings.Join(ids, " ") + " → " + end
 }
