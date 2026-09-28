@@ -2,7 +2,7 @@
 
 PathKit either detects a pattern correctly or clearly does not detect it; it never silently guesses. This file is the honest list of what it does and doesn't cover.
 
-**Status:** building (M2 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
+**Status:** building (M3 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
 
 ## Carried over from the TypeScript version (planned)
 
@@ -22,6 +22,16 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 - **"Where did this `err` come from?" uses the nearest assignment above the `if` (M2).** PathKit looks for the last assignment to that variable that appears **above** the `if` in the source, in the workflow function itself (including the `if`'s own `err := ...;` part, but not inside closures). If `err` is set in different ways in different branches before the check, only the one written last counts. `//pathkit:branch` or `//pathkit:ignore` override the result.
 - **An error check must compare the variable with `nil` and nothing else (M2).** `if err != nil && retries > 3` is a plain `if` with `true`/`false` exits, not a `failure`/`success` check. When its true side returns `err`, the end is plain `End`, because the condition doesn't prove `err` is non-nil.
 - **`//pathkit:ignore` on a plain `if` assumes the condition is false (M2)**, because an ignored `if` is usually a defensive check that doesn't fire. On an error check it assumes "no error". A pragma counts when it's on the `if`'s own line or the line directly above. That includes a comment trailing the previous statement on that line.
+- **Coverage is recorded only by `pathkit test`, not by plain `go test` (M3).** A plain `go test` compiles your original workflow files, so it records nothing, while your tests still pass or fail as usual. `pathkit traces` (and, from M6/M7, `coverage`/`report`) then say `no trace files found in <dir>; coverage is recorded only by "pathkit test" (plain "go test" records nothing)`. (`pathkit prepare`, which prints the `-overlay` flag for your own `go test` command, is planned for M6.)
+- **Only workflows `analyze` can map are recorded (M3).** Until M4, a workflow with a loop, `switch`, selector, saga `defer` and so on is not recorded; `pathkit test` prints `not recording <workflow>: ...` and runs its tests normally.
+- **A trace doesn't say which test produced it (M3).** The workflow runs on its own goroutine and can't see the `TestXxx` that started it. Reports can show which paths were run, but not by which test. To connect one test to its path, run just that test: `pathkit test <folder> -- -run '^TestName$'`.
+- **A run counts only if it finished a `return` of the workflow function (M3).** A run that panics (even while computing its return value), times out, or is stopped by the SDK is saved as `incomplete` and never matched. A panic is never a path.
+- **Trace files are written when the workflow function exits (M3).** A test that leaves a workflow blocked forever (for example waiting on a signal that never comes) produces no trace for that run.
+- **Child workflows mocked with `OnWorkflow` record nothing (M3)**, because the child's code doesn't run. To cover a child workflow, test it directly (the pilot does this for `PaymentWorkflow`).
+- **The staleness hash ignores comments and formatting, but nothing else (M3).** Renaming a variable inside the workflow function marks its old traces `stale`, even though the paths didn't change. `--allow-stale` arrives with `coverage` in M6. Editing a *different* function, or another file, doesn't make a workflow's traces stale.
+- **`pathkit test` always runs tests fresh (M3).** It adds `-count=1` (unless you pass your own `-count`), because Go's cached test results would skip the tests and record nothing. So every run takes as long as a fresh `go test -count=1`.
+- **A workflow function with more than 8 return values can't be recorded (M3).** `pathkit test` stops with a clear error. Temporal workflows return at most a value and an error, so this shouldn't happen in practice.
+- **Some names are reserved in recorded packages (M3).** `pathkit test` adds `pathkitRec`, `pathkitStart`, `pathkitRecorder`, `pathkitTrace`, `pathkitTraceDir` and `pathkitRet1`…`pathkitRet8`. If your package already uses one, it stops with a clear error instead of producing broken code.
 - **One broken package stops `analyze` (M2).** If any package in `analyze <folder>/...` doesn't compile, the command fails with `package does not compile: ...` instead of analyzing the others.
 
 ## New in Go, because of the proposed design (planned)
@@ -32,24 +42,19 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 - **Selectors are understood only in the simple shape.** The `Selector` must be created, have its `AddReceive`/`AddFuture`/`AddDefault` calls, and call `Select` in the same function, with inline function literals as callbacks. A selector passed to a helper, callbacks that are named functions, or `Add*` calls made inside a loop are shown with generic exit labels or cause a clear "cannot instrument" error.
 - **Saga compensation in `defer` is noted, not branched.** Paths show that a compensation `defer` exists, but "compensation ran" vs "didn't run" is not a separate path in v1, because counting it would create impossible paths (a successful order that also compensated) that could never be covered.
 - **`&&` / `||` inside a condition is one junction, not several.** `if a && b` has two exits (`true`/`false`), not one per part. (`go/cfg` adds the whole condition as one node; confirmed in M2.)
-- **`panic` is not a path.** A panic is not drawn as an exit; a trace from a run that panicked is marked incomplete and ignored.
-- **Coverage is recorded only by `pathkit test`, not by plain `go test`.** A plain `go test` compiles your original workflow files, so it records nothing, while your tests still pass or fail as usual; `coverage`/`report` then show 0% and say that no trace files were found. Use `pathkit test`, or add the `-overlay` flag that `pathkit prepare` prints to your own `go test` command.
-- **Trace files are only written when the workflow function returns.** A test that times out or leaves a workflow blocked forever produces no trace for that run.
-- **Child workflows mocked with `OnWorkflow` record nothing** for the child (its code doesn't run). To cover a child workflow, test it directly.
-- **Staleness hash ignores comments and formatting but nothing else.** Renaming a variable inside the workflow function marks its old traces stale, even though the paths didn't change. `--allow-stale` is the escape hatch.
 - **`ReceiveWithTimeout` is confirmed (M2).** It exists in SDK v1.49.0 (`internal/workflow.go` line 236) and returns `(ok, more bool)` with no error. Using its `ok` in an `if` becomes a `received`/`not received` junction in M4; until then such a workflow is skipped.
 
 ## Fixed by design compared to the TypeScript version (to be proven by tests)
 
 These TS limitations should not exist in Go. Each needs a test in its milestone before this list is trusted:
 
-- Listed-path order vs recorded-trace order drifting apart (one model owns all IDs; matching walks the graph).
+- Listed-path order vs recorded-trace order drifting apart (one model owns all IDs; matching walks the graph). **Proven in M3** (`TestEveryExitRecordedOnce`, `TestAnswerKey`).
 - `break`, labeled `break`, `continue` handled wrongly (handled by `go/cfg`).
 - `switch` not detected (it's a junction in Go v1).
-- One instrumented function per test run, and boilerplate in every test (all in-scope workflows instrumented; existing tests unchanged).
-- Leftover instrumented copies next to source files (overlay files live in `.pathkit/`).
-- Relative trace folder depending on where the test ran (absolute path passed by `pathkit test`).
-- Any edit to the file, even a comment, making all its traces stale (per-workflow, format-insensitive hash).
-- Success and failure ending at one generic `End` (end kinds: completed / failed / continued-as-new).
+- One instrumented function per test run, and boilerplate in every test (all in-scope workflows instrumented; existing tests unchanged). **Proven in M3**: the pilot's tests are unchanged, and one `pathkit test ./...` records all three M2 workflows.
+- Leftover instrumented copies next to source files (overlay files live in `.pathkit/`). **Proven in M3** (`TestAnswerKey` hashes the pilot before and after).
+- Relative trace folder depending on where the test ran (the absolute path is baked into the recorder by `pathkit test`). **Proven in M3.**
+- Any edit to the file, even a comment, making all its traces stale (per-workflow, format-insensitive hash). **Proven in M3** (`TestFunctionHash`).
+- Success and failure ending at one generic `End` (end kinds: completed / failed / continued-as-new). **Proven in M2** (`TestRules/EndKinds`).
 - Scope config matching only file names and only in `report` (workflow names, applied to `analyze` and `report`).
 - No CI threshold (`--fail-under`, exit code 2) and no trace cleanup (`pathkit clean`, cleared per `pathkit test` run).

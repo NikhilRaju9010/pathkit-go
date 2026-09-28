@@ -42,3 +42,13 @@ func UncheckedVar(ctx workflow.Context) error {
 	err := workflow.ExecuteActivity(ctx, Notify).Get(ctx, nil)
 	return err
 }
+
+func pair() (string, error) { return "a", nil }
+
+// ReturnsCall returns another function's two results directly.
+func ReturnsCall(ctx workflow.Context, x int) (string, error) {
+	if x > 0 {
+		return pair()
+	}
+	return "b", nil
+}

@@ -27,7 +27,7 @@ const mode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFil
 // package under a folder. Packages are loaded from the named folder, so the
 // go.mod that applies there is used (for example testdata/pilot's own).
 func Load(arg string) (*Result, error) {
-	dir, pattern, file, err := resolve(arg)
+	dir, pattern, file, err := Resolve(arg)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,10 @@ func Load(arg string) (*Result, error) {
 	return &Result{Packages: pkgs, File: file}, nil
 }
 
-func resolve(arg string) (dir, pattern, file string, err error) {
+// Resolve turns a command-line argument into the folder to run Go tools
+// from, the package pattern to use there ("." or "./..."), and the absolute
+// file path when a single .go file was named.
+func Resolve(arg string) (dir, pattern, file string, err error) {
 	if arg == "..." || strings.HasSuffix(arg, "/...") {
 		dir = strings.TrimSuffix(strings.TrimSuffix(arg, "..."), "/")
 		if dir == "" {

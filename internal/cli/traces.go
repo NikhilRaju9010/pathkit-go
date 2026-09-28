@@ -1,0 +1,118 @@
+package cli
+
+import (
+	"fmt"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/NikhilRaju9010/pathkit-go/internal/model"
+	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
+)
+
+func newTracesCommand() *cobra.Command {
+	var traceDir string
+	cmd := &cobra.Command{
+		Use:   "traces [folder | folder/...]",
+		Short: "Show which path each recorded trace took (a debug view; coverage arrives in M6)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target := "./..."
+			switch len(args) {
+			case 0:
+			case 1:
+				target = args[0]
+			default:
+				return userError("expected at most one folder argument, got %d", len(args))
+			}
+			return runTraces(cmd, target, traceDir)
+		},
+	}
+	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder the trace files are in")
+	return cmd
+}
+
+func runTraces(cmd *cobra.Command, target, traceDir string) error {
+	files, err := trace.List(traceDir)
+	if err != nil {
+		return userError("%s", err)
+	}
+	if len(files) == 0 {
+		return userError("%s", trace.NoTracesMessage(traceDir))
+	}
+	_, workflows, err := loadRecordable(target, "pathkit traces: not recordable yet ", cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+	byName := map[string]recordable{}
+	for _, r := range workflows {
+		byName[r.wf.Name] = r
+	}
+
+	type line struct{ workflow, text string }
+	var lines []line
+	counts := map[trace.Kind]int{}
+	for _, path := range files {
+		f, err := trace.Read(path)
+		if err != nil {
+			lines = append(lines, line{"~", fmt.Sprintf("%s: could not read trace: %v", filepath.Base(path), err)})
+			counts["unreadable"]++
+			continue
+		}
+		r, ok := byName[f.Workflow]
+		var out trace.Outcome
+		if ok {
+			out = trace.Check(f, r.graph, r.hash)
+		} else {
+			out = trace.Check(f, nil, "")
+		}
+		counts[out.Kind]++
+		if out.Kind == trace.Matched {
+			lines = append(lines, line{f.Workflow, fmt.Sprintf("%s: path %s (%s)", f.Workflow, pathNumber(r.graph, out.Path), describe(out.Path))})
+		} else {
+			lines = append(lines, line{f.Workflow, fmt.Sprintf("%s: %s: %s [%s]", f.Workflow, out.Kind, out.Reason, filepath.Base(path))})
+		}
+	}
+	sort.SliceStable(lines, func(i, j int) bool {
+		if lines[i].workflow != lines[j].workflow {
+			return lines[i].workflow < lines[j].workflow
+		}
+		return lines[i].text < lines[j].text // "path 1" before "path 2"
+	})
+
+	w := cmd.OutOrStdout()
+	for _, l := range lines {
+		fmt.Fprintln(w, l.text)
+	}
+	var parts []string
+	for _, k := range []trace.Kind{trace.Matched, trace.Unmatched, trace.Stale, trace.Incomplete, trace.UnknownWorkflow, "unreadable"} {
+		if counts[k] > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", counts[k], k))
+		}
+	}
+	fmt.Fprintf(w, "\n%d traces: %s\n", len(files), strings.Join(parts, ", "))
+	return nil
+}
+
+// pathNumber is the path's number in analyze's listing for this workflow.
+func pathNumber(g *model.Graph, p model.Path) string {
+	for i, q := range g.Paths(model.DefaultMaxPaths).List {
+		if q.Key() == p.Key() {
+			return fmt.Sprint(i + 1)
+		}
+	}
+	return "(beyond the first 2000)"
+}
+
+// describe prints a path compactly: "J1.false J2.failure → End (failed)".
+func describe(p model.Path) string {
+	ids := make([]string, len(p.Steps))
+	for i, s := range p.Steps {
+		ids[i] = s.Exit.ID.String()
+	}
+	if len(ids) == 0 {
+		return "no junctions → " + p.End.String()
+	}
+	return strings.Join(ids, " ") + " → " + p.End.String()
+}

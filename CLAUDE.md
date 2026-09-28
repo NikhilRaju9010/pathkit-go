@@ -211,6 +211,37 @@ The TS config only matched whole file names and only in `report`, so untestable 
 
 Text output keeps the TS format line for line, including `Start -> <junction> --<label>--> ... -> End`. Junction descriptions use Go source text (`if input.AmountCents <= 0`, `switch status`, `select (Selector)`). The only intentional differences are: the end station shows its kind when known (`End (failed)`), and `report` adds the branch-coverage figure and the "excluded by scope" line. `--json` shapes are documented in `SETUP-GUIDE.md` and tested with golden files.
 
+### Trace file format (schemaVersion 1) — defined in M3, approved with the M3 plan
+
+One JSON file per workflow run, written by the recorder that `pathkit test` adds to the package through the overlay. It lives in the trace folder (default `.pathkit/traces` in the folder `pathkit test` runs from, baked in as an absolute path) and is named `<workflow>.<12 random hex digits>.trace.json`. Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "tool": "pathkit-go",
+  "workflow": "orders.OrderWorkflow",
+  "functionHash": "3f9a1c0b7e2d4a51",
+  "status": "complete",
+  "steps": ["J1.false", "J2.failure"],
+  "workflowId": "default-test-workflow-id",
+  "runId": "default-test-run-id",
+  "recordedAt": "2026-09-28T10:15:00Z"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | Always `1` for this format. Any other value is reported as unsupported, never guessed at. |
+| `tool` | Always `pathkit-go`. |
+| `workflow` | The workflow's name as `analyze` prints it (`pkg.Func` or `pkg.Type.Method`). |
+| `functionHash` | 16 hex digits: the start of a SHA-256 of the workflow function's code, printed by `go/printer` without comments (so formatting and comments don't change it). Computed only by `model.FunctionHash`. A different hash now means the function changed, and the trace is **stale**. |
+| `status` | `complete` if the run **finished** a `return` of the workflow function, with all return values evaluated (see the M3 Decisions Log entry for why "reached" isn't enough). Otherwise `incomplete`: a panic (including one while computing a return value), the SDK stopping the run with `runtime.Goexit`, or a timeout. Only complete traces are matched. |
+| `steps` | The exit IDs the run passed, in order, exactly as `model` produced them (`J1.false`, …). Every string written here came from `Graph.ExitFor(...).String()` at instrument time. |
+| `workflowId`, `runId` | From `workflow.GetInfo`, for reference only. They are not used for matching. |
+| `recordedAt` | UTC time the file was written (RFC 3339). |
+
+What is deliberately **not** in the file: the Go test name (the workflow runs on its own goroutine and can't see it), the end kind (the matcher gets it from the graph), and the path number (display order can change; the path's identity is its steps plus end kind).
+
 ## Non-goals for v1
 
 - **One package at a time for analysis.** `analyze` takes a file (analyzes the workflows in it, but type-checks its whole package, since Go needs that) or a package; `report` takes package patterns like `./...` and analyzes each package separately.
@@ -369,4 +400,51 @@ Also learned: `env.OnActivity(fn, ...)` works without a separate `env.RegisterAc
 - `go test -count=1 ./...`: all ok
 - `go vet` on `testdata/fixtures/rules`: clean
 - the manual `analyze` commands from the plan, on the built binary: output as expected
+
+## 2026-09-28 — M3: trace recording (spike) for the three M2 workflows
+
+**The three risky assumptions, each proven by a real run:**
+- **R1: overlay can replace a file and add a new one. Confirmed.** Spike in a throwaway module: `go test -overlay` compiled the replaced file and a brand-new file (a function defined only there was callable). Nothing was written to the module and `go.mod` didn't change. Without the overlay, the same test failed to build, which proves the overlay was really used. Now permanent: `internal/instrument` `TestOverlayJSON` checks the recorder never exists on disk, and `internal/e2e` `TestAnswerKey` hashes every file under `testdata/pilot` before and after and requires them identical.
+- **R2: panics point at the real file and line. Confirmed.** In the spike, the stack trace named the original path (`.../mod/p/p.go:7`), not the overlay copy. Now permanent: `testdata/fixtures/panics` panics inside a `return` line that also gets inserted text, below other edited lines, and its test (run through `pathkit test` by `TestFixturesUnderOverlay`) requires the stack trace to name `panics/panics.go:<that line>` and never `.pathkit`.
+- **R3: the test environment never replays. Confirmed by a real test.** In `testdata/fixtures/replay`, a workflow with an activity, a 1-hour timer, a signal wait and a second activity runs 3 times. Each time its function starts exactly once and `workflow.IsReplaying` is never true. Under `pathkit test`, the 3 runs give exactly 3 complete traces with identical steps. (The SDK source agrees: `internal/internal_workflow_testsuite.go` line 2673, `// this test environment never replay`.) The design doesn't rely on this. Each call of a workflow function has its own recorder, so a replayed run records its whole trip into a new trace. An abandoned call is stopped by the SDK with `runtime.Goexit` (`internal/internal_workflow.go` line 1198), never finishes a `return`, and is saved as `incomplete`.
+- **R4: recorded order = listed order.** This holds by construction: the recorder punches at the start of each `Exit.Road` the model chose. `TestEveryExitRecordedOnce` checks every exit has exactly one `hit`, and every `hit` ID round-trips through `LookupEdge`, for all M2 fixture and pilot workflows. The end-to-end test confirms it on real runs.
+
+**Answer key.** `internal/e2e` `TestAnswerKey` runs `pathkit test <pilot package> -- -run '^TestName$'` for each of the 8 M2 tests listed in `EXPECTED.md`. Each produced exactly one complete trace, and `Match` landed it on exactly the path `EXPECTED.md` names:
+- orders: 1, 2, 3
+- payment: 2, 4
+- daily report: 3, 6, 4
+
+There were no disagreements, and `EXPECTED.md` was not edited. The shared answer-key reader now lives in `internal/expected`, used by both the M2 and M3 tests.
+
+**What was built:**
+- `internal/instrument`: line-preserving text insertions (every edit is checked for line breaks), one generated recorder file per package, and `overlay.json`.
+- `internal/trace`: read, list, clear (deletes only `*.trace.json`), and check against the graph.
+- `model.FunctionHash`: the printed function (no doc comment), turned into Go tokens with comments dropped, then SHA-256, first 16 hex digits.
+- `model.Match`: walks the graph step by step. It has five mismatch messages, each naming the step.
+- `pathkit test`, with `--traces`, `--keep-traces`, and `--` to pass flags to go test.
+- `pathkit traces`, a debug view.
+- The trace format is written above, under "Trace file format (schemaVersion 1)".
+
+**Two design corrections found while building. Both were real bugs in the plan, both fixed, both pinned by tests:**
+1. **"Mark before return" was the TS `d0aa17a` trap again.** The approved plan put `pathkitRec.returned();` before each `return`. The panic fixture showed this records a run as `complete` when the *return value itself* panics (`return explode(x), nil`), claiming a path the run never finished. The fix, still insertion-only and on the same line:
+   - `return a, b` becomes `return pathkitRet2[T0, T1](pathkitRec, a, b)`. The generated helper sets the flag only after `a` and `b` are evaluated. The explicit type arguments (the source text of the function's result types) keep untyped values such as `nil` working.
+   - `return f()`, where `f` returns several values, becomes an inline `func() (T0, T1) { r0, r1 := f(); mark; return r0, r1 }()`.
+   - A bare `return` is still marked just before it, because it has nothing to evaluate.
+   - Workflow functions with more than 8 results can't be recorded; that fails with a clear error. `TestFixturesUnderOverlay` now requires the panicking run's trace to be `incomplete`.
+2. **Go's test cache made a repeat run record nothing.** A second identical `pathkit test` printed `(cached)` and wrote 0 traces, because the tests didn't actually run. Go's docs say any `-count` flag disables the test cache, so `pathkit test` adds `-count=1` unless the user passed their own `-count`. `TestTraceClearingAndRepeatRuns` runs the same command twice and requires a fresh trace each time.
+
+**Choices made while building:**
+- Generated names are `pathkitRec`, `pathkitStart`, `pathkitRecorder`, `pathkitTrace`, `pathkitTraceDir` and `pathkitRet1…8`. A clash with user code is a clear error, tested with the `testdata/fixtures/clash*` fixtures.
+- `.pathkit/overlay` is emptied and rewritten on every `pathkit test` run, because it belongs to pathkit.
+- The recorder writes files from workflow code. That's fine in tests: the file is small, and the SDK's deadlock detector (1 s) never triggered.
+- `pathkit test` prints its summary line on stderr, so it doesn't mix into `go test`'s stdout.
+- `pathkit prepare` is deferred (noted for M6).
+
+**Checks run:**
+- `gofmt -l .`: clean
+- `go vet ./...`: clean
+- staticcheck v0.8.1: clean
+- `go test -count=1 ./...`: all ok, including `internal/e2e` (about 20 s)
+- pilot: `go vet` and `go test` ok
+- fixtures (except the deliberately broken package): `go vet` ok
 

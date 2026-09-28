@@ -1,15 +1,12 @@
 package model_test
 
 import (
-	"bufio"
 	"errors"
-	"os"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
+	expectedkey "github.com/NikhilRaju9010/pathkit-go/internal/expected"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
 
@@ -32,89 +29,19 @@ var m4Workflows = map[string]string{
 	"billing.SubscriptionWorkflow":         "for loop",
 }
 
-type expectedWorkflow struct {
-	count int      // the "**K paths:**" number
-	paths []string // keys like "J1.false J2.success|completed"
-}
-
-var (
-	sectionRe = regexp.MustCompile("^## \\d+\\. `([\\w.]+)`")
-	countRe   = regexp.MustCompile(`^\*\*(\d+) paths:\*\*`)
-	pathRe    = regexp.MustCompile(`^(\d+)\. (.*)$`)
-	stepRe    = regexp.MustCompile(`J(\d+)\b.*?--(.+?)-->`)
-	endRe     = regexp.MustCompile(`End \(([a-z-]+)\)`)
-)
-
-// parseExpected reads every workflow section's path list from EXPECTED.md.
-func parseExpected(t *testing.T) map[string]expectedWorkflow {
-	t.Helper()
-	f, err := os.Open(expectedFile)
+func TestPilotMatchesExpected(t *testing.T) {
+	expected, err := expectedkey.Read(expectedFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-
-	out := map[string]expectedWorkflow{}
-	var current string
-	inPaths := false
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if m := sectionRe.FindStringSubmatch(line); m != nil {
-			current, inPaths = m[1], false
-			continue
-		}
-		if current == "" {
-			continue
-		}
-		if m := countRe.FindStringSubmatch(line); m != nil {
-			n, _ := strconv.Atoi(m[1])
-			out[current] = expectedWorkflow{count: n}
-			inPaths = true
-			continue
-		}
-		if !inPaths {
-			continue
-		}
-		m := pathRe.FindStringSubmatch(line)
-		if m == nil {
-			if strings.TrimSpace(line) != "" {
-				inPaths = false // the path list has ended
-			}
-			continue
-		}
-		ew := out[current]
-		ew.paths = append(ew.paths, keyFromLine(t, current, m[2]))
-		out[current] = ew
-	}
-	return out
-}
-
-// keyFromLine turns "J1 --false--> J2 ChargeCard --success--> End (completed)"
-// into "J1.false J2.success|completed".
-func keyFromLine(t *testing.T, workflow, line string) string {
-	t.Helper()
-	var steps []string
-	for _, m := range stepRe.FindAllStringSubmatch(line, -1) {
-		steps = append(steps, "J"+m[1]+"."+m[2])
-	}
-	end := endRe.FindStringSubmatch(line)
-	if end == nil {
-		t.Fatalf("EXPECTED.md, %s: no end kind in %q", workflow, line)
-	}
-	return strings.Join(steps, " ") + "|" + end[1]
-}
-
-func TestPilotMatchesExpected(t *testing.T) {
-	expected := parseExpected(t)
 	workflows := workflowsIn(t, "../../testdata/pilot/...")
 
 	if len(expected) != 8 {
 		t.Fatalf("EXPECTED.md: parsed %d workflow sections, want 8", len(expected))
 	}
 	for name, ew := range expected {
-		if len(ew.paths) != ew.count {
-			t.Errorf("EXPECTED.md, %s: says %d paths but lists %d", name, ew.count, len(ew.paths))
+		if len(ew.Paths) != ew.Count {
+			t.Errorf("EXPECTED.md, %s: says %d paths but lists %d", name, ew.Count, len(ew.Paths))
 		}
 	}
 
@@ -129,7 +56,7 @@ func TestPilotMatchesExpected(t *testing.T) {
 				t.Fatalf("Build: %v", err)
 			}
 			got := pathKeys(g)
-			want := slices.Clone(expected[name].paths)
+			want := slices.Clone(expected[name].Paths)
 			slices.Sort(got)
 			slices.Sort(want)
 			if !slices.Equal(got, want) {

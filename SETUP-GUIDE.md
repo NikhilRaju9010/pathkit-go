@@ -2,16 +2,18 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (milestone M2 of M9).** `pathkit analyze` works for workflows made of `if`/`else` and Temporal error checks; loops, `switch`, selectors and the rest arrive in M4. `coverage` and `report` are not implemented yet. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (milestone M3 of M9).** `pathkit analyze` and `pathkit test` work for workflows made of `if`/`else` and Temporal error checks. Loops, `switch`, selectors and the rest arrive in M4. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
-> A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test` (or add the `-overlay` flag that `pathkit prepare` prints to your own `go test` command). *(Both commands arrive in M3.)*
+> A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`. *(`pathkit prepare`, for adding the overlay flag to your own `go test` command, arrives in M6.)*
 
 ## Commands
 
 | Command | What it does | Available |
 | --- | --- | --- |
 | `pathkit analyze <file>` | Lists every possible path through the workflows in one file (or a package folder, or `folder/...`). | yes (M2; some constructs from M4) |
+| `pathkit test [folder \| folder/...]` | Runs your Go tests and records which path each workflow run took. | yes (M3) |
+| `pathkit traces [folder \| folder/...]` | Shows which path each recorded run took (a debug view until `coverage` exists). | yes (M3) |
 | `pathkit coverage <file> --traces <dir>` | Shows which of one workflow's paths your tests ran. | coming in M6 |
 | `pathkit report <dir> --traces <dir>` | The same across every workflow in a project, with a project-wide total. | coming in M7 |
 | `pathkit --version` | Prints the installed version. | yes |
@@ -80,7 +82,62 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
 pathkit analyze: skipping polling.ReportPollingWorkflow: for loop at polling.go:21 is supported from M4
 ```
 
-## 4. Errors and exit codes
+## 4. Record which paths your tests run (`pathkit test`)
+
+Run your normal tests through PathKit. No changes to your test files are needed:
+
+```bash
+cd testdata/pilot
+pathkit test ./...
+```
+
+```
+ok  	example.com/pilot/fulfillment	0.086s
+ok  	example.com/pilot/orders	0.086s
+ok  	example.com/pilot/reports	0.081s
+...
+pathkit test: recorded 8 traces (8 complete) in .pathkit/traces
+```
+
+What happens:
+1. PathKit makes a marked-up copy of each workflow file in `.pathkit/overlay/`. The copy writes down every junction exit the run passes.
+2. It runs `go test -overlay=...`, so Go compiles the copies instead of your files. **Your source files and `go.mod` are never changed.**
+3. Each workflow run writes one small JSON trace file to `.pathkit/traces/`.
+
+Line numbers stay the same in the copy, so test failures and panics still point at your real file and line.
+
+| Flag | Effect |
+| --- | --- |
+| `--traces <dir>` | Where to write trace files (default `.pathkit/traces`). |
+| `--keep-traces` | Keep old trace files. By default each run first deletes the old ones (only `*.trace.json` files). |
+| `-- <go test flags>` | Everything after `--` goes to `go test`, e.g. `pathkit test ./... -- -run TestOrder -v`. |
+
+`pathkit test` always runs the tests fresh (it adds `-count=1` unless you pass your own `-count`), because cached test results would record nothing. If a test fails, the traces from the other tests are still kept and PathKit exits 1.
+
+Then see which path each run took:
+
+```bash
+pathkit traces ./...
+```
+
+```
+orders.OrderWorkflow: path 1 (J1.true → End (completed))
+orders.OrderWorkflow: path 2 (J1.false J2.failure → End (failed))
+orders.OrderWorkflow: path 3 (J1.false J2.success → End (completed))
+...
+8 traces: 8 matched
+```
+
+The path numbers are the ones `pathkit analyze` prints. A trace can also show as:
+- **`unmatched`**, naming the step that doesn't fit the workflow's map
+- **`stale`**, when the workflow changed since the run was recorded (re-run `pathkit test`)
+- **`incomplete`**, when the run panicked, timed out, or never reached a `return`
+
+A trace doesn't know which test produced it; to see one test's path, run only that test (`-- -run '^TestName$'`).
+
+Add `.pathkit/` to your `.gitignore`.
+
+## 5. Errors and exit codes
 
 Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 
@@ -95,7 +152,11 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `missing <file> argument` / `missing <dir> argument` | No path given. | Pass the file or folder. |
 | `missing required --traces <dir> argument` | `coverage`/`report` need the trace folder. | Add `--traces <dir>`. |
 | `unknown flag: --xyz` | Misspelled or unsupported flag. | Check the spelling (`pathkit <command> --help` lists flags). |
-| `pathkit: unknown command "xyz"` | Misspelled command. | Use `analyze`, `coverage` or `report`. |
+| `pathkit: unknown command "xyz"` | Misspelled command. | Use `analyze`, `test`, `traces`, `coverage` or `report`. |
+| `no trace files found in <dir>; coverage is recorded only by "pathkit test" ...` | No runs were recorded, usually because the tests ran with plain `go test`. | Run `pathkit test`. |
+| `go test failed (exit status 1)` | One of your tests failed under `pathkit test`. | Fix the test; traces from passing tests are still kept. |
+| `expected a package folder or folder/..., not a file` | `pathkit test` runs packages, not single files. | Pass the folder. |
+| `cannot record <workflow>: ... a name pathkit needs` | Your code already uses one of pathkit's generated names. | Rename yours (see LIMITATIONS.md). |
 | `not implemented yet (planned for Mx)` | The command exists but its work arrives in a later milestone. | Wait for that milestone. |
 | `Workflow file not found: ...` / `Directory not found: ...` | Wrong path. | Check the path and your working directory. |
 | `package does not compile: ...` | PathKit needs code that builds. | Fix the compile error shown (run `go build ./...`). |

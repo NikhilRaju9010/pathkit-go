@@ -90,6 +90,7 @@ func TestRules(t *testing.T) {
 		}},
 		{"NamedBare", []string{"|"}},
 		{"UncheckedVar", []string{"|"}},
+		{"ReturnsCall", []string{"J1.true|", "J1.false|completed"}},
 		{"PlainDefer", []string{"|completed"}},
 	}
 	for _, tt := range tests {
