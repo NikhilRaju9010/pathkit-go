@@ -1,0 +1,7 @@
+# PathKit's own generated files (overlay copies, traces, reports)
+.pathkit/
+
+# Built binaries
+/pathkit
+/pathkit.exe
+dist/

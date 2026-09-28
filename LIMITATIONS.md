@@ -13,6 +13,11 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 - **Activity, timer and signal calls are recognized only when made directly** through the Temporal `workflow` package's functions and types. A call made through your own wrapper function (`myExecute(ctx, ...)`) is not recognized as a Temporal call.
 - **Only code that runs in the workflow function itself is on the map.** Signal/Query/Update handlers registered with `SetQueryHandler`, `SetUpdateHandler` or a callback are separate entry points and are not followed.
 
+## Found while building
+
+- **`--version` shows a commit-based version for local builds (M0).** A `go build` inside a git checkout prints something like `v0.0.0-20260928070644-65ea0f53be27+dirty` (Go stamps it from git automatically); `go run` prints `dev`. Only release builds (M9) and `go install ...@vX.Y.Z` show a clean `vX.Y.Z`. This is how Go works, not a bug.
+- **The race detector (`go test -race`) needs a C compiler (M0).** CI runs it on Linux, macOS and Windows, where one is installed. On the development machine there is no C compiler, so the local check is plain `go test ./...`.
+
 ## New in Go, because of the proposed design (planned)
 
 - **The package must compile.** PathKit uses Go's real type checker (`go/types` via `go/packages`), so a package with a compile error, or with modules not downloaded, can't be analyzed. A Go toolchain must be installed where PathKit runs (minimum version to be confirmed in M0; research points to 1.26).

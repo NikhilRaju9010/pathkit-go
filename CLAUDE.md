@@ -166,7 +166,7 @@ Under `pathkit test`, the instrumented `OrderWorkflow` is compiled in instead, a
 ### D7 — CLI, Go version, module, install — APPROVED (2026-09-28)
 
 - **CLI library: `cobra` (with `pflag`).** The standard `flag` package stops reading flags at the first non-flag word, so `pathkit analyze orders.go --summary` would silently ignore `--summary` — the same "flag swallowed" bug class the TS version fixed three times. `cobra`/`pflag` reads flags in any position, supports `--flag` and `--flag=value`, and gives `--help` and shell completion for free. Cost: two small, very widely used dependencies. One behavior difference: an optional value is written `--html=report.html` (with `=`); `--html` alone still means "default path". `--html report.html` (with a space) would read `report.html` as the positional argument. The alternative is a hand-written parser (zero dependencies, exact TS behavior) — I recommend cobra.
-- **Minimum Go version: set in M0 from the real `go.mod` files.** Research (2026-09-28) found that `golang.org/x/tools` and the Temporal Go SDK (v1.49.0) both declare `go 1.26.0`, which suggests 1.26. Owner's decision: this is **verified in M0** by reading the actual `go.mod` of the exact `x/tools` and `go.temporal.io/sdk` versions we pin (the SDK only matters for the test fixtures, but users need it too). PathKit's minimum is the highest `go` line among them, recorded in the Decisions Log.
+- **Minimum Go version: 1.26.0 (verified in M0, see Decisions Log).** Originally: Research (2026-09-28) found that `golang.org/x/tools` and the Temporal Go SDK (v1.49.0) both declare `go 1.26.0`, which suggests 1.26. Owner's decision: this is **verified in M0** by reading the actual `go.mod` of the exact `x/tools` and `go.temporal.io/sdk` versions we pin (the SDK only matters for the test fixtures, but users need it too). PathKit's minimum is the highest `go` line among them, recorded in the Decisions Log.
 - **Module path:** `github.com/NikhilRaju9010/pathkit-go`. Binary entry point: `cmd/pathkit`.
 - **Install:** `go install github.com/NikhilRaju9010/pathkit-go/cmd/pathkit@latest`, plus prebuilt binaries for Linux/macOS/Windows (amd64/arm64) on GitHub Releases, built by GoReleaser from a git tag in GitHub Actions. `pathkit --version` reads the version stamped at build time, falling back to Go's build info for `go install`.
 - **PathKit's own `go.mod` does not depend on the Temporal SDK.** Only the test fixtures need it, and they live in a separate module under `testdata/` (Go ignores `testdata/`). This is the Go version of the TS "Temporal packages are devDependencies only" decision.
@@ -253,4 +253,38 @@ The owner approved letting `workflows.include` in `.pathkitrc.json` add a functi
 
 1. An `include` name that matches no function, or matches a function whose first parameter is not `workflow.Context`, is an error (exit 1), handled the same way as a misspelled workflow name. Reason: a wrong entry must never silently change the scope, or the coverage % stops meaning anything.
 2. Workflows added this way are labelled `added by config` in `analyze` and `report` output, including `--json` and the HTML report. Reason: a reader can always tell which workflows were found automatically and which a person added.
+
+## 2026-09-28 — M0: skeleton built, Go minimum verified as 1.26.0
+
+**Go installed:** Go 1.27.1 (latest stable), downloaded from go.dev, SHA-256 checked against go.dev's published checksum, unpacked to `~/.local/go` (no sudo). `~/.local/go/bin` and `~/go/bin` were added to `PATH` in `~/.bashrc`.
+
+**Minimum Go version, checked from the real `go.mod` files** (downloaded with `go mod download -json <module>@latest` in a scratch folder, then reading each file's `go` line):
+
+| Module | Version | `go` line |
+| --- | --- | --- |
+| `go.temporal.io/sdk` | v1.49.0 | 1.26.0 |
+| `golang.org/x/tools` | v0.50.0 | 1.26.0 |
+| `github.com/spf13/cobra` | v1.10.2 | 1.15 |
+| `github.com/spf13/pflag` | v1.0.10 (cobra itself pins v1.0.9) | 1.12 |
+| `honnef.co/go/tools` (staticcheck, CI only) | v0.8.1 | 1.26.0 |
+
+The highest is 1.26.0, so PathKit's `go.mod` says `go 1.26.0`, with no `toolchain` line. This matches the research. Only cobra is in PathKit's `go.mod` so far. `x/tools` is added in M2 when code first uses it. The Temporal SDK is never added to PathKit's own `go.mod` (D7).
+
+**What was built:**
+- `cmd/pathkit/main.go` is the only place that calls `os.Exit`.
+- `internal/cli` holds `Run(args, stdout, stderr) int` and the `analyze`/`coverage`/`report` placeholders, which do the real argument checks and then say `not implemented yet (planned for Mx)`.
+- One error formatter produces `pathkit <command>: <message>`, or `pathkit: <message>` for an unknown command. Exit codes are named constants 0/1/2.
+- `internal/version` gives `--version` in this order: the version stamped with `-ldflags` at build time, else Go's recorded build info, else `dev`.
+- CI (`.github/workflows/ci.yml`) runs on Linux, macOS and Windows: gofmt check (skipped on Windows because of line endings), `go vet`, staticcheck v0.8.1 via `go run`, and `go test -race`.
+
+**Choices made while building:**
+- Cobra's own errors are rewritten to the one-line style. An unknown command drops cobra's ` for "pathkit"` suffix and its multi-line "Did you mean" block.
+- `coverage` and `report` already register `--traces`. The plan said "no flags yet except `--summary`", but the "missing required --traces" check can't be tested without the flag existing.
+- Cobra's automatic `completion` command is left on (the free shell completion from D7).
+
+**Surprises:**
+- (a) A `go build` inside a git checkout stamps a commit-based version, such as `v0.0.0-20260928070644-65ea0f53be27+dirty`, while `go run` gives `dev`. The plan only expected `dev`. This is documented in `SETUP-GUIDE.md` and `LIMITATIONS.md`.
+- (b) `go test -race` needs cgo and a C compiler. The dev machine has none, so `-race` runs in CI only. The local check is `go test ./...`.
+
+**Checks run:** `gofmt -l .` (clean), `go vet ./...` (clean), `go test -count=1 ./...` (3 packages ok, including a test that builds the real binary and checks its actual exit codes), staticcheck v0.8.1 (clean). CI has not run yet, because the repo is not pushed to GitHub.
 
