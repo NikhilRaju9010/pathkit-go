@@ -2,7 +2,7 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (M7 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` shows which paths your tests ran, and `report` gives the whole project at a glance. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (M8 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` shows which paths your tests ran, `report` gives the whole project at a glance, and `--html` turns it into one shareable web page. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`, or with the exact command `pathkit prepare` prints (section 5).
@@ -17,7 +17,7 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 | `pathkit coverage <file \| folder \| folder/...>` | Shows which paths your tests ran, workflow by workflow, with a total; `--fail-under` for CI. | yes (M6) |
 | `pathkit clean` | Deletes recorded trace files. | yes (M6) |
 | `pathkit prepare [folder \| folder/...]` | Prints the `go test -overlay=...` command that records traces, for running `go test` yourself. | yes (M6) |
-| `pathkit report [folder \| folder/...]` | The whole project at a glance: every workflow's coverage with a High/Medium/Low priority, the project total, the excluded workflows, `--summary`, `--json`. | yes (M7) |
+| `pathkit report [folder \| folder/...]` | The whole project at a glance: every workflow's coverage with a High/Medium/Low priority, the project total, the excluded workflows, `--summary`, `--json`; `--html` for a shareable web page. | yes (M7; `--html` M8) |
 | `pathkit --version` | Prints the installed version. | yes |
 
 ## 1. Requirements
@@ -379,6 +379,78 @@ A flag always beats the config file, including `--json=false`. The exit codes ar
 
 Everything else (`workflows`, `excluded`, `total`, `branches`, `traces`, `failUnder`) means exactly the same as in `coverage --json`.
 
+## 5c. A shareable web page (`--html`)
+
+`report --html` also writes the report as **one web page**, which you can open in any browser, attach to a ticket, or send to someone without Go:
+
+```bash
+cd testdata/pilot
+pathkit test ./...
+pathkit report ./... --html          # writes .pathkit/report.html
+pathkit analyze ./... --html         # writes .pathkit/analysis.html (the map only)
+```
+
+Open the file in your browser: double-click it, or run `xdg-open .pathkit/report.html` (Linux), `open .pathkit/report.html` (macOS), or `start .pathkit\report.html` (Windows).
+
+**What's on it.** Two tabs:
+- **Coverage** (shown first):
+  - the project total and branch coverage, worded exactly like the terminal;
+  - for each workflow: its file, its **High/Medium/Low label** (the word and a colour), the stats line, and every numbered path marked `covered` or `missed`, with `truncated` when the list was cut at 2000 paths;
+  - the `--fail-under` result, if you set one;
+  - the `Traces:` counts;
+  - the **trend**.
+- **Analysis:** the same workflows and paths, with the same numbers `pathkit analyze` prints, and no coverage marks.
+
+The excluded workflows and their reasons are listed below the tabs. `report --html` fills both tabs from one run, so path 3 on the Coverage tab is always path 3 on the Analysis tab.
+
+**Safe to send, works offline.** The page is a single file with everything inside it. It has no JavaScript, and no fonts, images or stylesheets from the internet. It also tells the browser to refuse any network request. Everything that comes from your code or config (workflow names, conditions such as `if decision == "approved"`, file paths, exclusion reasons) is escaped, so it's shown exactly as written and can never act as HTML.
+
+**`analyze --html` and `report --html` write separate files** (`analysis.html` and `report.html`), each complete from its own run, so neither overwrites the other. The `analyze` page says "Not measured" on its Coverage tab.
+
+**The trend.** Each `report --html` run adds a line to a small file, `report-history.json`, **next to the HTML file**, and the page shows the last 5 runs: time, covered/total, and a bar. If the set of counted workflows changed since the run before (for example you excluded one), that line says `scope changed: 7 in scope, 1 excluded`, so a jump in % that only comes from excluding something is visible.
+- A run that fails (exit code 1) adds nothing. A run below `--fail-under` (exit code 2) still writes the page and adds its line.
+- If `report-history.json` is missing (the first run) or damaged, PathKit prints a warning, `pathkit report: warning: ... starting a new trend`, and starts a fresh trend. The report itself never fails because of it.
+- `pathkit test`, `pathkit clean` and `--clean` **never delete** `report-history.json`: they delete only `*.trace.json` files and PathKit's own copies in `.pathkit/overlay/`. Delete the file yourself to reset the trend.
+
+**The trend in CI.** A CI job usually starts from a fresh checkout, so `.pathkit/report-history.json` isn't there, and the trend starts empty on every run (with the "no report history yet" warning). To keep it, save the history file at the end of each run and put it back at the start of the next. In GitHub Actions, for example:
+
+```yaml
+      - name: Restore the coverage trend
+        uses: actions/cache/restore@v6
+        with:
+          path: .pathkit/report-history.json
+          key: pathkit-trend-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: pathkit-trend-${{ github.ref_name }}-
+
+      - run: pathkit test ./...
+      - run: pathkit report ./... --html
+
+      - name: Save the coverage trend
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: .pathkit/report-history.json
+          key: pathkit-trend-${{ github.ref_name }}-${{ github.run_id }}
+
+      - name: Keep the report page
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pathkit-report
+          path: .pathkit/report.html
+```
+
+Upload the page as a CI **artifact** to download and open it after the run. The cache keeps one trend per branch. Any other way of keeping a file between runs works too; PathKit only needs `report-history.json` to be next to the HTML file when `report --html` runs.
+
+| Flag or key | Effect |
+| --- | --- |
+| `--html` | Write the page to the default file (`.pathkit/report.html`, or `.pathkit/analysis.html` for `analyze`). |
+| `--html=<file>` | Write it there; the trend file goes next to it. Write it **with `=`**: `--html report.html` (with a space) would read `report.html` as the folder, and PathKit stops with `write --html=report.html (with =)`. |
+| `--html=false` | No page, even if the config says so. |
+| config `"html"` | `report` only: `true`, a file path (relative to the config file), or `false`. |
+
+The page's "Generated" time is in UTC. File paths on the page use forward slashes on every system.
+
 ## 6. Choose which workflows count (`.pathkitrc.json`)
 
 Some workflows can't be tested yet (say, they need a real bank sandbox). Counting them would drag your coverage down and make the number mean less. A `.pathkitrc.json` file says which workflows count. Think of a report card where some subjects aren't graded this term: they're listed as "not graded, because …", and the average is taken over the rest.
@@ -439,9 +511,9 @@ Workflow: scope.lowerFlow (added by config)
 | `workflows.include` / `workflows.exclude` | See above. | now |
 | `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). | now (`coverage` and `report`) |
 | `out`, `json`, `noColor` | `report` output: write to a file (relative to the config file), print JSON, no colour (section 5b). A flag always wins. | now (`report`) |
-| `html` | `true` or a file path for the HTML report. | checked now, used from M8 |
+| `html` | `report` only: `true` writes `.pathkit/report.html` (from the current folder), a path writes there (relative to the config file), `false` writes none (section 5c). `--html` always wins, including `--html=false`. | now (`report`) |
 
-Keys marked "checked now" are validated, so a typo or wrong type is still reported, but they do nothing yet, and no command claims to apply them. (`out`, `json` and `noColor` in the config are for `report` only; `coverage` uses only its own `--out` and `--json` flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
+Every key is used now, and each one is covered by a test. (`out`, `json`, `noColor` and `html` in the config are for `report` only; `coverage` and `analyze` use only their own flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
 
 ## 7. Errors and exit codes
 

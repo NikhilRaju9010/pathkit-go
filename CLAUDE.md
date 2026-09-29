@@ -225,6 +225,21 @@ Text output keeps the TS format line for line, including `Start -> <junction> --
 - **A workflow with 0 listed paths has no label.** This can only happen when every path ends in `panic`.
 - `SETUP-GUIDE.md` says that labels are per workflow, and what each one means for a tester (owner's requirement).
 
+### D12 — HTML report — APPROVED (2026-09-29)
+
+`report --html` and `analyze --html` write one self-contained web page (M8). The owner approved every recommendation, with four additions (the last four bullets).
+
+- **Separate files, no merged store.** `report --html` writes `.pathkit/report.html` and fills **both** tabs (Coverage and Analysis) from its own single run. `analyze --html` writes `.pathkit/analysis.html` (Analysis tab; the Coverage tab says "Not measured"). The TypeScript version merged both commands into one file through `.pathkit/report-data.json`, so its Analysis tab could come from an older version of the code than its Coverage tab. That is the D5 bug class, so it is not copied.
+- **The same numbers as `report`.** The page is filled from the shared `measure`'s `coverage.Result`, and every sentence (total line, branches, stats, excluded line, Traces line, path text) comes from package `render`, exactly as the terminal prints it. There is no calculation in `internal/htmlreport`.
+- **No JavaScript, nothing loaded.** The tabs are CSS-only (radio buttons and `:checked`). There are no scripts, external stylesheets, fonts or images. A Content-Security-Policy `<meta>` (`default-src 'none'; style-src 'unsafe-inline'; img-src data:`) makes the browser refuse any request. The fonts are the system's own.
+- **Escaping.** The page uses Go's `html/template`. No value is ever marked safe: `template.HTML`, `JS`, `CSS`, `URL`, `HTMLAttr`, `JSStr` and `Srcset` are banned by a source-scanning test. The stylesheet is part of the template text, not a value.
+- **The trend.** The last 5 `report --html` runs are kept in `report-history.json` **next to the HTML file** (`schemaVersion` 1). Each run stores its totals, the in-scope and excluded counts, and a scope fingerprint; when the fingerprint changes, the trend line says `scope changed: N in scope, M excluded`. A run is added only when the page was written (exit 0 or 2).
+- **Config:** `html` applies to `report` only (`true` → `.pathkit/report.html`, from the current folder; a path → relative to the config file; `false` → none). `--html` / `--html=path` / `--html=false` always win. `--html path` with a space is caught with a hint to write `--html=path`.
+- **Owner's addition 1:** `pathkit test`, `pathkit clean` and `--clean` never delete `report-history.json`. That's tested, including when it sits in the trace folder or in `.pathkit/overlay`. To make it hold, `pathkit test` now deletes only its own generated files in `.pathkit/overlay` instead of emptying the folder.
+- **Owner's addition 2:** a missing or damaged `report-history.json` gives a warning (`pathkit report: warning: … starting a new trend`) and a fresh trend; it never fails the report. Both are tested.
+- **Owner's addition 3:** SETUP-GUIDE explains that in CI the trend starts empty each run, and how to keep it: restore and save `report-history.json` with the cache action, and upload the page as an artifact.
+- **Owner's addition 4:** a workflow truncated at the path cap shows "truncated" in the HTML, with the same `(truncated at maxPaths=2000)` wording as the text report.
+
 ### Trace file format (schemaVersion 1) — defined in M3, approved with the M3 plan
 
 One JSON file per workflow run, written by the recorder that `pathkit test` adds to the package through the overlay. It lives in the trace folder (default `.pathkit/traces` in the folder `pathkit test` runs from, baked in as an absolute path) and is named `<workflow>.<12 random hex digits>.trace.json`. Example:
@@ -972,3 +987,49 @@ The JSON golden files didn't change: the wording is text only.
 - `actions/setup-go` v5 → **v7** (latest release v7.0.0, 2026-07-16).
 
 Both v7 `action.yml` files declare `using: node24`, which removes the Node.js 20 deprecation warning. setup-go v7 still has the `go-version-file` and `cache-dependency-path` inputs our CI uses. checkout v7's one behaviour change blocks fork PR checkouts for `pull_request_target` and `workflow_run`, and our CI uses only `push` and `pull_request`.
+
+## 2026-09-29 — M8: shareable HTML report
+
+Branch `m8-html-report`. Decisions: D12 above (approved with the owner's four additions).
+
+**What was built:**
+- **New package `internal/htmlreport`:** `page.html.tmpl` and `style.css` (embedded), `Report` and `Analysis` (page data from `coverage.Result` and `render`), and `history.go` (`ReadHistory`, `AddRun`, `WriteHistory`, `Fingerprint`). There is no calculation in the package.
+- **`render` exports the sentences it shares with the page:** `ProjectTotalLine`, `BranchesLine` and `WorkflowStats`. `ReportText` uses them too, and its output is unchanged.
+- **CLI (`internal/cli/html.go`):**
+  - `--html` on `report` and `analyze` (a `pflag` option whose value is optional);
+  - `htmlPath` (flag, else, for `report`, the config's `html`);
+  - `htmlSpaceHint`;
+  - `reportHTML`, run inside the shared `finish` after `--out` and before `--clean` (the new `extra` step), so a page that can't be written is exit 1 and keeps the traces.
+
+  `now` (the clock) and `isTerminal` are package variables that tests can replace.
+- **`instrument.WriteOverlay`** deletes only `overlay.json` and `NNN_<name>.go` in `.pathkit/overlay`, where it used to empty the whole folder (owner's addition 1). `TestOverlayKeepsOtherFiles` pins it.
+- The trend's bar is an HTML `<meter>`, which needs no script and no inline style.
+
+**Checked by eye:** headless Chrome screenshots of the pilot's page at desktop and phone width, taken offline with a `file://` URL.
+
+**Tests:**
+- **`internal/htmlreport`:**
+  - `TestSelfContained`: no `<script`, `<link`, `@import`, `@font-face`, `http:`/`https:`, `src`/`href`, `<img>`/`<iframe>`/`<object>`/`<embed>`, or non-`data:` `url(`; exactly one CSP meta;
+  - `TestEscapesEverything`: made-up names, files, reasons and config paths full of `<script>`, `&` and quotes are never raw, and unescape to exactly the original;
+  - `TestNothingMarkedSafe`: scans all PathKit Go code for `template.HTML` and its relatives. **Proven to fail** on a throwaway file using `template.HTML`, which was then deleted;
+  - `TestTruncatedShown`, `TestAnalysisPageSaysNotMeasured`, `TestReadHistory` (missing, plus 7 kinds of damage), `TestAddRunKeepsFive`, `TestFingerprint`, `TestTrendMarksScopeChange`.
+- **`internal/cli` (`html_test.go`):**
+  - `TestReportHTMLGolden`: the whole orders page with a fixed clock, `internal/cli/testdata/report_orders.html`;
+  - `TestReportHTMLTrend`: 6 runs keep 5, and a later `--exclude` run is marked "scope changed";
+  - `TestReportHTMLHistoryMissingOrDamaged`: missing, damaged JSON and garbage each warn and start fresh, with exit 0;
+  - `TestHistorySurvivesCleanup`: `--clean`, `pathkit clean` and `pathkit clean --older-than` with the history in the trace folder;
+  - `TestReportHTMLConfigKey`: `true`, a path, `false`, `--html=false` beats `true`, the flag path beats the config, and `analyze` ignores the key;
+  - `TestReportHTMLExitCodes`: exit 2 writes, exit 1 doesn't, an unwritable path is exit 1 and keeps the traces;
+  - `TestHTMLSpaceHint`, `TestAnalyzeHTML`;
+  - `TestHTMLTruncated`: `rules.TwelveIfs`, 4,096 paths, on both pages;
+  - `TestHTMLEscapesUserCode`: the new fixture `testdata/fixtures/escaping`, whose conditions, switch cases and signal name contain `<`, `>`, `&` and both quotes, including `case "&amp;"`, which must come back as `&amp;`, not `&`. The config's exclusion reason is `<script>alert("x")</script> & 'quotes'`;
+  - `TestAllowStaleConfigKey` (a key used since M6; this is its first test) and `TestNoColorConfigKey` (a key used since M7, tested with stdout set to "terminal"; `--no-color=false` beats the config).
+- **`internal/e2e` `TestCoverageMatchesKey`** (also runs with `-short`):
+  - the pilot's `report --html`, unscoped and with the no-shipment scope, must equal `report --json` **field by field**: totals, every workflow's covered/total/priority/file, every path's number, text and covered mark, the excluded names and reasons, all 9 trace counts, and the visible total and Traces lines;
+  - the Analysis tab of `report.html` and of `analysis.html` must equal `analyze`'s numbered listing;
+  - `pathkit test` must leave `report-history.json` untouched in `.pathkit/`, in `.pathkit/overlay/` and in the trace folder.
+
+  The agreement check was **proven able to fail** by briefly putting each workflow's total into `data-covered` (it reported `4/4` against `2/4`), then restoring the template.
+- **`cmd/pathkit` `TestBinaryReportHTML`**, against the real program: exit 0 and exit 2 write the page and the trend, exit 1 writes nothing, and `--html out.html` gives the hint.
+
+**Commits:** the plan said two commits, "M8a" (report page) and "M8b" (analyze page, trend, docs). The trend is part of the report page's own code path (`reportHTML`), so splitting the code would have left a commit that doesn't build its own feature. So it is one code commit and one docs commit.
