@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
+	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"github.com/NikhilRaju9010/pathkit-go/internal/render"
 	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
@@ -23,6 +24,8 @@ type measureOptions struct {
 	failUnder  string
 	allowStale bool
 	scope      scopeFlags
+	// foldersOnly (report): refuse a single .go file.
+	foldersOnly bool
 }
 
 // measured is one measurement: the numbers, and what finish needs.
@@ -50,6 +53,14 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		m.threshold = &v
 	}
 
+	if opt.foldersOnly && target != "" {
+		if _, _, file, err := load.Resolve(target); err != nil {
+			return nil, userError("%s", err)
+		} else if file != "" {
+			return nil, userError("expected a folder or folder/..., not a file: %s (%s covers a whole project; use \"pathkit coverage\" for one file)", target, cmdName)
+		}
+	}
+
 	sc, err := loadScoped(cmdName, target, opt.scope, stderr)
 	if err != nil {
 		return nil, err
@@ -71,7 +82,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	var workflows []coverage.Workflow
 	var others []string
 	for _, r := range sc.mapped {
-		workflows = append(workflows, coverage.Workflow{Name: r.wf.Name, Graph: r.graph, Hash: r.hash, AddedByConfig: r.addedByConfig})
+		workflows = append(workflows, coverage.Workflow{Name: r.wf.Name, File: load.DisplayPath(r.wf.Filename), Graph: r.graph, Hash: r.hash, AddedByConfig: r.addedByConfig})
 	}
 	if opt.function != "" {
 		var names []string
@@ -122,10 +133,13 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 // print it, write --out, then --clean (only now that the report was fully
 // produced: exit 0 or 2, never after an error, owner's condition M6), and
 // last the --fail-under check (exit 2).
-func finish(cmd *cobra.Command, cmdName string, m *measured, output, outFile string, clean bool) error {
-	fmt.Fprint(cmd.OutOrStdout(), output)
+//
+// printed goes to stdout; plain (the same text without colour) goes to
+// the --out file, which is always plain text.
+func finish(cmd *cobra.Command, cmdName string, m *measured, printed, plain, outFile string, clean bool) error {
+	fmt.Fprint(cmd.OutOrStdout(), printed)
 	if outFile != "" {
-		if err := os.WriteFile(outFile, []byte(output), 0o644); err != nil {
+		if err := os.WriteFile(outFile, []byte(plain), 0o644); err != nil {
 			return userError("could not write --out file: %v", err)
 		}
 	}

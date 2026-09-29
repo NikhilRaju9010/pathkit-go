@@ -879,3 +879,61 @@ The request had asked how each *untested path* gets its label. TypeScript never 
 - `go test -short -count=1 ./...`: all ok
 
 `EXPECTED.md` was not edited.
+
+## 2026-09-29 — M7b: `pathkit report`
+
+**What was built:**
+- **`pathkit report [folder|folder/...]`** (`internal/cli/report.go`). It gets its numbers from the same `measure` and `finish` as `coverage` (M7a), so the two cannot disagree. The text layout follows TypeScript's report format with `analyze`'s path numbers added:
+  - `<workflow> (<file>)`
+  - `2/3 paths · 66.7% · branches 3/4 · priority Medium`
+  - each path as `  N. <path>: covered|missed`
+  - `N paths total · C covered · M missed · P% project coverage`, then `Branches:`
+  - the excluded line (always printed) with each workflow's reason, and the `Traces:` line.
+
+  `--summary` prints one aligned line per workflow, then the same footer.
+- **D11 priority labels:** `coverage.Priority(covered, total)` uses only whole-number comparisons (`covered*100 < 50*total` → High, `covered*100 <= 80*total` → Medium, else Low; 0 paths → no label). `render.WorkflowPct` shows extra decimals when one decimal would put a workflow on a boundary it isn't on (`79.99%`, `80.01%`).
+- **`report --json` (schemaVersion 1)** is `coverage --json` plus `workflows[].file`, `workflows[].priority` (null with no paths) and `excludedBy` (for example `[".pathkitrc.json", "--exclude"]`). The coverage fields come first and are built by the same `coverageJSON`. Pinned by the golden file `internal/cli/testdata/report_orders.json`.
+- **Config keys `out`, `json` and `noColor` apply to `report`.** A flag always beats the config, including `--json=false`, and `out` is read relative to the config file. Only `html` is still unused (M8).
+- **Colour** (`render.ColorEnabled`, `render.paint`): only on a real terminal (stdout is a character device), never with `--no-color`, config `noColor` or a non-empty `NO_COLOR`. It is never used in `--out` (which always gets the plain text) or in `--json`. There is no new dependency.
+- **Folders:** with no folder, `report` loads every entry of the config's `packages` (`loadAll`; each package once). A single `.go` file is refused with a hint to use `coverage`. That check lives in `measure` (`foldersOnly`) after `--fail-under` is parsed, so `report` checks its flags in the same order as `coverage`.
+- The M0 placeholder (`requireTraces`, `notImplemented`) is gone, and `--traces` defaults as for `coverage`.
+
+**Choices made while building (not in the plan):**
+- The excluded line's wording:
+  - `0 workflows excluded (no scope in use)`
+  - `0 workflows excluded by .pathkitrc.json`
+  - `N workflow(s) excluded by <sources> (see "reason"):` followed by the list.
+
+  The sources are the config file's own name, `--include` and `--exclude`. `--all` gives "no scope in use".
+- `--summary` together with `--json` prints `--summary ignored because --json was passed.` on stderr (like analyze's `--limit`/`--summary` note).
+- `report` has `--all` (ignore the scope), like `analyze`. It shows `0 workflows excluded (no scope in use)`, and stderr says the config is ignored.
+
+**Tests added:**
+- **`TestCoverageMatchesKey` (e2e, also runs with `-short`)** now also checks that `report` and `coverage` agree **field by field** on the recorded pilot, unscoped and with the no-shipment scope. Both `--json` outputs are decoded, report's three extra fields are removed, and the rest must be deep-equal: 8 top-level fields and every workflow, path, count and trace count. Each workflow's priority is checked against D11 from `EXPECTED.md`'s numbers, and the text totals are checked (52.6% and 58.6% project coverage). **Proven able to fail:** with `report`'s JSON temporarily changed to leave out one trace count, both subtests failed. The change was then reverted.
+- `internal/coverage` `TestPriority`: 0%, 49.99%, 50%, 50.01%, 66.7%, 79.99%, 80% (4/5 and 8/10), 80.01%, 83.3%, 100%, 1/3, and 0 paths.
+- `internal/render`: `TestWorkflowPct` (the boundary decimals), `TestColorEnabled`, `TestReportColor` (colour is decoration only: stripping the codes gives exactly the plain text), `TestExcludedLine`.
+- `internal/cli`:
+  - `TestReportText` (full text and `--summary`, checked in full, plus `--out`);
+  - `TestReportSummaryOneLinePerWorkflow` (all 8 pilot workflows);
+  - `TestReportJSONGolden`, `TestReportJSONIsCoverageJSONPlusThree`;
+  - `TestReportExcludedLine` (6 cases);
+  - `TestReportAddedByConfig`, `TestReportFailUnder`, `TestReportConfigKeys`;
+  - `TestReportClean` (exit 0, 2, 1);
+  - `TestReportErrors` (a file, two folders, not analyzable, a broken package, no traces, a missing folder);
+  - `TestReportEveryConfiguredPackage` (overlapping entries count once).
+
+  The M0 placeholder cases in `cli_test.go` were replaced.
+- **`cmd/pathkit` `TestBinaryReportExitCodes`:** 14 cases against the real built program. Exit 0: plain, `--summary`, `--json`, above the threshold, the flag beating the config. Exit 2: below `--fail-under`, as text and as JSON, and config `failUnder`; the report is still printed first. Exit 1: a bad threshold, no traces, a single file, not analyzable, a broken package, an unknown flag.
+
+**Pilot results (the real program):**
+- `pathkit report ./...`: **38 paths, 20 covered, 18 missed, 52.6%**, branches 39/50. Shipment is High (33.3%), orders Low (100%), the other six Medium.
+- With the no-shipment config: **29 / 17 / 58.6%**, with `1 workflow excluded by .pathkitrc.json (see "reason"):  shipment.ShipmentWorkflow: needs a real carrier sandbox`.
+
+**Checks run:**
+- `gofmt` on all tracked and new Go files: clean
+- `go vet ./...` and pilot `go vet`: clean
+- staticcheck v0.8.1: clean
+- `go test -count=1 ./...`: 119 top-level tests (207 subtests) pass, none skipped, in 79 s
+- `go test -short -count=1 ./...`: 109 pass, 10 skipped, in 26 s (M7a: 19 s; the new report tests in `internal/cli` load the pilot several times)
+
+`EXPECTED.md` was not edited.

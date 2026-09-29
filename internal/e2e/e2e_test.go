@@ -13,9 +13,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -577,6 +579,64 @@ func TestCoverageMatchesKey(t *testing.T) {
 	if !strings.Contains(stdout, "\n38 paths total · 20 covered · 18 missed · 52.6% coverage\n") {
 		t.Errorf("text total line missing:\n%s", stdout)
 	}
+
+	// M7b: report and coverage agree field by field, because they share one
+	// code path (measure). report --json is coverage --json plus "file" and
+	// "priority" on each workflow and "excludedBy"; with those three
+	// removed, the two must be identical, unscoped and scoped.
+	agree := func(t *testing.T, args []string, wantTotal string, wantPriority map[string]string) {
+		cov, covErr, covCode := pathkit(t, append([]string{"coverage", pilot + "/...", "--traces", traces, "--json"}, args...)...)
+		rep, repErr, repCode := pathkit(t, append([]string{"report", pilot + "/...", "--traces", traces, "--json"}, args...)...)
+		if covCode != 0 || repCode != 0 || covErr != "" || repErr != "" {
+			t.Fatalf("coverage exit %d %q, report exit %d %q", covCode, covErr, repCode, repErr)
+		}
+		var c, r map[string]any
+		if err := json.Unmarshal([]byte(cov), &c); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(rep), &r); err != nil {
+			t.Fatal(err)
+		}
+		gotPriority := map[string]string{}
+		delete(r, "excludedBy")
+		for _, w := range r["workflows"].([]any) {
+			w := w.(map[string]any)
+			if f, _ := w["file"].(string); !strings.HasSuffix(f, ".go") {
+				t.Errorf("%v: file = %q", w["name"], f)
+			}
+			gotPriority[w["name"].(string)], _ = w["priority"].(string)
+			delete(w, "file")
+			delete(w, "priority")
+		}
+		if !reflect.DeepEqual(c, r) {
+			t.Errorf("report --json (minus file, priority, excludedBy) differs from coverage --json\ncoverage:\n%s\nreport:\n%s", cov, rep)
+		}
+		if len(c) != 8 || len(c["workflows"].([]any)) != len(wantPriority) {
+			t.Errorf("compared %d top-level fields and %d workflows; want 8 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
+		}
+		if !maps.Equal(gotPriority, wantPriority) {
+			t.Errorf("priorities %v, want %v", gotPriority, wantPriority)
+		}
+		text, _, _ := pathkit(t, append([]string{"report", pilot + "/...", "--traces", traces}, args...)...)
+		if !strings.Contains(text, "\n"+wantTotal+"\n") || !strings.Contains(text, "\nTraces: 21 read · ") {
+			t.Errorf("report text lacks %q or the Traces line:\n%s", wantTotal, text)
+		}
+	}
+	// D11 from EXPECTED.md's numbers: 33.3% High; 50%, 60%, 66.7% Medium; 100% Low.
+	priorities := map[string]string{
+		"approval.ApprovalWorkflow": "Medium", "billing.SubscriptionWorkflow": "Medium",
+		"fulfillment.OrderFulfillmentWorkflow": "Medium", "fulfillment.PaymentWorkflow": "Medium",
+		"orders.OrderWorkflow": "Low", "polling.ReportPollingWorkflow": "Medium",
+		"reports.DailyReportWorkflow": "Medium", "shipment.ShipmentWorkflow": "High",
+	}
+	t.Run("report agrees with coverage, whole pilot", func(t *testing.T) {
+		agree(t, nil, "38 paths total · 20 covered · 18 missed · 52.6% project coverage", priorities)
+	})
+	t.Run("report agrees with coverage, no-shipment scope", func(t *testing.T) {
+		scoped := maps.Clone(priorities)
+		delete(scoped, "shipment.ShipmentWorkflow")
+		agree(t, []string{"--config", cfg}, "29 paths total · 17 covered · 12 missed · 58.6% project coverage", scoped)
+	})
 }
 
 // pathkit prepare writes the overlay and prints the go test command; that

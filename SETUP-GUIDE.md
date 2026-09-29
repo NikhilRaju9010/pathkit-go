@@ -2,7 +2,7 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (M6 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` shows which paths your tests ran; the project-wide `report` arrives in M7. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (M7 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` shows which paths your tests ran, and `report` gives the whole project at a glance. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`, or with the exact command `pathkit prepare` prints (section 5).
@@ -17,7 +17,7 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 | `pathkit coverage <file \| folder \| folder/...>` | Shows which paths your tests ran, workflow by workflow, with a total; `--fail-under` for CI. | yes (M6) |
 | `pathkit clean` | Deletes recorded trace files. | yes (M6) |
 | `pathkit prepare [folder \| folder/...]` | Prints the `go test -overlay=...` command that records traces, for running `go test` yourself. | yes (M6) |
-| `pathkit report <dir> --traces <dir>` | The same across every workflow in a project, with a project-wide total. | coming in M7 |
+| `pathkit report [folder \| folder/...]` | The whole project at a glance: every workflow's coverage with a High/Medium/Low priority, the project total, the excluded workflows, `--summary`, `--json`. | yes (M7) |
 | `pathkit --version` | Prints the installed version. | yes |
 
 ## 1. Requirements
@@ -291,6 +291,93 @@ go test -overlay=/your/project/.pathkit/overlay/overlay.json -count=1 ./...
 
 Only that command records traces; a plain `go test` records nothing. Run `prepare` again after you change a workflow, because the copies are made from the code as it was when you ran it.
 
+## 5b. The whole project at a glance (`report`)
+
+`coverage` is the close-up of each workflow. `report` is the **term report for the whole project**: one block per workflow, a priority label saying where tests are most needed, the project total, the workflows left out and why, and what happened to every trace file. Its numbers are exactly `coverage`'s: both commands use the same code to count, and a test checks they agree field by field.
+
+```bash
+cd testdata/pilot
+pathkit test ./...
+pathkit report ./...
+```
+
+```
+approval.ApprovalWorkflow (approval/approval.go)
+2/4 paths · 50.0% · branches 4/6 · priority Medium
+  1. Start -> AwaitWithTimeout (wait) --failure--> End (failed): missed
+  2. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == "approved" --true--> End (completed): covered
+  ...
+orders.OrderWorkflow (orders/orders.go)
+3/3 paths · 100.0% · branches 4/4 · priority Low
+  1. Start -> if in.AmountCents <= 0 --true--> End (completed): covered
+  2. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed): covered
+  3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed): covered
+...
+38 paths total · 20 covered · 18 missed · 52.6% project coverage
+Branches: 39/50 (78.0%)
+
+0 workflows excluded (no scope in use)
+Traces: 21 read · 21 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
+```
+
+With `--summary`, each workflow gets one line:
+
+```
+approval.ApprovalWorkflow             2/4 paths · 50.0% · priority Medium
+billing.SubscriptionWorkflow          2/3 paths · 66.7% · priority Medium
+fulfillment.OrderFulfillmentWorkflow  2/4 paths · 50.0% · priority Medium
+fulfillment.PaymentWorkflow           2/4 paths · 50.0% · priority Medium
+orders.OrderWorkflow                  3/3 paths · 100.0% · priority Low
+polling.ReportPollingWorkflow         3/5 paths · 60.0% · priority Medium
+reports.DailyReportWorkflow           3/6 paths · 50.0% · priority Medium
+shipment.ShipmentWorkflow             3/9 paths · 33.3% · priority High
+
+38 paths total · 20 covered · 18 missed · 52.6% project coverage
+...
+```
+
+**Priority labels are per workflow, not per path.** Each one comes from that workflow's path coverage, and every untested path of the workflow shares its label. They tell a tester where to spend the next test:
+
+| Label | Path coverage | What it means for you |
+| --- | --- | --- |
+| **High** | below 50% | Most of this workflow's paths have never run in a test. Write tests here first. |
+| **Medium** | 50% to 80%, both included | The main paths are tested, but several paths (often failures and timeouts) are not. Add tests for the paths marked `missed`. |
+| **Low** | above 80% | Well covered. Close the last gaps when convenient. |
+
+The boundaries are exact: 4 of 5 paths is exactly 80%, so it's Medium, and 79.99% is Medium too, while 80.01% is Low. When a % would print as "80.0%" or "50.0%" without being exactly that, more decimals are shown (`79.99%`), so the label never looks wrong. A workflow with no paths at all has no label.
+
+**The total** adds up the paths of every in-scope workflow (it never averages percentages). **The excluded line is always printed**, even when nothing is excluded, so nobody can raise the % quietly:
+
+```
+1 workflow excluded by .pathkitrc.json (see "reason"):
+  shipment.ShipmentWorkflow: needs a real carrier sandbox
+```
+
+It names what excluded them: `.pathkitrc.json`, `--include`, `--exclude`, or `(no scope in use)`.
+
+**Which folder.** `pathkit report ./...` or `pathkit report some/folder`. With no folder, `report` uses **every** entry of the config's `"packages"` (a workflow listed twice counts once), else `./...`. A single `.go` file is refused, because `report` is for the whole project; use `coverage` for one file.
+
+**`report` stops with exit code 1** rather than print a number that leaves something out:
+- when a package doesn't compile: every broken package is named, each with its first error. Fix them, or leave them out of the folder pattern or `"packages"`.
+- when a workflow in scope can't be analyzed: fix it, or exclude it with a reason (section 6).
+
+| Flag | Effect |
+| --- | --- |
+| `--summary` | One line per workflow instead of every path. |
+| `--json` | Print JSON instead (shape below). Config: `"json"`. |
+| `--out <file>` | Also write the report to a file, **always plain text** (no colour codes). Config: `"out"`, relative to the config file. |
+| `--no-color` | No colour. Colour (`covered` green, `missed` red; High red, Medium yellow, Low green) appears only on a real terminal, never when piped or redirected, and never with `--no-color`, config `"noColor": true`, or the `NO_COLOR` environment variable set to anything. The words are always there; colour is decoration only. |
+| `--traces`, `--fail-under`, `--allow-stale`, `--clean` | As for `coverage` (section 5). `--fail-under` checks the project's path coverage. |
+| `--config`, `--include`, `--exclude`, `--all` | Scope, as in section 6. `--all` ignores the scope and shows every workflow. |
+
+A flag always beats the config file, including `--json=false`. The exit codes are the same as for `coverage`: `0` fine, `1` a real error, `2` below `--fail-under` (the report is printed first).
+
+**`report --json`** has exactly `coverage --json`'s shape (section 5), with three additions:
+- each workflow also has `file` (where it's declared) and `priority` (`"High"`, `"Medium"`, `"Low"`, or `null` when it has no paths);
+- at the top, `excludedBy` lists what excluded workflows (`[".pathkitrc.json", "--exclude"]`, or `[]`).
+
+Everything else (`workflows`, `excluded`, `total`, `branches`, `traces`, `failUnder`) means exactly the same as in `coverage --json`.
+
 ## 6. Choose which workflows count (`.pathkitrc.json`)
 
 Some workflows can't be tested yet (say, they need a real bank sandbox). Counting them would drag your coverage down and make the number mean less. A `.pathkitrc.json` file says which workflows count. Think of a report card where some subjects aren't graded this term: they're listed as "not graded, because …", and the average is taken over the rest.
@@ -336,9 +423,9 @@ Workflow: scope.lowerFlow (added by config)
 
 **Scope changes what is counted, never what is tested.** `pathkit test` still runs every test; it records only the workflows in scope.
 
-**Example with the sample project:** excluding `ShipmentWorkflow` changes the project from 38 paths with 20 covered (52.6%) to 29 paths with 17 covered (58.6%). The number went up only because something was taken out. That's why every exclusion shows its reason, and why `report` (M7) will always print how many workflows were excluded.
+**Example with the sample project:** excluding `ShipmentWorkflow` changes the project from 38 paths with 20 covered (52.6%) to 29 paths with 17 covered (58.6%). The number went up only because something was taken out. That's why every exclusion shows its reason, and why `report` always prints how many workflows were excluded (section 5b).
 
-**A workflow in scope that PathKit can't analyze** (for example one using `goto`) is always printed as `in scope but not analyzable: … (fix it, or exclude it in .pathkitrc.json with a reason)`. `coverage` (and `report` from M7) refuses to run while one is in scope (exit 1), so the percentage always covers exactly what's in scope.
+**A workflow in scope that PathKit can't analyze** (for example one using `goto`) is always printed as `in scope but not analyzable: … (fix it, or exclude it in .pathkitrc.json with a reason)`. `coverage` and `report` refuse to run while one is in scope (exit 1), so the percentage always covers exactly what's in scope.
 
 **All keys:**
 
@@ -347,11 +434,11 @@ Workflow: scope.lowerFlow (added by config)
 | `packages` | Where your workflows are (default `./...` from the file's folder). Names are checked against these. It is also the folder `pathkit test`/`traces` use when you give none (only when it lists one). | now |
 | `traces` | Trace folder (default `.pathkit/traces`). | now |
 | `workflows.include` / `workflows.exclude` | See above. | now |
-| `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). | now (`coverage`; `report` from M7) |
-| `out`, `json`, `noColor` | Report output options. | checked now, used from M7 |
+| `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). | now (`coverage` and `report`) |
+| `out`, `json`, `noColor` | `report` output: write to a file (relative to the config file), print JSON, no colour (section 5b). A flag always wins. | now (`report`) |
 | `html` | `true` or a file path for the HTML report. | checked now, used from M8 |
 
-Keys marked "checked now" are validated, so a typo or wrong type is still reported, but they do nothing yet, and no command claims to apply them. (`out`, `json` and `noColor` in the config are for `report`; `coverage` uses only its own `--out` and `--json` flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
+Keys marked "checked now" are validated, so a typo or wrong type is still reported, but they do nothing yet, and no command claims to apply them. (`out`, `json` and `noColor` in the config are for `report` only; `coverage` uses only its own `--out` and `--json` flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
 
 ## 7. Errors and exit codes
 
@@ -366,14 +453,13 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | Message | Cause | Fix |
 | --- | --- | --- |
 | `missing <file> argument` / `missing <dir> argument` | No path given. | Pass the file or folder. |
-| `missing required --traces <dir> argument` | `coverage`/`report` need the trace folder. | Add `--traces <dir>`. |
 | `unknown flag: --xyz` | Misspelled or unsupported flag. | Check the spelling (`pathkit <command> --help` lists flags). |
 | `pathkit: unknown command "xyz"` | Misspelled command. | Use `analyze`, `test`, `traces`, `coverage` or `report`. |
 | `no trace files found in <dir>; coverage is recorded only by "pathkit test" ...` | No runs were recorded, usually because the tests ran with plain `go test`. | Run `pathkit test`. |
 | `go test failed (exit status 1)` | One of your tests failed under `pathkit test`. | Fix the test; traces from passing tests are still kept. |
 | `expected a package folder or folder/..., not a file` | `pathkit test` runs packages, not single files. | Pass the folder. |
+| `expected a folder or folder/..., not a file: ... (report covers a whole project; ...)` | `report` is for whole projects. | Pass the folder, or use `pathkit coverage <file>`. |
 | `cannot record <workflow>: ... a name pathkit needs` | Your code already uses one of pathkit's generated names. | Rename yours (see LIMITATIONS.md). |
-| `not implemented yet (planned for Mx)` | The command exists but its work arrives in a later milestone. | Wait for that milestone. |
 | `Workflow file not found: ...` / `Directory not found: ...` | Wrong path. | Check the path and your working directory. |
 | `package does not compile: <package>: <file>:<line>:<col>: <error>` | PathKit needs code that builds. The message names the package and its first real compile error. | Fix that error (`go build ./...` shows them all). |
 | `3 packages do not compile: <package>: <error>; <package>: <error>; ...` | Several packages under a `folder/...` don't build. PathKit stops rather than skip them, so no workflow drops out of the numbers unnoticed. Each broken package is named once, with its first error. A package that only *imports* a broken one is not listed. | Fix them, or leave those folders out of the pattern you pass. |

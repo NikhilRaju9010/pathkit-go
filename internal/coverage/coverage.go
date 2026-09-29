@@ -28,6 +28,7 @@ import (
 // Workflow is one in-scope workflow to measure.
 type Workflow struct {
 	Name          string
+	File          string // where it is declared, as it should be printed (report)
 	Graph         *model.Graph
 	Hash          string // current model.FunctionHash
 	AddedByConfig bool
@@ -61,6 +62,7 @@ type PathResult struct {
 // WorkflowResult is one workflow's coverage.
 type WorkflowResult struct {
 	Name          string
+	File          string
 	AddedByConfig bool
 	Paths         []PathResult
 	Truncated     bool // more paths exist than the listing shows
@@ -101,6 +103,31 @@ func Percent(covered, total int) float64 {
 		return 0
 	}
 	return float64(covered) / float64(total) * 100
+}
+
+// Priority labels, CLAUDE.md D11.
+const (
+	PriorityHigh   = "High"
+	PriorityMedium = "Medium"
+	PriorityLow    = "Low"
+)
+
+// Priority is a workflow's priority label (CLAUDE.md D11): how urgently
+// it needs more tests. High below 50%, Medium from 50% up to and
+// including 80%, Low above 80%. The boundaries are compared with whole
+// numbers (covered*100 against boundary*total), never with a rounded
+// percentage, so 4/5 is exactly 80% (Medium) and 8001/10000 is Low. A
+// workflow with no listed paths has no label (ok is false).
+func Priority(covered, total int) (label string, ok bool) {
+	switch {
+	case total <= 0:
+		return "", false
+	case covered*100 < 50*total:
+		return PriorityHigh, true
+	case covered*100 <= 80*total:
+		return PriorityMedium, true
+	}
+	return PriorityLow, true
 }
 
 // Compute measures every workflow in in against every trace in in.
@@ -219,7 +246,7 @@ func Compute(in Input) Result {
 	}
 
 	for _, st := range order {
-		wr := WorkflowResult{Name: st.wf.Name, AddedByConfig: st.wf.AddedByConfig, Truncated: st.paths.Truncated, Branches: len(st.branches)}
+		wr := WorkflowResult{Name: st.wf.Name, File: st.wf.File, AddedByConfig: st.wf.AddedByConfig, Truncated: st.paths.Truncated, Branches: len(st.branches)}
 		for i, p := range st.paths.List {
 			pr := PathResult{Number: i + 1, Path: p, Covered: st.traces[i] > 0, Traces: st.traces[i], StaleTrace: st.stale[i]}
 			if pr.Covered {

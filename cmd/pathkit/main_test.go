@@ -139,3 +139,53 @@ func TestBinaryCoverageExitCodes(t *testing.T) {
 		})
 	}
 }
+
+// The exit codes of "pathkit report", from the real program (M7b): 0 fine,
+// 1 any real error (including an in-scope workflow PathKit can't analyze
+// and a package that doesn't compile), 2 below --fail-under.
+func TestBinaryReportExitCodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary; skipped with -short (CI runs it)")
+	}
+	bin := buildPathkit(t)
+	orders := "../../testdata/pilot/orders"
+	traces := ordersTraces(t)
+	cfg := filepath.Join(t.TempDir(), ".pathkitrc.json")
+	if err := os.WriteFile(cfg, []byte(`{"failUnder": 90}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		args   []string
+		code   int
+		stderr string // prefix
+	}{
+		{"fine", []string{orders}, 0, ""},
+		{"summary", []string{orders, "--summary"}, 0, ""},
+		{"json", []string{orders, "--json"}, 0, ""},
+		{"above the threshold", []string{orders, "--fail-under", "50"}, 0, ""},
+		{"below the threshold", []string{orders, "--fail-under", "70"}, 2, "pathkit report: coverage 66.7% is below --fail-under 70%\n"},
+		{"below, as JSON", []string{orders, "--json", "--fail-under", "70"}, 2, "pathkit report: coverage 66.7% is below --fail-under 70%\n"},
+		{"config failUnder", []string{orders, "--config", cfg}, 2, "pathkit report: coverage 66.7% is below failUnder in " + cfg + " 90%\n"},
+		{"flag beats config", []string{orders, "--config", cfg, "--fail-under", "10"}, 0, ""},
+		{"bad threshold", []string{orders, "--fail-under", "abc"}, 1, "pathkit report: invalid --fail-under value: \"abc\""},
+		{"no trace files", []string{orders, "--traces", t.TempDir()}, 1, "pathkit report: no trace files found in "},
+		{"a single file", []string{orders + "/orders.go"}, 1, "pathkit report: expected a folder or folder/..., not a file: "},
+		{"not analyzable in scope", []string{"../../testdata/fixtures/rules/...", "--fail-under", "10"}, 1, "pathkit report: in scope but not analyzable: "},
+		{"a broken package", []string{"../../testdata/fixtures/...", "--fail-under", "10"}, 1, "pathkit report: package does not compile: example.com/fixtures/broken: "},
+		{"unknown flag", []string{orders, "--sumary"}, 1, "pathkit report: unknown flag: --sumary\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"report", "--traces", traces}, tt.args...)
+			stdout, stderr, code := runBinary(t, bin, args...)
+			if code != tt.code || !strings.HasPrefix(stderr, tt.stderr) || (tt.stderr == "" && stderr != "") {
+				t.Errorf("exit %d, stderr %q; want exit %d, stderr starting %q", code, stderr, tt.code, tt.stderr)
+			}
+			// Exit 2 still prints the whole report first.
+			if code == 2 && !strings.Contains(stdout, "66.7") {
+				t.Errorf("exit 2 without the report:\n%s", stdout)
+			}
+		})
+	}
+}

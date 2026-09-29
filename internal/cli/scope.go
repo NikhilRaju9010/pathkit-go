@@ -21,6 +21,9 @@ type scopeFlags struct {
 	include []string
 	exclude []string
 	all     bool // analyze only: ignore the scope
+	// everyPackage (report only, not a flag): with no target, load every
+	// entry of the config's "packages", not just a single one.
+	everyPackage bool
 }
 
 func addScopeFlags(cmd *cobra.Command, sf *scopeFlags, withAll bool) {
@@ -83,16 +86,21 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 		cfg, flags = nil, scope.Flags{}
 	}
 
+	targets := []string{target}
 	if target == "" {
-		target = "./..."
+		targets = []string{"./..."}
 		if cfg != nil {
-			if len(cfg.Packages) != 1 {
+			if len(cfg.Packages) != 1 && !sf.everyPackage {
 				return nil, userError("%s lists %d packages; pass the folder to use as an argument", cfg.Path, len(cfg.Packages))
 			}
-			target = cfg.Abs(cfg.Packages[0])
+			targets = nil
+			for _, p := range cfg.Packages {
+				targets = append(targets, cfg.Abs(p))
+			}
 		}
+		target = strings.Join(targets, ", ")
 	}
-	res, err := load.Load(target)
+	res, err := loadAll(targets)
 	if err != nil {
 		return nil, userError("%s", err)
 	}
@@ -142,6 +150,29 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 		})
 	}
 	return out, nil
+}
+
+// loadAll loads each target and merges the packages, each package once
+// (config entries such as "./..." and "./orders" can overlap).
+func loadAll(targets []string) (*load.Result, error) {
+	if len(targets) == 1 {
+		return load.Load(targets[0])
+	}
+	merged := &load.Result{}
+	seen := map[string]bool{}
+	for _, t := range targets {
+		r, err := load.Load(t)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range r.Packages {
+			if !seen[p.ID] {
+				seen[p.ID] = true
+				merged.Packages = append(merged.Packages, p)
+			}
+		}
+	}
+	return merged, nil
 }
 
 // notAnalyzableHint ends every "in scope but not analyzable" line.

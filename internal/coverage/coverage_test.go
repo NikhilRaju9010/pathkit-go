@@ -161,3 +161,34 @@ func TestPercent(t *testing.T) {
 		t.Errorf("Percent(20, 38) = %v, Percent(0, 0) = %v", Percent(20, 38), Percent(0, 0))
 	}
 }
+
+// D11: the boundaries are exact, compared with whole numbers.
+func TestPriority(t *testing.T) {
+	tests := []struct {
+		covered, total int
+		want           string
+	}{
+		{0, 3, PriorityHigh},          // 0%
+		{4999, 10000, PriorityHigh},   // 49.99%, just below 50%
+		{1, 2, PriorityMedium},        // exactly 50%
+		{5001, 10000, PriorityMedium}, // 50.01%
+		{2, 3, PriorityMedium},        // 66.7%
+		{7999, 10000, PriorityMedium}, // 79.99%, just below 80%
+		{4, 5, PriorityMedium},        // exactly 80%
+		{8, 10, PriorityMedium},       // exactly 80% again, other numbers
+		{8001, 10000, PriorityLow},    // 80.01%, just above 80%
+		{5, 6, PriorityLow},           // 83.3%
+		{3, 3, PriorityLow},           // 100%
+		// 1/3 is 33.33...%: never exactly representable, still High.
+		{1, 3, PriorityHigh},
+	}
+	for _, tt := range tests {
+		got, ok := Priority(tt.covered, tt.total)
+		if !ok || got != tt.want {
+			t.Errorf("Priority(%d, %d) = %q, %v; want %q", tt.covered, tt.total, got, ok, tt.want)
+		}
+	}
+	if got, ok := Priority(0, 0); ok || got != "" {
+		t.Errorf("Priority(0, 0) = %q, %v; want no label", got, ok)
+	}
+}

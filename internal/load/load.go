@@ -70,8 +70,8 @@ func compileErrors(pkgs []*packages.Package) error {
 // firstError picks the error worth showing. go list's own error for a
 // package that fails to build is a two-line "-: # <package>" summary,
 // whose useful second line would be cut off (errors are one line), so a
-// type or syntax error with a position is preferred. The position is made
-// relative to the current folder when it can be.
+// type or syntax error with a position is preferred. The position is shown
+// with DisplayPath.
 func firstError(errs []packages.Error) string {
 	e := errs[0]
 	for _, c := range errs {
@@ -80,12 +80,7 @@ func firstError(errs []packages.Error) string {
 			break
 		}
 	}
-	pos := e.Pos
-	if cwd, err := os.Getwd(); err == nil && filepath.IsAbs(pos) {
-		if rel, err := filepath.Rel(cwd, pos); err == nil && !strings.HasPrefix(rel, "..") {
-			pos = rel
-		}
-	}
+	pos := DisplayPath(e.Pos)
 	msg := strings.Join(strings.Fields(e.Msg), " ")
 	if pos == "" || pos == "-" {
 		return msg
@@ -134,6 +129,18 @@ func Resolve(arg string) (dir, pattern, file string, err error) {
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// DisplayPath shows an absolute path relative to the current folder when
+// it is inside it, else unchanged. Anything after the file name (such as
+// ":8:14") is kept.
+func DisplayPath(p string) string {
+	if cwd, err := os.Getwd(); err == nil && filepath.IsAbs(p) {
+		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return p
 }
 
 // SameFile reports whether two paths name the same file on disk.

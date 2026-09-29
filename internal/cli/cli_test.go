@@ -38,12 +38,14 @@ func TestErrorsUseOneLineStyleAndExitCode1(t *testing.T) {
 			"pathkit coverage: Workflow file not found: x.go\n"},
 		{"coverage bad --fail-under", []string{"coverage", "x.go", "--fail-under", "abc"},
 			"pathkit coverage: invalid --fail-under value: \"abc\" (it must be a number from 0 to 100)\n"},
-		{"report without dir", []string{"report"},
-			"pathkit report: missing <dir> argument\n"},
-		{"report without traces", []string{"report", "."},
-			"pathkit report: missing required --traces <dir> argument\n"},
-		{"report not implemented yet", []string{"report", ".", "--traces=t"},
-			"pathkit report: not implemented yet (planned for M7)\n"},
+		// Since M7b the folder (default ./... or the config's packages)
+		// and --traces (default like coverage) are optional for report.
+		{"report with two folders", []string{"report", "a", "b"},
+			"pathkit report: expected at most one <folder> argument, got 2\n"},
+		{"report folder not found", []string{"report", "nowhere"},
+			"pathkit report: Directory not found: nowhere\n"},
+		{"report bad --fail-under", []string{"report", "nowhere", "--fail-under", "abc"},
+			"pathkit report: invalid --fail-under value: \"abc\" (it must be a number from 0 to 100)\n"},
 		{"unknown command", []string{"analyse"},
 			"pathkit: unknown command \"analyse\"\n"},
 	}
