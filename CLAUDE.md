@@ -937,3 +937,17 @@ The request had asked how each *untested path* gets its label. TypeScript never 
 - `go test -short -count=1 ./...`: 109 pass, 10 skipped, in 26 s (M7a: 19 s; the new report tests in `internal/cli` load the pilot several times)
 
 `EXPECTED.md` was not edited.
+
+## 2026-09-29 — Cross-platform fixes (Windows paths, macOS symlinks, line endings)
+
+**Why:** CI was red on Windows from M5 and on macOS from M7a; Linux was green. The owner's rule: fix the tool or the tests properly, and never skip a test on one system without explaining why and getting approval. No test was skipped. Work is on the branch `cross-platform-fixes` (commit 1: M7b as it was; commit 2: these fixes), not on `main`.
+
+**Causes and fixes:**
+- **A, a real tool bug on Windows (since M5):** PathKit only recognized `<folder>/...` with a forward slash. On Windows, joining a config's `"./..."` or `"../pilot/..."` onto its folder gives `<folder>\...`. Windows also drops trailing dots, so PathKit loaded only the folder itself (`no Go files in ...\testdata\pilot`). Every config with `packages` was broken on Windows. `load.Resolve` now accepts the system's own separator too (`recursive`). Test: `TestRecursivePatternWithOSSeparator`, built with `filepath.Join`, so each system tests its own form.
+- **B, a test bug (since M5, repeated in M7b):** 7 tests pasted absolute paths into JSON text. A Windows path's backslashes were read as JSON escape codes. The new helper `jsonString` encodes each path properly.
+- **C, a repo setting (since M6):** git on Windows checked text files out with CRLF, so golden JSON files didn't match byte for byte. The new `.gitattributes` (`* text=auto eol=lf`) keeps LF on every system; all 134 tracked files were already LF, so no content changed. **gofmt is checked on Windows again** (owner's decision): the M0 reason for skipping it was exactly this. The step now runs with `shell: bash`, because Windows runners default to PowerShell.
+- **D, a test bug (since M5):** `TestAbs` used `/abs/x`, which is not absolute on Windows (no drive letter). It now uses a real absolute path for the system.
+- **E, a real tool bug, cosmetic (since M7a):** on macOS the temp folder `/var/...` is a symlink to `/private/var/...`. The current folder came back as `/var/...`, Go's loader reported `/private/var/...`, and `DisplayPath` printed long absolute paths. It now also tries the current folder with symlinks resolved. Test: `TestSymlinkedFolderShowsShortPaths`, which enters a module through a symlink. It **fails on Linux without the fix** (checked), so the fix is proven locally, not only on macOS.
+- **F (M7b), owner's decision:** file paths in `report`'s text use the system's own separator (`orders\orders.go` on Windows). `--json` always uses forward slashes (`filepath.ToSlash`), so the JSON is identical on every system. The text tests build their expected path with `filepath.Join`.
+
+**Item 3, the trace hash (checked; no change needed):** `model.FunctionHash` hashes only the function's Go tokens. There is no file name, no position and no whitespace, line breaks become `;`, and Go's scanner removes CR from raw strings. The new `TestFunctionHashIsTheSameOnEverySystem` hashes one function six ways: LF and CRLF, on disk in different folders, with Linux-style and Windows-style file names, and with extra comments and blank lines. All six give `bb7b28a20d4db287`, and that value is pinned, so CI on all three systems must compute exactly the same hash.

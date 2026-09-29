@@ -84,3 +84,52 @@ func TestEveryBrokenPackageIsNamed(t *testing.T) {
 		t.Errorf("error =\n  %v\nwant\n  %s", err, want)
 	}
 }
+
+// "<folder>/..." written with the system's own separator (what joining a
+// config's "./..." onto its folder gives: "<folder>\..." on Windows) means
+// every package under the folder, not the folder alone.
+func TestRecursivePatternWithOSSeparator(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"a/a.go":   "package a\n",
+		"a/b/b.go": "package b\n",
+	})
+	arg := filepath.Join(dir, "...")
+	gotDir, pattern, file, err := Resolve(arg)
+	if err != nil || gotDir != dir || pattern != "./..." || file != "" {
+		t.Errorf("Resolve(%q) = %q, %q, %q, %v; want %q, \"./...\"", arg, gotDir, pattern, file, err, dir)
+	}
+	res, err := Load(arg)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", arg, err)
+	}
+	var names []string
+	for _, p := range res.Packages {
+		names = append(names, p.PkgPath)
+	}
+	if strings.Join(names, " ") != "example.com/bp/a example.com/bp/a/b" {
+		t.Errorf("Load(%q) found %v; want both packages", arg, names)
+	}
+	// The slash form keeps working everywhere, and a bare "..." too.
+	if d, p, _, err := Resolve(dir + "/..."); err != nil || d != dir || p != "./..." {
+		t.Errorf("Resolve(%q/...) = %q, %q, %v", dir, d, p, err)
+	}
+}
+
+// When the current folder is reached through a symlink (on macOS the temp
+// folder /var/... is really /private/var/...), file names are still shown
+// relative to it, not as long absolute paths.
+func TestSymlinkedFolderShowsShortPaths(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"a/a.go": "package a\n\nvar X int = \"s\"\n",
+	})
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatalf("could not create a symlink: %v", err)
+	}
+	t.Chdir(link)
+	_, err := Load("./...")
+	want := "package does not compile: example.com/bp/a: " + filepath.Join("a", "a.go") + ":3:13: cannot use"
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("error =\n  %v\nwant it to start with\n  %s", err, want)
+	}
+}

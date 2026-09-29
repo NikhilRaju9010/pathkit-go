@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,17 @@ func absPath(t *testing.T, rel string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// jsonString is s as a JSON string, quotes included. Paths put into a
+// config must go through it: a Windows path's backslashes would otherwise
+// be read as JSON escape codes (C:\Users -> "\U").
+func jsonString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 // writeConfig writes a .pathkitrc.json into a new temp folder and
@@ -155,9 +167,9 @@ func TestAnalyzeConfigErrors(t *testing.T) {
 			"invalid JSON at line 3, column 32: invalid character '\"' after object key:value pair\n"},
 		{"empty include", `{"workflows": {"include": []}}`,
 			"workflows.include is empty: remove it to include every workflow, or list the ones you want\n"},
-		{"misspelled include", `{"packages": ["` + p + `/..."], "workflows": {"include": ["OrderWorkflw"]}}`,
+		{"misspelled include", `{"packages": [` + jsonString(p+"/...") + `], "workflows": {"include": ["OrderWorkflw"]}}`,
 			`include "OrderWorkflw" matches no function in the configured packages (` + p + `/...); did you mean "OrderWorkflow"?` + "\n"},
-		{"include of a non-workflow", `{"packages": ["` + f + `/scope/..."], "workflows": {"include": ["sendEmail"]}}`,
+		{"include of a non-workflow", `{"packages": [` + jsonString(f+"/scope/...") + `], "workflows": {"include": ["sendEmail"]}}`,
 			`include "sendEmail" is not a workflow: its first parameter is not workflow.Context` + "\n"},
 		{"unknown key", `{"workflow": {}}`, `unknown key "workflow"` + "\n"},
 	}
@@ -185,7 +197,7 @@ func TestAnalyzeNotAnalyzable(t *testing.T) {
 		t.Errorf("code=%d stderr:\n%s", code, stderr)
 	}
 
-	cfg := writeConfig(t, `{"packages": ["`+rules+`"], "workflows": {"exclude": [
+	cfg := writeConfig(t, `{"packages": [`+jsonString(rules)+`], "workflows": {"exclude": [
 		{"name": "UsesLabel", "reason": "uses goto on purpose"},
 		{"name": "UsesGoSelect", "reason": "uses Go's select on purpose"}]}}`)
 	stdout, stderr, code := run(t, "analyze", file, "--config", cfg)

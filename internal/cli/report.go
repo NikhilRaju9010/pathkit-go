@@ -167,7 +167,9 @@ func reportJSON(res coverage.Result, threshold *float64, by []string) jsonReport
 		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
-		rw := jsonReportWorkflow{jsonWorkflow: w, File: res.Workflows[i].File}
+		// Forward slashes on every system, so the JSON is the same everywhere;
+		// the text output uses the system's own separator.
+		rw := jsonReportWorkflow{jsonWorkflow: w, File: filepath.ToSlash(res.Workflows[i].File)}
 		if label, ok := coverage.Priority(res.Workflows[i].Covered, len(res.Workflows[i].Paths)); ok {
 			rw.Priority = &label
 		}

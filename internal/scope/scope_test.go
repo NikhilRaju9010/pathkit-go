@@ -151,7 +151,10 @@ func TestAbs(t *testing.T) {
 	if got := c.Abs("../pilot/..."); got != filepath.Clean("/proj/pilot/...") {
 		t.Errorf("Abs = %q", got)
 	}
-	if got := c.Abs("/abs/x"); got != "/abs/x" {
-		t.Errorf("Abs(absolute) = %q", got)
+	// An absolute path for this system ("/abs/x" is not absolute on
+	// Windows, where an absolute path needs a drive letter).
+	abs := filepath.Join(t.TempDir(), "abs", "x")
+	if got := c.Abs(abs); got != abs {
+		t.Errorf("Abs(%q) = %q, want it unchanged", abs, got)
 	}
 }

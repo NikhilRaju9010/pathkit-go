@@ -355,7 +355,7 @@ The boundaries are exact: 4 of 5 paths is exactly 80%, so it's Medium, and 79.99
 
 It names what excluded them: `.pathkitrc.json`, `--include`, `--exclude`, or `(no scope in use)`.
 
-**Which folder.** `pathkit report ./...` or `pathkit report some/folder`. With no folder, `report` uses **every** entry of the config's `"packages"` (a workflow listed twice counts once), else `./...`. A single `.go` file is refused, because `report` is for the whole project; use `coverage` for one file.
+**Which folder.** `pathkit report ./...` or `pathkit report some/folder` (on Windows, `.\...` and `some\folder\...` work too). With no folder, `report` uses **every** entry of the config's `"packages"` (a workflow listed twice counts once), else `./...`. A single `.go` file is refused, because `report` is for the whole project; use `coverage` for one file.
 
 **`report` stops with exit code 1** rather than print a number that leaves something out:
 - when a package doesn't compile: every broken package is named, each with its first error. Fix them, or leave them out of the folder pattern or `"packages"`.
@@ -373,7 +373,7 @@ It names what excluded them: `.pathkitrc.json`, `--include`, `--exclude`, or `(n
 A flag always beats the config file, including `--json=false`. The exit codes are the same as for `coverage`: `0` fine, `1` a real error, `2` below `--fail-under` (the report is printed first).
 
 **`report --json`** has exactly `coverage --json`'s shape (section 5), with three additions:
-- each workflow also has `file` (where it's declared) and `priority` (`"High"`, `"Medium"`, `"Low"`, or `null` when it has no paths);
+- each workflow also has `file` (where it's declared, always with forward slashes, `orders/orders.go`, even on Windows, so the JSON is the same on every system; the text report uses your system's own separator) and `priority` (`"High"`, `"Medium"`, `"Low"`, or `null` when it has no paths);
 - at the top, `excludedBy` lists what excluded workflows (`[".pathkitrc.json", "--exclude"]`, or `[]`).
 
 Everything else (`workflows`, `excluded`, `total`, `branches`, `traces`, `failUnder`) means exactly the same as in `coverage --json`.

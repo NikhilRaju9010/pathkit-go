@@ -22,7 +22,7 @@ jobs:
             testdata/pilot/go.sum
 
       - name: Check formatting (gofmt)
-        if: runner.os != 'Windows' # line endings make gofmt noisy on Windows checkouts
+        shell: bash # the script is bash; Windows runners default to PowerShell
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then

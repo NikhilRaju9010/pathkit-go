@@ -91,12 +91,13 @@ func firstError(errs []packages.Error) string {
 // Resolve turns a command-line argument into the folder to run Go tools
 // from, the package pattern to use there ("." or "./..."), and the absolute
 // file path when a single .go file was named.
+//
+// "<folder>/..." may also be written with the system's own separator
+// ("<folder>\..." on Windows), which is also what joining a config's
+// "./..." onto its folder produces there.
 func Resolve(arg string) (dir, pattern, file string, err error) {
-	if arg == "..." || strings.HasSuffix(arg, "/...") {
-		dir = strings.TrimSuffix(strings.TrimSuffix(arg, "..."), "/")
-		if dir == "" {
-			dir = "."
-		}
+	if folder, ok := recursive(arg); ok {
+		dir = folder
 		if !isDir(dir) {
 			//lint:ignore ST1005 wording matches the setup guide ("Workflow file not found", "Directory not found")
 			return "", "", "", fmt.Errorf("Directory not found: %s", dir)
@@ -126,21 +127,58 @@ func Resolve(arg string) (dir, pattern, file string, err error) {
 	return filepath.Dir(abs), ".", abs, nil
 }
 
+// recursive reports whether arg is "...", "<folder>/..." or, on Windows,
+// "<folder>\...", and returns the folder ("." for a bare "...").
+func recursive(arg string) (folder string, ok bool) {
+	if arg == "..." {
+		return ".", true
+	}
+	for _, sep := range []string{"/", string(filepath.Separator)} {
+		if rest, found := strings.CutSuffix(arg, sep+"..."); found {
+			if rest == "" {
+				rest = sep // "/..." is everything under the root
+			}
+			return rest, true
+		}
+	}
+	return "", false
+}
+
 func isDir(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
 }
 
 // DisplayPath shows an absolute path relative to the current folder when
-// it is inside it, else unchanged. Anything after the file name (such as
-// ":8:14") is kept.
+// it is inside it, else unchanged, with the system's own separators.
+// Anything after the file name (such as ":8:14") is kept.
+//
+// The current folder may be reached through a symlink (on macOS, /var and
+// /tmp are shortcuts to /private/var and /private/tmp), while Go's tools
+// report the real path; so the real current folder is tried too.
 func DisplayPath(p string) string {
-	if cwd, err := os.Getwd(); err == nil && filepath.IsAbs(p) {
-		if rel, err := filepath.Rel(cwd, p); err == nil && !strings.HasPrefix(rel, "..") {
+	cwd, err := os.Getwd()
+	if err != nil || !filepath.IsAbs(p) {
+		return p
+	}
+	if rel, ok := inside(cwd, p); ok {
+		return rel
+	}
+	if real, err := filepath.EvalSymlinks(cwd); err == nil && real != cwd {
+		if rel, ok := inside(real, p); ok {
 			return rel
 		}
 	}
 	return p
+}
+
+// inside returns p relative to dir when p is inside dir.
+func inside(dir, p string) (string, bool) {
+	rel, err := filepath.Rel(dir, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
 }
 
 // SameFile reports whether two paths name the same file on disk.

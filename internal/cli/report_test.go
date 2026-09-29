@@ -32,6 +32,13 @@ Branches: 3/4 (75.0%)
 Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
 `
 
+// native swaps the one file name in a report text for this system's
+// form: the text output uses the system's separator (orders\orders.go on
+// Windows), while --json always uses forward slashes.
+func native(report string) string {
+	return strings.Replace(report, "(orders/orders.go)", "("+filepath.Join("orders", "orders.go")+")", 1)
+}
+
 // inPilot runs from the pilot folder, so file names print as orders/orders.go.
 func inPilot(t *testing.T) {
 	t.Helper()
@@ -43,8 +50,8 @@ func TestReportText(t *testing.T) {
 	inPilot(t)
 	out := filepath.Join(t.TempDir(), "report.txt")
 	stdout, stderr, code := run(t, "report", "./orders", "--traces", traces, "--out", out)
-	if code != ExitOK || stderr != "" || stdout != ordersReport {
-		t.Fatalf("code=%d stderr=%q\n%s\nwant\n%s", code, stderr, stdout, ordersReport)
+	if want := native(ordersReport); code != ExitOK || stderr != "" || stdout != want {
+		t.Fatalf("code=%d stderr=%q\n%s\nwant\n%s", code, stderr, stdout, want)
 	}
 	if data, _ := os.ReadFile(out); string(data) != stdout {
 		t.Errorf("--out file differs from stdout:\n%s", data)
@@ -145,11 +152,11 @@ func TestReportExcludedLine(t *testing.T) {
 			"1 workflow excluded by --exclude (see \"reason\"):\n  fulfillment.PaymentWorkflow: excluded by --exclude flag\n"},
 		{"include flag", []string{"--include", "PaymentWorkflow"},
 			"1 workflow excluded by --include (see \"reason\"):\n  fulfillment.OrderFulfillmentWorkflow: not in include list\n"},
-		{"config", []string{"--config", writeConfig(t, `{"packages": ["`+absPath(t, ".")+`/fulfillment"], "workflows": {"exclude": [{"name": "PaymentWorkflow", "reason": "tested elsewhere"}]}}`)},
+		{"config", []string{"--config", writeConfig(t, `{"packages": [`+jsonString(absPath(t, ".")+"/fulfillment")+`], "workflows": {"exclude": [{"name": "PaymentWorkflow", "reason": "tested elsewhere"}]}}`)},
 			"1 workflow excluded by .pathkitrc.json (see \"reason\"):\n  fulfillment.PaymentWorkflow: tested elsewhere\n"},
-		{"config and flag", []string{"./...", "--config", writeConfig(t, `{"packages": ["`+absPath(t, ".")+`/..."], "workflows": {"exclude": [{"name": "PaymentWorkflow", "reason": "tested elsewhere"}]}}`), "--exclude", "ShipmentWorkflow"},
+		{"config and flag", []string{"./...", "--config", writeConfig(t, `{"packages": [`+jsonString(absPath(t, ".")+"/...")+`], "workflows": {"exclude": [{"name": "PaymentWorkflow", "reason": "tested elsewhere"}]}}`), "--exclude", "ShipmentWorkflow"},
 			"2 workflows excluded by .pathkitrc.json and --exclude (see \"reason\"):\n  fulfillment.PaymentWorkflow: tested elsewhere\n  shipment.ShipmentWorkflow: excluded by --exclude flag\n"},
-		{"config that excludes nothing", []string{"--config", writeConfig(t, `{"packages": ["`+absPath(t, ".")+`/fulfillment"], "workflows": {"include": ["PaymentWorkflow", "OrderFulfillmentWorkflow"]}}`)},
+		{"config that excludes nothing", []string{"--config", writeConfig(t, `{"packages": [`+jsonString(absPath(t, ".")+"/fulfillment")+`], "workflows": {"include": ["PaymentWorkflow", "OrderFulfillmentWorkflow"]}}`)},
 			"0 workflows excluded by .pathkitrc.json\n"},
 		{"--all", []string{"--all", "--exclude", "PaymentWorkflow"},
 			"0 workflows excluded (no scope in use)\n"},
@@ -220,7 +227,7 @@ func TestReportConfigKeys(t *testing.T) {
 	}
 
 	stdout, _, _ = run(t, "report", "./orders", "--traces", traces, "--config", cfg, "--json=false", "--out", filepath.Join(t.TempDir(), "x.txt"))
-	if stdout != ordersReport {
+	if stdout != native(ordersReport) {
 		t.Errorf("--json=false must beat the config:\n%s", stdout)
 	}
 }
@@ -289,7 +296,7 @@ func TestReportEveryConfiguredPackage(t *testing.T) {
 	traces := ordersTraces(t)
 	p := absPath(t, pilot)
 	t.Chdir(t.TempDir())
-	cfg := writeConfig(t, `{"packages": ["`+p+`/orders", "`+p+`/billing", "`+p+`/..."]}`)
+	cfg := writeConfig(t, `{"packages": [`+jsonString(p+"/orders")+`, `+jsonString(p+"/billing")+`, `+jsonString(p+"/...")+`]}`)
 	stdout, _, code := run(t, "report", "--config", cfg, "--traces", traces, "--summary")
 	if code != ExitOK || !strings.Contains(stdout, "38 paths total · 2 covered") || strings.Count(stdout, "orders.OrderWorkflow") != 1 {
 		t.Errorf("code=%d (overlapping entries must count each workflow once)\n%s", code, stdout)

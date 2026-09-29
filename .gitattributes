@@ -1,0 +1,5 @@
+# Check every text file out with Linux line endings (LF) on every system.
+# Without this, git on Windows converts to CRLF, and then golden files no
+# longer match PathKit's output byte for byte, and gofmt reports every Go
+# file as unformatted. Git detects binary files itself and leaves them alone.
+* text=auto eol=lf

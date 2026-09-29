@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -210,4 +212,58 @@ func listed(g *model.Graph, p model.Path) bool {
 		}
 	}
 	return false
+}
+
+// The trace hash must not depend on the system (item 3 of the
+// cross-platform fixes): not on where the file is, not on its line endings
+// (a Windows checkout may have CRLF), not on path separators. It hashes
+// only the function's Go tokens. The same function, written with LF in a
+// Linux-style folder and with CRLF in a Windows-style one, must give the
+// same hash, and that hash is pinned, so CI on Linux, macOS and Windows
+// must all compute exactly this value.
+func TestFunctionHashIsTheSameOnEverySystem(t *testing.T) {
+	const pinned = "bb7b28a20d4db287"
+	lf := "package p\n\n// W waits.\nfunc W(x int) (string, error) {\n\tmsg := `line one\nline two`\n\tif x > 0 { // positive\n\t\treturn msg, nil\n\t}\n\treturn \"\", nil\n}\n"
+	crlf := strings.ReplaceAll(lf, "\n", "\r\n")
+	moved := "package p\n\n\n// another comment\nfunc W(x int) (string, error) {\n\n\tmsg := `line one\nline two`\n\tif x > 0 {\n\t\treturn msg, nil\n\t}\n\n\treturn \"\", nil\n}\n"
+
+	hashOnDisk := func(dir, name, src string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return model.FunctionHash(fset, f.Decls[0].(*ast.FuncDecl))
+	}
+	hashNamed := func(filename, src string) string {
+		t.Helper()
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, filename, src, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return model.FunctionHash(fset, f.Decls[0].(*ast.FuncDecl))
+	}
+
+	got := map[string]string{
+		"LF on disk":                  hashOnDisk("home/u/proj/flows", "a.go", lf),
+		"CRLF on disk":                hashOnDisk("other/place", "b.go", crlf),
+		"moved, other comments":       hashOnDisk("x", "c.go", moved),
+		"Linux path, LF":              hashNamed("/home/u/proj/flows/a.go", lf),
+		`Windows path, CRLF`:          hashNamed(`C:\Users\u\proj\flows\a.go`, crlf),
+		`Windows path, mixed endings`: hashNamed(`D:\a\b.go`, strings.Replace(lf, "\n", "\r\n", 3)),
+	}
+	for how, h := range got {
+		if h != pinned {
+			t.Errorf("%s: hash %s, want %s", how, h, pinned)
+		}
+	}
 }
