@@ -42,6 +42,8 @@ go build -o pathkit ./cmd/pathkit
 
 The repo includes a small pretend Temporal project at `testdata/pilot/` (an online shop: orders, approvals, polling, shipping, a saga with a child workflow, a subscription that continues as new, and a daily scheduled report). It's what PathKit is tested against. `testdata/pilot/EXPECTED.md` lists, by hand, every path PathKit should find and which ones the sample tests cover. To run the sample's own tests: `cd testdata/pilot && go test ./...`.
 
+**PathKit's own tests (for contributors).** `go test ./...` at the repo root runs everything, including the slow end-to-end tests that run `pathkit test` once per sample test (about 70 seconds). For a quick check while you work, use `go test -short ./...` (about 20 seconds). It skips the slow end-to-end tests but still records the whole sample project once and checks it against `EXPECTED.md`. CI always runs the full suite, never `-short`, and a test fails if `-short` ever appears in CI's `go test` line. Before committing, run the full `go test ./...` once.
+
 ## 3. See all paths (`analyze`)
 
 ```bash
@@ -373,7 +375,8 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `cannot record <workflow>: ... a name pathkit needs` | Your code already uses one of pathkit's generated names. | Rename yours (see LIMITATIONS.md). |
 | `not implemented yet (planned for Mx)` | The command exists but its work arrives in a later milestone. | Wait for that milestone. |
 | `Workflow file not found: ...` / `Directory not found: ...` | Wrong path. | Check the path and your working directory. |
-| `package does not compile: ...` | PathKit needs code that builds. | Fix the compile error shown (run `go build ./...`). |
+| `package does not compile: <package>: <file>:<line>:<col>: <error>` | PathKit needs code that builds. The message names the package and its first real compile error. | Fix that error (`go build ./...` shows them all). |
+| `3 packages do not compile: <package>: <error>; <package>: <error>; ...` | Several packages under a `folder/...` don't build. PathKit stops rather than skip them, so no workflow drops out of the numbers unnoticed. Each broken package is named once, with its first error. A package that only *imports* a broken one is not listed. | Fix them, or leave those folders out of the pattern you pass. |
 | `... has no exported workflow functions to analyze` | Nothing in that file matches the workflow rule above. | Check the function is exported, takes `workflow.Context` first and returns `error` last. |
 | `no workflows could be analyzed` | Every workflow found was skipped (see the `skipping ...` lines). | Rewrite the construct named in the `skipping` line (see "Never supported" above), or analyze another file. |
 | `skipping <workflow>: goto at ... is not supported: ...` | The workflow uses `goto` or Go's `select`, which PathKit never maps. | Rewrite with `break`/`continue`/`return`, or `workflow.Selector`; other workflows are still analyzed. |

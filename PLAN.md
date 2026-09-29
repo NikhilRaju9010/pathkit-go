@@ -2,7 +2,7 @@
 
 Tick each milestone only when its Definition of Done (see `CLAUDE.md`) is met: `go test ./...` and `go vet ./...` pass, the Decisions Log, `LIMITATIONS.md` and `SETUP-GUIDE.md` are updated where needed, and the owner has been given step-by-step commands to verify it themselves. Each milestone starts in Plan Mode and only after the owner's go-ahead.
 
-**Status (2026-09-28):** **M0–M6 are done** (M4 was built in four slices, M4a–M4d, see below). **M7 is next** and waits for the owner's go-ahead. The design decisions D1–D10 in `CLAUDE.md` are approved, with the amendments recorded in its Decisions Log.
+**Status (2026-09-29):** **M0–M6 are done** (M4 was built in four slices, M4a–M4d, see below). **M7 is in progress, in two slices: M7a is done, M7b is next** and waits for the owner's go-ahead after they verify and commit M7a. The design decisions D1–D10 in `CLAUDE.md` are approved, with the amendments recorded in its Decisions Log.
 
 ## Why this order differs from the first draft
 
@@ -50,6 +50,10 @@ Scope config (M5) comes after the constructs, because it filters a list of disco
 - [ ] **M7 — `report` command.** Scans package patterns (`./...`), applies scope, per-workflow rows plus a project total computed only over in-scope workflows (summing raw counts, never averaging percentages), the "N workflows excluded by .pathkitrc.json" line, green/red color on a real terminal only (`--no-color`, `NO_COLOR`), `--json`, `--out` (always plain text), `--allow-stale`, `--fail-under`. Also adds `report --summary` (deferred in TS).
   Also (owner's decision in M5): an in-scope workflow that can't be analyzed stops `report` with exit 1 (same rule as `coverage`). Config keys `out`, `json` and `noColor` start to apply here.
   *Visible result:* `pathkit report ./...` in the pilot project prints the full project report.
+
+  M7 is built in two slices, each committed separately. The M7 box above is ticked only when both are done.
+  - [x] **M7a — shared code path, broken packages, fast local tests.** `coverage` gets its numbers from one shared `measure` function and finishes through `finish` (`--out`, `--clean`, `--fail-under`); `report` will use the same two. Its output is unchanged, and its existing tests and JSON golden file pass untouched. The loader names every broken package with its real error (owner's decision: stop, don't skip). `go test -short ./...` keeps one real end-to-end check. A guard test keeps `-short` out of CI.
+  - [ ] **M7b — `report`.** The command itself, D11 priority labels (exact whole-number boundaries), colour, `--summary`, the config keys `out`, `json` and `noColor`, and `TestReportAgreesWithCoverage` (scoped and unscoped), plus the docs.
 
 - [ ] **M8 — HTML report.** `--html[=path]` on `analyze` and `report`, one self-contained file (Go `html/template` + `embed`), Analysis and Coverage tabs, same path numbers in both tabs, coverage trend of the last 5 runs, excluded workflows listed with their reasons.
   *Visible result:* `.pathkit/report.html` opens in a browser with no server and no internet.

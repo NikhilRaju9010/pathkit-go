@@ -157,7 +157,9 @@ func TestAnalyzeErrors(t *testing.T) {
 		{"no workflows in file", []string{"analyze", fixtures + "/rules/noworkflows.go"},
 			"pathkit analyze: " + fixtures + "/rules/noworkflows.go has no exported workflow functions to analyze"},
 		{"does not compile", []string{"analyze", fixtures + "/broken"},
-			"pathkit analyze: package does not compile: "},
+			// the real error with its place, not go list's "-: # <package>" line (fixed in M7a);
+			// a file outside the current folder is shown with its absolute path
+			"pathkit analyze: package does not compile: example.com/fixtures/broken: " + absPath(t, fixtures+"/broken/broken.go") + ":8:14: cannot use \"not a number\""},
 		{"every workflow skipped", []string{"analyze", fixtures + "/rules/selectors_unsupported.go"},
 			"pathkit analyze: in scope but not analyzable: rules.Selector"},
 		{"missing folder", []string{"analyze", "nowhere/..."},

@@ -2,29 +2,20 @@ package cli
 
 import (
 	"encoding/json"
-	"fmt"
 	"math"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/render"
-	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
-	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
 )
 
 type coverageOptions struct {
-	traces     string
-	function   string
-	out        string
-	failUnder  string
-	json       bool
-	allowStale bool
-	clean      bool
-	scope      scopeFlags
+	measure measureOptions
+	out     string
+	json    bool
+	clean   bool
 }
 
 func newCoverageCommand() *cobra.Command {
@@ -44,133 +35,36 @@ on stderr; they never change the exit code.`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&opt.traces, "traces", defaultTraceDir, "folder the trace files are in (default: the config's \"traces\", else .pathkit/traces)")
-	f.StringVar(&opt.function, "function", "", "measure only this `workflow`")
+	f.StringVar(&opt.measure.traces, "traces", defaultTraceDir, "folder the trace files are in (default: the config's \"traces\", else .pathkit/traces)")
+	f.StringVar(&opt.measure.function, "function", "", "measure only this `workflow`")
 	f.StringVar(&opt.out, "out", "", "also write exactly what was printed to this `file`")
-	f.StringVar(&opt.failUnder, "fail-under", "", "exit 2 when path coverage is below this `percent` (0-100)")
+	f.StringVar(&opt.measure.failUnder, "fail-under", "", "exit 2 when path coverage is below this `percent` (0-100)")
 	f.BoolVar(&opt.json, "json", false, "print JSON instead of text")
-	f.BoolVar(&opt.allowStale, "allow-stale", false, "also count traces recorded for an older version of a workflow, when they still fit a path")
+	f.BoolVar(&opt.measure.allowStale, "allow-stale", false, "also count traces recorded for an older version of a workflow, when they still fit a path")
 	f.BoolVar(&opt.clean, "clean", false, "delete the trace files after the report (only when the report was produced)")
-	addScopeFlags(cmd, &opt.scope, false)
+	addScopeFlags(cmd, &opt.measure.scope, false)
 	return cmd
 }
 
 func runCoverage(cmd *cobra.Command, target string, opt coverageOptions) error {
-	stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
-
-	var threshold *float64
-	thresholdFrom := "--fail-under"
-	if cmd.Flags().Changed("fail-under") {
-		v, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(opt.failUnder), "%"), 64)
-		if err != nil || v < 0 || v > 100 || math.IsNaN(v) {
-			return userError("invalid --fail-under value: %q (it must be a number from 0 to 100)", opt.failUnder)
-		}
-		threshold = &v
-	}
-
-	sc, err := loadScoped("coverage", target, opt.scope, stderr)
+	m, err := measure(cmd, "coverage", target, opt.measure)
 	if err != nil {
 		return err
 	}
-	// Owner's decision (M5): the % must cover exactly what is in scope.
-	if len(sc.notAnalyzable) > 0 {
-		var parts []string
-		for _, n := range sc.notAnalyzable {
-			parts = append(parts, fmt.Sprintf("%s: %v", n.name, n.err))
-		}
-		return userError("in scope but not analyzable: %s %s", strings.Join(parts, "; "), notAnalyzableHint)
-	}
-	if threshold == nil && sc.cfg != nil && sc.cfg.FailUnder != nil {
-		threshold, thresholdFrom = sc.cfg.FailUnder, "failUnder in "+sc.cfg.Path
-	}
-	allowStale := opt.allowStale || (sc.cfg != nil && sc.cfg.AllowStale)
-
-	var workflows []coverage.Workflow
-	var others []string
-	for _, r := range sc.mapped {
-		workflows = append(workflows, coverage.Workflow{Name: r.wf.Name, Graph: r.graph, Hash: r.hash, AddedByConfig: r.addedByConfig})
-	}
-	if opt.function != "" {
-		var names []string
-		for _, w := range workflows {
-			names = append(names, w.Name)
-		}
-		name, err := scope.MatchName(names, opt.function, "--function", target)
-		if err != nil {
-			return userError("%s", err)
-		}
-		var picked []coverage.Workflow
-		for _, w := range workflows {
-			if w.Name == name {
-				picked = append(picked, w)
-			} else {
-				others = append(others, w.Name)
-			}
-		}
-		workflows = picked
-	}
-	if len(workflows) == 0 {
-		fmt.Fprint(stdout, strings.TrimPrefix(excludedBlock(sc.excluded), "\n"))
-		return userError("no workflows in scope to measure")
-	}
-
-	traceDir := traceDirFor(cmd, opt.traces, sc.cfg)
-	paths, err := trace.List(traceDir)
-	if err != nil {
-		return userError("%s", err)
-	}
-	if len(paths) == 0 {
-		return userError("%s", trace.NoTracesMessage(traceDir))
-	}
-	var files []coverage.TraceFile
-	for _, p := range paths {
-		f, err := trace.Read(p)
-		files = append(files, coverage.TraceFile{Path: p, File: f, ReadErr: err})
-	}
-
-	res := coverage.Compute(coverage.Input{Workflows: workflows, Excluded: sc.excluded, Others: others, Traces: files, AllowStale: allowStale})
-	for _, w := range res.Warnings {
-		fmt.Fprintf(stderr, "pathkit coverage: warning: %s\n", w.Message)
-	}
-
 	var output string
 	if opt.json {
 		var buf strings.Builder
 		enc := json.NewEncoder(&buf)
 		enc.SetEscapeHTML(false) // keep "->" readable in the path text
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(coverageJSON(res, threshold)); err != nil {
+		if err := enc.Encode(coverageJSON(m.res, m.threshold)); err != nil {
 			return err
 		}
 		output = buf.String()
 	} else {
-		output = render.CoverageText(res, threshold) + excludedBlock(res.Excluded) + "\n" + render.TracesLine(res.Counts)
+		output = render.CoverageText(m.res, m.threshold) + excludedBlock(m.res.Excluded) + "\n" + render.TracesLine(m.res.Counts)
 	}
-	fmt.Fprint(stdout, output)
-	if opt.out != "" {
-		if err := os.WriteFile(opt.out, []byte(output), 0o644); err != nil {
-			return userError("could not write --out file: %v", err)
-		}
-	}
-
-	// The report is fully produced; only now may --clean delete traces
-	// (exit 0 or 2, never after an error: owner's condition, M6).
-	if opt.clean {
-		deleted := 0
-		for _, p := range paths {
-			if err := os.Remove(p); err == nil {
-				deleted++
-			}
-		}
-		fmt.Fprintf(stderr, "pathkit coverage: deleted %s from %s\n", count(deleted, "trace file"), traceDir)
-	}
-
-	if threshold != nil {
-		if v := coverage.Percent(res.Covered, res.Paths); v < *threshold {
-			return belowThresholdError("coverage %s is below %s %s", render.Pct(v, threshold), thresholdFrom, render.Threshold(*threshold))
-		}
-	}
-	return nil
+	return finish(cmd, "coverage", m, output, opt.out, opt.clean)
 }
 
 // The --json shape (schemaVersion 1), documented in SETUP-GUIDE.md.

@@ -212,6 +212,19 @@ The TS config only matched whole file names and only in `report`, so untestable 
 
 Text output keeps the TS format line for line, including `Start -> <junction> --<label>--> ... -> End`. Junction descriptions use Go source text (`if input.AmountCents <= 0`, `switch status`, `select (Selector)`). The only intentional differences are: the end station shows its kind when known (`End (failed)`), and `report` adds the branch-coverage figure and the "excluded by scope" line. `--json` shapes are documented in `SETUP-GUIDE.md` and tested with golden files.
 
+### D11 — Priority labels (High / Medium / Low) — APPROVED (2026-09-29)
+
+`report` gives each **workflow** a priority label that says how urgently it needs more tests. It is shown in the text report, `--summary` and `--json` (M7b) and in the HTML report (M8). It is taken from the TypeScript version (`src/htmlReport.ts`, `priorityLabel`, and `test/htmlReport.test.ts`), where it appeared only in the HTML report.
+
+- **The label belongs to the workflow, not to a path.** TypeScript never labelled individual paths. Every untested path of a workflow effectively carries its workflow's label. A per-path rule (for example "failure paths first") would be a new design and needs its own proposal.
+- **The rule**, where `covered` and `total` are the workflow's covered and listed paths:
+  - **High** when coverage is below 50%: `covered × 100 < 50 × total`.
+  - **Medium** when it is from 50% up to and including 80%: `covered × 100 ≤ 80 × total`.
+  - **Low** when it is above 80%, including 100%.
+- **Exact whole-number comparison, never a rounded % (owner's requirement).** The boundaries are compared with the integer products above, never with a printed or rounded percentage. So 1/2 = 50% is Medium, 4/5 = 80% is Medium, 7999/10000 = 79.99% is Medium, 8001/10000 = 80.01% is Low, and 4999/10000 = 49.99% is High. Tests pin exactly these boundaries and the values just either side.
+- **A workflow with 0 listed paths has no label.** This can only happen when every path ends in `panic`.
+- `SETUP-GUIDE.md` says that labels are per workflow, and what each one means for a tester (owner's requirement).
+
 ### Trace file format (schemaVersion 1) — defined in M3, approved with the M3 plan
 
 One JSON file per workflow run, written by the recorder that `pathkit test` adds to the package through the overlay. It lives in the trace folder (default `.pathkit/traces` in the folder `pathkit test` runs from, baked in as an absolute path) and is named `<workflow>.<12 random hex digits>.trace.json`. Example:
@@ -814,5 +827,55 @@ Two decisions changed along the way, both approved by the owner:
 - **`internal/e2e`:**
   - `TestCoverageMatchesKey`: one real `pathkit test` of the pilot, then `coverage --json`. That gives **20/38 = 52.6%**, and **17/29 = 58.6%** with the no-shipment scope. For every workflow, **the set of covered paths equals the set `EXPECTED.md`'s tests point to**, notes included. The text total line is checked too.
   - `TestPrepare`: the printed command, run with `exec` (not through PathKit), records 3 traces, and a plain `go test` records none.
+
+`EXPECTED.md` was not edited.
+
+## 2026-09-29 — M7 plan approved: two slices, D11, broken packages, fast local tests
+
+The owner approved the M7 plan with every recommendation, plus two additions to D11:
+
+1. **Priority labels (D11, new):** per workflow, as in TypeScript: under 50% High, 50–80% (both ends included) Medium, over 80% Low. The comparison uses exact whole-number arithmetic, never a rounded %, and the boundaries 50% and 80% and the values just either side are tested exactly.
+2. `SETUP-GUIDE.md` says labels are per workflow, and what each one means for a tester.
+
+The request had asked how each *untested path* gets its label. TypeScript never labelled paths, only workflows, so the rule was written per workflow. A per-path rule would be a separate proposal.
+
+**The M2 open question is decided: a package that doesn't compile stops `report` (exit 1); it is never skipped.** Skipping would hide that package's workflows and silently shrink the set the % is computed over, which is what D8 and the M5 "not analyzable is fatal" rule guard against. Every broken package is named, each with its first real error.
+
+**Other approved choices for M7b:**
+- `report` defaults `--traces` like `coverage`, and `report [folder|folder/...]` defaults to all of the config's `packages`, else `./...`. A single `.go` file is refused.
+- The config keys `out`, `json` and `noColor` apply to `report`; a flag always beats the config.
+- Colour is used only on a real terminal, with no new dependency.
+- The excluded line is always printed, even for 0.
+- `report --json` is the `coverage --json` shape plus `priority`, `file` and `excludedBy`.
+- `--clean` follows the same rule as `coverage`.
+
+**Order:** M7a (shared code path, loader message, fast local tests), stop for the owner to verify and commit, then M7b (`report`).
+
+## 2026-09-29 — M7a: one shared code path, every broken package named, fast local tests
+
+**What was built:**
+- **One shared code path for the numbers.** `internal/cli/measure.go` holds `measure` and `finish`:
+  - `measure` parses `--fail-under`, loads and scopes through `loadScoped`, refuses while an in-scope workflow isn't analyzable, applies the config's `failUnder` and `allowStale`, picks `--function`, reads the traces and calls `coverage.Compute`. Its warnings are printed as `pathkit <command>: warning: …`.
+  - `finish` prints, writes `--out`, runs `--clean` (only once the output is written) and does the `--fail-under` check (exit 2).
+
+  `coverage` is now its flags, `measure`, its rendering and `finish`. M7b's `report` will call the same two functions, so it cannot compute its numbers differently. **Coverage's output is unchanged:** its text tests, the JSON golden file `internal/cli/testdata/coverage_orders.json` and the real-binary exit-code test pass untouched.
+- **Every broken package is named** (`internal/load`, `compileErrors`). One broken package prints `package does not compile: <package>: <file>:<line>:<col>: <error>`. Several print `N packages do not compile: <package>: <error>; <package>: <error>`, sorted, on one line. A package that only imports a broken one has no errors of its own (checked with a probe) and is not listed. The position is relative to the current folder when the file is inside it, else absolute.
+- **Fast local tests.** Every e2e test and both real-binary tests already skipped under `-short`, from earlier milestones. So until now a `-short` run had **no** end-to-end check at all. Now:
+  - `TestCoverageMatchesKey` runs under `-short` too: it records the whole pilot once and compares every workflow's covered paths with `EXPECTED.md`, both unscoped and with the no-shipment scope.
+  - Every skip message ends with `(CI runs it)`.
+  - The new `TestCIRunsEverything` fails if any `go test` line in `.github/workflows/ci.yml` contains `-short`. This was checked by temporarily adding `-short` to CI's two `go test` lines: the test failed and named lines 41 and 55. The file was then restored from git.
+
+**Bug found and fixed.** Since M2, a broken package was reported as `package does not compile: -: # example.com/fixtures/broken`. `go/packages` puts go list's two-line build summary first, and PathKit's one-line error rule cut off its second line, which is the one with the real error. `firstError` now prefers a type or syntax error with a position. `TestAnalyzeErrors` now requires the full real error (`…/broken/broken.go:8:14: cannot use "not a number" …`), and `TestEveryBrokenPackageIsNamed` pins both wordings.
+
+**Timings (this machine, warm build cache):**
+- `go test -count=1 ./...`: **71 s**. Of this, `TestLiveFixtures` takes about 35 s and `TestAnswerKey` about 24 s.
+- `go test -short -count=1 ./...`: **19 s**.
+
+**Checks run:**
+- `gofmt` on all tracked and new Go files: clean
+- `go vet ./...`: clean
+- staticcheck v0.8.1: clean
+- `go test -count=1 ./...` (full): all ok
+- `go test -short -count=1 ./...`: all ok
 
 `EXPECTED.md` was not edited.

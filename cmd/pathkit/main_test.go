@@ -55,7 +55,7 @@ func runBinary(t *testing.T, bin string, args ...string) (string, string, int) {
 
 func TestBinary(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds the binary; skipped with -short")
+		t.Skip("builds the binary; skipped with -short (CI runs it)")
 	}
 	bin := buildPathkit(t)
 
@@ -99,7 +99,7 @@ func ordersTraces(t *testing.T) string {
 // 1 any real error, 2 below --fail-under (CLAUDE.md D7, D9).
 func TestBinaryCoverageExitCodes(t *testing.T) {
 	if testing.Short() {
-		t.Skip("builds the binary; skipped with -short")
+		t.Skip("builds the binary; skipped with -short (CI runs it)")
 	}
 	bin := buildPathkit(t)
 	file := "../../testdata/pilot/orders/orders.go"

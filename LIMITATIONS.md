@@ -2,7 +2,7 @@
 
 PathKit either detects a pattern correctly or clearly does not detect it; it never silently guesses. This file is the honest list of what it does and doesn't cover.
 
-**Status:** building (M6 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
+**Status:** building (M6 done, M7a done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
 
 ## Carried over from the TypeScript version (planned)
 
@@ -68,7 +68,8 @@ PathKit either detects a pattern correctly or clearly does not detect it; it nev
 - **`pathkit test` always runs tests fresh (M3).** It adds `-count=1` (unless you pass your own `-count`), because Go's cached test results would skip the tests and record nothing. So every run takes as long as a fresh `go test -count=1`.
 - **A workflow function with more than 8 return values can't be recorded (M3).** `pathkit test` stops with a clear error. Temporal workflows return at most a value and an error, so this shouldn't happen in practice.
 - **Some names are reserved in recorded packages (M3).** `pathkit test` adds `pathkitRec`, `pathkitStart`, `pathkitRecorder`, `pathkitTrace`, `pathkitTraceDir`, `pathkitLoop` (since M4b) and `pathkitRet1`…`pathkitRet8`. If your package already uses one, it stops with a clear error instead of producing broken code.
-- **One broken package stops `analyze` (M2).** If any package in `analyze <folder>/...` doesn't compile, the command fails with `package does not compile: ...` instead of analyzing the others.
+- **One broken package stops the command (M2; message fixed and decided for `report` in M7a).** If any package in `<folder>/...` doesn't compile, `analyze`, `coverage`, `pathkit test` and `pathkit traces` stop instead of skipping it, and `report` (M7b) will too. Skipping would silently shrink the set the coverage % is computed over. Every broken package is named on one line, with its first real error (`2 packages do not compile: example.com/a: a/a.go:3:13: ...; example.com/b: ...`). Before M7a, the message showed only the first package, and the error was replaced by go list's useless `-: # <package>` line. A file position inside the current folder is shown relative to it; one outside is shown in full.
+- **`go test -short ./...` skips the slow end-to-end tests (M7a, for PathKit's own development).** A quick local run takes about 20 seconds instead of about 70. It still records the whole sample project once and checks every workflow's covered paths against `EXPECTED.md` (`TestCoverageMatchesKey`). It skips the per-test answer-key runs, the live fixture runs and the real-binary tests. CI runs everything, and `TestCIRunsEverything` fails if CI's `go test` line ever gets `-short`.
 
 ## New in Go, because of the proposed design (planned)
 

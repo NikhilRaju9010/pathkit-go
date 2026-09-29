@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -39,12 +40,57 @@ func Load(arg string) (*Result, error) {
 	if len(pkgs) == 0 {
 		return nil, fmt.Errorf("no Go packages found in %s", arg)
 	}
-	for _, p := range pkgs {
-		if len(p.Errors) > 0 {
-			return nil, fmt.Errorf("package does not compile: %s", p.Errors[0])
-		}
+	if err := compileErrors(pkgs); err != nil {
+		return nil, err
 	}
 	return &Result{Packages: pkgs, File: file}, nil
+}
+
+// compileErrors names every package that doesn't compile, each with its
+// first real error, all on one line (owner's decision, M7: stop, but list
+// them all). A package that only imports a broken one has no errors of
+// its own, so it is not listed.
+func compileErrors(pkgs []*packages.Package) error {
+	var broken []string
+	for _, p := range pkgs {
+		if len(p.Errors) > 0 {
+			broken = append(broken, p.PkgPath+": "+firstError(p.Errors))
+		}
+	}
+	sort.Strings(broken)
+	switch len(broken) {
+	case 0:
+		return nil
+	case 1:
+		return fmt.Errorf("package does not compile: %s", broken[0])
+	}
+	return fmt.Errorf("%d packages do not compile: %s", len(broken), strings.Join(broken, "; "))
+}
+
+// firstError picks the error worth showing. go list's own error for a
+// package that fails to build is a two-line "-: # <package>" summary,
+// whose useful second line would be cut off (errors are one line), so a
+// type or syntax error with a position is preferred. The position is made
+// relative to the current folder when it can be.
+func firstError(errs []packages.Error) string {
+	e := errs[0]
+	for _, c := range errs {
+		if c.Kind == packages.TypeError || c.Kind == packages.ParseError {
+			e = c
+			break
+		}
+	}
+	pos := e.Pos
+	if cwd, err := os.Getwd(); err == nil && filepath.IsAbs(pos) {
+		if rel, err := filepath.Rel(cwd, pos); err == nil && !strings.HasPrefix(rel, "..") {
+			pos = rel
+		}
+	}
+	msg := strings.Join(strings.Fields(e.Msg), " ")
+	if pos == "" || pos == "-" {
+		return msg
+	}
+	return pos + ": " + msg
 }
 
 // Resolve turns a command-line argument into the folder to run Go tools

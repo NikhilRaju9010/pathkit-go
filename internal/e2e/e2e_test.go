@@ -109,7 +109,7 @@ func readTraces(t *testing.T, dir string) []trace.File {
 
 func TestAnswerKey(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test on the pilot; skipped with -short")
+		t.Skip("runs go test on the pilot; skipped with -short (CI runs it)")
 	}
 	pilot := abs(t, "../../testdata/pilot")
 	key, err := expected.Read(filepath.Join(pilot, "EXPECTED.md"))
@@ -187,7 +187,7 @@ func TestAnswerKey(t *testing.T) {
 
 func TestTraceClearingAndRepeatRuns(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test; skipped with -short")
+		t.Skip("runs go test; skipped with -short (CI runs it)")
 	}
 	orders := abs(t, "../../testdata/pilot/orders")
 	t.Chdir(t.TempDir())
@@ -226,7 +226,7 @@ func TestTraceClearingAndRepeatRuns(t *testing.T) {
 
 func TestFixturesUnderOverlay(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test; skipped with -short")
+		t.Skip("runs go test; skipped with -short (CI runs it)")
 	}
 	fixtures := abs(t, "../../testdata/fixtures")
 	t.Chdir(t.TempDir())
@@ -349,7 +349,7 @@ var liveFixtures = map[string][]liveCase{
 // complete trace that lands on its stated path.
 func TestLiveFixtures(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test on the fixtures; skipped with -short")
+		t.Skip("runs go test on the fixtures; skipped with -short (CI runs it)")
 	}
 	fixtures := abs(t, "../../testdata/fixtures")
 	t.Chdir(t.TempDir())
@@ -382,7 +382,7 @@ func TestLiveFixtures(t *testing.T) {
 // whole pilot), and must agree with EXPECTED.md, which is never edited.
 func TestScopeExcludesShipment(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test on the pilot; skipped with -short")
+		t.Skip("runs go test on the pilot; skipped with -short (CI runs it)")
 	}
 	pilot := abs(t, "../../testdata/pilot")
 	cfg := abs(t, "../../testdata/scopes/no-shipment/.pathkitrc.json")
@@ -466,7 +466,7 @@ func TestScopeExcludesShipment(t *testing.T) {
 // matched like any other.
 func TestAddedByConfigRecorded(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test; skipped with -short")
+		t.Skip("runs go test; skipped with -short (CI runs it)")
 	}
 	cfg := abs(t, "../../testdata/scopes/added/.pathkitrc.json")
 	dir := abs(t, "../../testdata/fixtures/scope")
@@ -509,10 +509,10 @@ type covJSON struct {
 // predicts: 20 of 38 (52.6%) for the whole pilot, 17 of 29 (58.6%) with
 // the no-shipment scope, and for every workflow the very paths the key's
 // tests point to.
+// TestCoverageMatchesKey also runs with -short (M7a): it records the whole
+// pilot once (a few seconds), so a quick local run still has one real
+// end-to-end check against EXPECTED.md.
 func TestCoverageMatchesKey(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs go test on the pilot; skipped with -short")
-	}
 	pilot := abs(t, "../../testdata/pilot")
 	cfg := abs(t, "../../testdata/scopes/no-shipment/.pathkitrc.json")
 	key, err := expected.Read(filepath.Join(pilot, "EXPECTED.md"))
@@ -584,7 +584,7 @@ func TestCoverageMatchesKey(t *testing.T) {
 // "go test" records nothing.
 func TestPrepare(t *testing.T) {
 	if testing.Short() {
-		t.Skip("runs go test; skipped with -short")
+		t.Skip("runs go test; skipped with -short (CI runs it)")
 	}
 	orders := abs(t, "../../testdata/pilot/orders")
 	t.Chdir(t.TempDir())
@@ -619,5 +619,27 @@ func TestPrepare(t *testing.T) {
 	stdout, _, code = pathkit(t, "coverage", orders, "--traces", traces)
 	if code != 0 || !strings.Contains(stdout, "Covered: 3/3 (100.0%)") {
 		t.Errorf("coverage of the prepared run: exit %d\n%s", code, stdout)
+	}
+}
+
+// CI must run every test: -short is for quick local runs only (M7a).
+// This fails if a "go test" line in the CI workflow ever gets -short.
+func TestCIRunsEverything(t *testing.T) {
+	data, err := os.ReadFile("../../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := 0
+	for i, line := range strings.Split(string(data), "\n") {
+		if !strings.Contains(line, "go test") {
+			continue
+		}
+		runs++
+		if strings.Contains(line, "-short") {
+			t.Errorf("ci.yml line %d uses -short, so CI would skip the slow tests: %s", i+1, strings.TrimSpace(line))
+		}
+	}
+	if runs == 0 {
+		t.Error("ci.yml has no go test line")
 	}
 }
