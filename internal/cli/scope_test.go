@@ -111,7 +111,7 @@ func TestAnalyzeFindsConfigUpward(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := `{"packages": ["` + p + `/..."], "workflows": {"exclude": [{"name": "OrderWorkflow", "reason": "retired"}]}}`
+	cfg := `{"packages": [` + jsonString(p+"/...") + `], "workflows": {"exclude": [{"name": "OrderWorkflow", "reason": "retired"}]}}`
 	if err := os.WriteFile(filepath.Join(dir, ".pathkitrc.json"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -120,9 +120,9 @@ func TestAnalyzeFindsConfigUpward(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(sub)
-	stdout, _, code := run(t, "analyze", p+"/orders/orders.go")
+	stdout, stderr, code := run(t, "analyze", p+"/orders/orders.go")
 	if code != ExitError || !strings.Contains(stdout, "  orders.OrderWorkflow: retired\n") {
-		t.Errorf("code=%d, want the excluded list (and exit 1: nothing left in scope):\n%s", code, stdout)
+		t.Errorf("code=%d, want the excluded list (and exit 1: nothing left in scope):\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
 }
 
