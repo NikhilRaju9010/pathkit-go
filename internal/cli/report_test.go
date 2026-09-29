@@ -302,3 +302,51 @@ func TestReportEveryConfiguredPackage(t *testing.T) {
 		t.Errorf("code=%d (overlapping entries must count each workflow once)\n%s", code, stdout)
 	}
 }
+
+// coverage and report print the excluded workflows with one shared
+// wording (render.ExcludedBlock), always, even for 0; also in the error
+// case where the scope leaves nothing to measure.
+func TestExcludedWordingIsShared(t *testing.T) {
+	traces := ordersTraces(t)
+	inPilot(t)
+	cfg := writeConfig(t, `{"packages": [`+jsonString(absPath(t, ".")+"/...")+`], "workflows": {"exclude": [{"name": "PaymentWorkflow", "reason": "tested elsewhere"}]}}`)
+	block := func(out string) string {
+		start := strings.Index(out, "excluded")
+		end := strings.Index(out, "Traces: ")
+		if start < 0 {
+			return "(no excluded line)"
+		}
+		start = strings.LastIndex(out[:start], "\n") + 1
+		if end < start {
+			end = len(out)
+		}
+		return out[start:end]
+	}
+	tests := []struct {
+		name string
+		args []string
+		code int
+		want string
+	}{
+		{"no scope", nil, ExitOK,
+			"0 workflows excluded (no scope in use)\n"},
+		{"config", []string{"--config", cfg}, ExitOK,
+			"1 workflow excluded by .pathkitrc.json (see \"reason\"):\n  fulfillment.PaymentWorkflow: tested elsewhere\n"},
+		{"flag", []string{"--exclude", "PaymentWorkflow"}, ExitOK,
+			"1 workflow excluded by --exclude (see \"reason\"):\n  fulfillment.PaymentWorkflow: excluded by --exclude flag\n"},
+		{"config and flag", []string{"--config", cfg, "--exclude", "OrderFulfillmentWorkflow"}, ExitError,
+			"2 workflows excluded by .pathkitrc.json and --exclude (see \"reason\"):\n  fulfillment.OrderFulfillmentWorkflow: excluded by --exclude flag\n  fulfillment.PaymentWorkflow: tested elsewhere\n"},
+		{"nothing left", []string{"--exclude", "PaymentWorkflow,OrderFulfillmentWorkflow"}, ExitError,
+			"2 workflows excluded by --exclude (see \"reason\"):\n  fulfillment.OrderFulfillmentWorkflow: excluded by --exclude flag\n  fulfillment.PaymentWorkflow: excluded by --exclude flag\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, command := range []string{"coverage", "report"} {
+				stdout, stderr, code := run(t, append([]string{command, "./fulfillment", "--traces", traces}, tt.args...)...)
+				if got := block(stdout); code != tt.code || got != tt.want {
+					t.Errorf("%s: code=%d stderr=%q\nexcluded block:\n%s\nwant:\n%s", command, code, stderr, got, tt.want)
+				}
+			}
+		})
+	}
+}

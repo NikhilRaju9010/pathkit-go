@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -36,6 +37,7 @@ type measured struct {
 	tracePaths    []string // every trace file read (what --clean deletes)
 	threshold     *float64 // nil: no --fail-under and no failUnder in the config
 	thresholdFrom string
+	excludedBy    []string // what excluded workflows (render.ExcludedLine)
 }
 
 // measure is the only way coverage and report get their numbers. It loads
@@ -66,6 +68,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		return nil, err
 	}
 	m.sc = sc
+	m.excludedBy = excludedBy(sc, opt.scope)
 	// Owner's decision (M5): the % must cover exactly what is in scope.
 	if len(sc.notAnalyzable) > 0 {
 		var parts []string
@@ -104,7 +107,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		workflows = picked
 	}
 	if len(workflows) == 0 {
-		fmt.Fprint(stdout, strings.TrimPrefix(excludedBlock(sc.excluded), "\n"))
+		fmt.Fprint(stdout, render.ExcludedBlock(sc.excluded, m.excludedBy))
 		return nil, userError("no workflows in scope to measure")
 	}
 
@@ -158,4 +161,24 @@ func finish(cmd *cobra.Command, cmdName string, m *measured, printed, plain, out
 		}
 	}
 	return nil
+}
+
+// excludedBy names what decided the scope, for the excluded line: the
+// config file, --include, --exclude. Empty when no scope is in use (or
+// with --all).
+func excludedBy(sc *scoped, sf scopeFlags) []string {
+	if sf.all {
+		return nil
+	}
+	var by []string
+	if cfg := sc.cfg; cfg != nil && ((cfg.HasInclude && sf.include == nil) || len(cfg.Exclude) > 0) {
+		by = append(by, filepath.Base(cfg.Path))
+	}
+	if sf.include != nil {
+		by = append(by, "--include")
+	}
+	if len(sf.exclude) > 0 {
+		by = append(by, "--exclude")
+	}
+	return by
 }

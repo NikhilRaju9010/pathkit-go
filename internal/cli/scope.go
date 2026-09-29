@@ -178,8 +178,9 @@ func loadAll(targets []string) (*load.Result, error) {
 // notAnalyzableHint ends every "in scope but not analyzable" line.
 const notAnalyzableHint = "(fix it, or exclude it in .pathkitrc.json with a reason)"
 
-// excludedBlock lists the excluded workflows with their reasons, so none
-// disappears silently.
+// excludedBlock is analyze's list of excluded workflows with their
+// reasons, so none disappears silently. analyze has --all, so it says so.
+// (coverage and report print render.ExcludedBlock instead.)
 func excludedBlock(excluded []scope.Excluded) string {
 	if len(excluded) == 0 {
 		return ""

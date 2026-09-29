@@ -41,6 +41,7 @@ Covered paths:
 Untested paths:
   3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
 
+0 workflows excluded (no scope in use)
 Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
 `
 

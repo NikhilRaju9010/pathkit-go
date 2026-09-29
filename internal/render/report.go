@@ -7,6 +7,7 @@ import (
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
+	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 )
 
 // ReportOptions controls report's text output.
@@ -58,16 +59,25 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 	fmt.Fprintf(&b, "\n%d paths total · %d covered · %d missed · %s project coverage\n",
 		res.Paths, res.Covered, res.Paths-res.Covered, Pct(coverage.Percent(res.Covered, res.Paths), opt.Threshold))
 	fmt.Fprintf(&b, "Branches: %d/%d (%s)\n", res.BranchesTaken, res.Branches, Pct(coverage.Percent(res.BranchesTaken, res.Branches), nil))
-	b.WriteString("\n" + ExcludedLine(len(res.Excluded), opt.ExcludedBy) + "\n")
-	for _, e := range res.Excluded {
-		fmt.Fprintf(&b, "  %s: %s\n", e.Name, e.Reason)
-	}
+	b.WriteString("\n" + ExcludedBlock(res.Excluded, opt.ExcludedBy))
 	b.WriteString(TracesLine(res.Counts))
 	return b.String()
 }
 
-// ExcludedLine is the line report always prints, even for 0 (CLAUDE.md
-// D8), so nobody can quietly raise coverage by excluding things.
+// ExcludedBlock is the excluded line followed by each excluded workflow
+// with its reason. coverage and report both print it, always, even for 0
+// (CLAUDE.md D8), so nobody can quietly raise coverage by excluding
+// things; it is the one wording for both.
+func ExcludedBlock(excluded []scope.Excluded, by []string) string {
+	var b strings.Builder
+	b.WriteString(ExcludedLine(len(excluded), by) + "\n")
+	for _, e := range excluded {
+		fmt.Fprintf(&b, "  %s: %s\n", e.Name, e.Reason)
+	}
+	return b.String()
+}
+
+// ExcludedLine is the first line of ExcludedBlock.
 func ExcludedLine(n int, by []string) string {
 	what := count(n, "workflow") + " excluded"
 	switch {

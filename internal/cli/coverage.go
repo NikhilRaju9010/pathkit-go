@@ -62,7 +62,7 @@ func runCoverage(cmd *cobra.Command, target string, opt coverageOptions) error {
 		}
 		output = buf.String()
 	} else {
-		output = render.CoverageText(m.res, m.threshold) + excludedBlock(m.res.Excluded) + "\n" + render.TracesLine(m.res.Counts)
+		output = render.CoverageText(m.res, m.threshold) + "\n" + render.ExcludedBlock(m.res.Excluded, m.excludedBy) + render.TracesLine(m.res.Counts)
 	}
 	return finish(cmd, "coverage", m, output, output, opt.out, opt.clean)
 }

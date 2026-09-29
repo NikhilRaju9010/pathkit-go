@@ -226,13 +226,14 @@ Untested paths:
 38 paths total · 20 covered · 18 missed · 52.6% coverage
 Branches: 39/50 (78.0%)
 
+0 workflows excluded (no scope in use)
 Traces: 21 read · 21 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
 ```
 
 - **A path counts as covered** when at least one recorded run took it. Running it twice still counts once. The path numbers are the ones `analyze` prints.
 - **Loops:** a run that went round a loop several times counts as the path of its last trip (the loop rule in section 3).
 - **Branches** count exits instead of whole paths: of all the exits on the listed paths, how many some run took. Branch coverage uses each run's raw steps (before loop folding), so a branch can show as taken even when no covered path uses it. It is shown to help you, but `--fail-under` never looks at it.
-- **The scope** (section 6) applies: excluded workflows are listed with their reasons at the end, and their traces count as "excluded".
+- **The scope** (section 6) applies: the excluded line is always printed (even `0 workflows excluded (no scope in use)`), followed by each excluded workflow with its reason, in exactly the same wording as `report` (section 5b). Their traces count as "excluded".
 
 | Flag | Effect |
 | --- | --- |
@@ -405,6 +406,8 @@ Some workflows can't be tested yet (say, they need a real bank sandbox). Countin
 Excluded from scope (1), pass --all to show them:
   shipment.ShipmentWorkflow: needs a real carrier sandbox
 ```
+
+(`analyze` has `--all`, so it says so. `coverage` and `report` print the same list with their own shared wording, `1 workflow excluded by .pathkitrc.json (see "reason"):`.)
 
 **`workflows.include`: only these count.** Every other workflow PathKit finds is listed as excluded with the reason `not in include list`.
 

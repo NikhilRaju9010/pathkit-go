@@ -951,3 +951,24 @@ The request had asked how each *untested path* gets its label. TypeScript never 
 - **F (M7b), owner's decision:** file paths in `report`'s text use the system's own separator (`orders\orders.go` on Windows). `--json` always uses forward slashes (`filepath.ToSlash`), so the JSON is identical on every system. The text tests build their expected path with `filepath.Join`.
 
 **Item 3, the trace hash (checked; no change needed):** `model.FunctionHash` hashes only the function's Go tokens. There is no file name, no position and no whitespace, line breaks become `;`, and Go's scanner removes CR from raw strings. The new `TestFunctionHashIsTheSameOnEverySystem` hashes one function six ways: LF and CRLF, on disk in different folders, with Linux-style and Windows-style file names, and with extra comments and blank lines. All six give `bb7b28a20d4db287`, and that value is pinned, so CI on all three systems must compute exactly the same hash.
+
+## 2026-09-29 — Cleanup after M7: one excluded wording, CI actions v7
+
+Branch `cleanup-m7`, not merged.
+
+**1. One wording for the excluded workflows in `coverage` and `report`** (owner's request). Before, `coverage` printed `Excluded from scope (1), pass --all to show them:` (and nothing at all for 0), while `report` printed `1 workflow excluded by .pathkitrc.json (see "reason"):`. The `coverage` wording was also wrong: `coverage` has no `--all` flag. Both commands now print `render.ExcludedBlock`, the M7b `report` wording, and they print it **always**:
+- `0 workflows excluded (no scope in use)`
+- `0 workflows excluded by .pathkitrc.json`
+- `N workflow(s) excluded by <sources> (see "reason"):` followed by `  <workflow>: <reason>` for each.
+
+The sources (`excludedBy`) are now computed once, in the shared `measure`. The "no workflows in scope to measure" error prints the same block. **`analyze` is unchanged** (`Excluded from scope (N), pass --all to show them:`): it wasn't part of the request, it does have `--all`, and D8 describes that note. Tests:
+- the `coverage` text golden (`ordersCoverage`) gains the `0 workflows excluded (no scope in use)` line;
+- the new `TestExcludedWordingIsShared` requires `coverage` and `report` to print the identical block in 5 cases: no scope, a config, `--exclude`, the config and the flag together, and nothing left in scope (exit 1).
+
+The JSON golden files didn't change: the wording is text only.
+
+**2. GitHub Actions bumped to their current major versions, checked with `gh api`, not guessed:**
+- `actions/checkout` v4 → **v7** (latest release v7.0.1, 2026-07-20);
+- `actions/setup-go` v5 → **v7** (latest release v7.0.0, 2026-07-16).
+
+Both v7 `action.yml` files declare `using: node24`, which removes the Node.js 20 deprecation warning. setup-go v7 still has the `go-version-file` and `cache-dependency-path` inputs our CI uses. checkout v7's one behaviour change blocks fork PR checkouts for `pull_request_target` and `workflow_run`, and our CI uses only `push` and `pull_request`.

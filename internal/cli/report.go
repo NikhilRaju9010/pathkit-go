@@ -84,7 +84,7 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 			outFile = cfg.Abs(cfg.Out)
 		}
 	}
-	by := excludedBy(m, opt.measure.scope)
+	by := m.excludedBy
 
 	if asJSON {
 		if opt.summary {
@@ -107,25 +107,6 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 		printed = render.ReportText(m.res, ro)
 	}
 	return finish(cmd, "report", m, printed, plain, outFile, opt.clean)
-}
-
-// excludedBy names what decided the scope, for the excluded line: the
-// config file, --include, --exclude. Empty when no scope is in use.
-func excludedBy(m *measured, sf scopeFlags) []string {
-	if sf.all {
-		return nil
-	}
-	var by []string
-	if cfg := m.sc.cfg; cfg != nil && ((cfg.HasInclude && sf.include == nil) || len(cfg.Exclude) > 0) {
-		by = append(by, filepath.Base(cfg.Path))
-	}
-	if sf.include != nil {
-		by = append(by, "--include")
-	}
-	if len(sf.exclude) > 0 {
-		by = append(by, "--exclude")
-	}
-	return by
 }
 
 // isTerminal reports whether w is a real terminal (not a pipe, a file or
