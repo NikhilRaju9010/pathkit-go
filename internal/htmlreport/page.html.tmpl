@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="pathkit-go">
+<title>{{.Title}}</title>
+<style>
+/*STYLE*/
+</style>
+</head>
+<body>
+<main>
+<h1>{{.Title}}</h1>
+<p class="meta">Generated {{.Generated}} · {{.Folder}} · {{.ConfigNote}}</p>
+
+<div class="tabs">
+<input type="radio" name="tab" id="tab-coverage"{{if .CoverageFirst}} checked{{end}}>
+<label for="tab-coverage">Coverage</label>
+<input type="radio" name="tab" id="tab-analysis"{{if not .CoverageFirst}} checked{{end}}>
+<label for="tab-analysis">Analysis</label>
+
+<section class="panel" id="panel-coverage">
+{{- if .Measured}}
+<p class="total" data-total-paths="{{.TotalPaths}}" data-total-covered="{{.TotalCovered}}">{{.TotalLine}}</p>
+<p class="branches">{{.BranchesLine}}</p>
+{{- with .FailUnder}}
+<p class="fail-under" data-fail-under-passed="{{.Passed}}">{{.Text}}</p>
+{{- end}}
+{{- range .Workflows}}
+<article class="card" data-workflow="{{.Name}}" data-covered="{{.Covered}}" data-paths="{{.Total}}" data-priority="{{.Priority}}" data-truncated="{{.Truncated}}">
+<header><h3>{{.Name}}</h3>{{if .AddedByConfig}}<span class="added">added by config</span>{{end}}<span class="file">{{.File}}</span>{{if .Priority}}<span class="badge prio-{{.Priority}}">{{.Priority}}</span>{{end}}</header>
+<p class="stats">{{.Stats}}{{if .Truncated}} <span class="truncated">truncated</span>{{end}}</p>
+<ol class="paths">
+{{- range .Paths}}
+<li data-number="{{.Number}}" data-covered="{{.Covered}}"><span class="num">{{.Number}}.</span><code class="path">{{.Text}}</code>{{if .Covered}}<span class="mark covered">covered{{if .Stale}} (stale trace){{end}}</span>{{else}}<span class="mark missed">missed</span>{{end}}</li>
+{{- end}}
+</ol>
+</article>
+{{- end}}
+{{- else}}
+<p class="note">Not measured. This page comes from <code>pathkit analyze</code>, which maps the paths but doesn't read test runs. Run <code>pathkit test</code>, then <code>pathkit report --html</code>, for coverage.</p>
+{{- end}}
+
+{{- with .Traces}}
+<p class="traces" data-read="{{.Read}}" data-counted="{{.Counted}}" data-unmatched="{{.Unmatched}}" data-stale="{{.Stale}}" data-incomplete="{{.Incomplete}}" data-excluded-traces="{{.Excluded}}" data-unknown="{{.Unknown}}" data-unreadable="{{.Unreadable}}" data-other="{{.Other}}">{{$.TracesLine}}</p>
+{{- end}}
+{{- if .Measured}}
+<section class="trend">
+<h2>Trend (last {{len .Trend}} report {{if eq (len .Trend) 1}}run{{else}}runs{{end}})</h2>
+<ol>
+{{- range .Trend}}
+<li data-trend-covered="{{.Covered}}" data-trend-paths="{{.Paths}}">{{.Time}} · {{.Covered}}/{{.Paths}} · {{.Pct}} <meter min="0" max="100" value="{{.Percent}}">{{.Pct}}</meter>{{with .ScopeChanged}} <span class="scope-changed">{{.}}</span>{{end}}</li>
+{{- end}}
+</ol>
+</section>
+{{- end}}
+</section>
+
+<section class="panel" id="panel-analysis">
+{{- range .Workflows}}
+<article class="card" data-analysis-workflow="{{.Name}}">
+<header><h3>{{.Name}}</h3>{{if .AddedByConfig}}<span class="added">added by config</span>{{end}}<span class="file">{{.File}}</span></header>
+<p class="stats">{{.TotalPathsLine}}{{if .Truncated}} <span class="truncated">truncated</span>{{end}}</p>
+<ol class="paths">
+{{- range .Paths}}
+<li data-number="{{.Number}}"><span class="num">{{.Number}}.</span><code class="path">{{.Text}}</code></li>
+{{- end}}
+</ol>
+</article>
+{{- end}}
+</section>
+</div>
+
+<section class="excluded" data-excluded="{{len .Excluded}}">
+<h2>{{.ExcludedLine}}</h2>
+{{- if .Excluded}}
+<ul>
+{{- range .Excluded}}
+<li data-excluded-workflow="{{.Name}}"><code>{{.Name}}</code>: <span class="reason">{{.Reason}}</span></li>
+{{- end}}
+</ul>
+{{- end}}
+</section>
+</main>
+</body>
+</html>

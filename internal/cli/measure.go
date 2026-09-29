@@ -139,11 +139,19 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 //
 // printed goes to stdout; plain (the same text without colour) goes to
 // the --out file, which is always plain text.
-func finish(cmd *cobra.Command, cmdName string, m *measured, printed, plain, outFile string, clean bool) error {
+//
+// extra, when not nil, runs after --out and before --clean (report's
+// --html): if it fails, the traces are kept.
+func finish(cmd *cobra.Command, cmdName string, m *measured, printed, plain, outFile string, clean bool, extra func() error) error {
 	fmt.Fprint(cmd.OutOrStdout(), printed)
 	if outFile != "" {
 		if err := os.WriteFile(outFile, []byte(plain), 0o644); err != nil {
 			return userError("could not write --out file: %v", err)
+		}
+	}
+	if extra != nil {
+		if err := extra(); err != nil {
+			return err
 		}
 	}
 	if clean {

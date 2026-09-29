@@ -263,3 +263,38 @@ func countReturns(fn *ast.FuncDecl) int {
 	})
 	return n
 }
+
+// WriteOverlay deletes only what an earlier run generated (overlay.json
+// and the NNN_<name>.go copies), never another file in the folder, such
+// as a report-history.json (owner's requirement, M8).
+func TestOverlayKeepsOtherFiles(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "overlay")
+	res := instrumentAll(t, targets(t, pilot+"/orders"))
+	if _, err := instrument.WriteOverlay(res, dir); err != nil {
+		t.Fatal(err)
+	}
+	keep := map[string]string{"report-history.json": "[]", "notes.txt": "mine", "helper.go": "package x"}
+	for name, body := range keep {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale := filepath.Join(dir, "999_old.go") // an earlier run's copy
+	if err := os.WriteFile(stale, []byte("package x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := instrument.WriteOverlay(res, dir); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range keep {
+		if data, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(data) != body {
+			t.Errorf("%s was deleted or changed: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(stale); err == nil {
+		t.Errorf("an earlier run's copy was left behind: %s", stale)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "overlay.json")); err != nil {
+		t.Errorf("overlay.json missing: %v", err)
+	}
+}

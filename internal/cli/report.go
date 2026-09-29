@@ -20,6 +20,7 @@ type reportOptions struct {
 	summary bool
 	noColor bool
 	clean   bool
+	html    string
 }
 
 func newReportCommand() *cobra.Command {
@@ -58,11 +59,15 @@ below --fail-under.`,
 	f.BoolVar(&opt.noColor, "no-color", false, "never colour the output (also: the config's \"noColor\", or the NO_COLOR environment variable)")
 	f.BoolVar(&opt.measure.allowStale, "allow-stale", false, "also count traces recorded for an older version of a workflow, when they still fit a path")
 	f.BoolVar(&opt.clean, "clean", false, "delete the trace files after the report (only when the report was produced)")
+	addHTMLFlag(cmd, &opt.html, defaultReportHTML, "the report (both tabs)")
 	addScopeFlags(cmd, &opt.measure.scope, true)
 	return cmd
 }
 
 func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
+	if err := htmlSpaceHint(cmd, opt.html, defaultReportHTML, target); err != nil {
+		return err
+	}
 	opt.measure.scope.everyPackage = true
 	opt.measure.foldersOnly = true
 	m, err := measure(cmd, "report", target, opt.measure)
@@ -85,6 +90,10 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 		}
 	}
 	by := m.excludedBy
+	var html func() error
+	if path := htmlPath(cmd, opt.html, defaultReportHTML, cfg); path != "" {
+		html = reportHTML(cmd, m, path)
+	}
 
 	if asJSON {
 		if opt.summary {
@@ -97,7 +106,7 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 		if err := enc.Encode(reportJSON(m.res, m.threshold, by)); err != nil {
 			return err
 		}
-		return finish(cmd, "report", m, buf.String(), buf.String(), outFile, opt.clean)
+		return finish(cmd, "report", m, buf.String(), buf.String(), outFile, opt.clean, html)
 	}
 	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.threshold, ExcludedBy: by}
 	plain := render.ReportText(m.res, ro)
@@ -106,12 +115,14 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 		ro.Color = true
 		printed = render.ReportText(m.res, ro)
 	}
-	return finish(cmd, "report", m, printed, plain, outFile, opt.clean)
+	return finish(cmd, "report", m, printed, plain, outFile, opt.clean, html)
 }
 
 // isTerminal reports whether w is a real terminal (not a pipe, a file or
 // a test buffer). No extra dependency: a terminal is a character device.
-func isTerminal(w any) bool {
+//
+// A variable, so a test can pretend stdout is a terminal.
+var isTerminal = func(w any) bool {
 	f, ok := w.(*os.File)
 	if !ok {
 		return false

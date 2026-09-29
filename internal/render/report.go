@@ -56,13 +56,31 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 		}
 	}
 
-	fmt.Fprintf(&b, "\n%d paths total · %d covered · %d missed · %s project coverage\n",
-		res.Paths, res.Covered, res.Paths-res.Covered, Pct(coverage.Percent(res.Covered, res.Paths), opt.Threshold))
-	fmt.Fprintf(&b, "Branches: %d/%d (%s)\n", res.BranchesTaken, res.Branches, Pct(coverage.Percent(res.BranchesTaken, res.Branches), nil))
+	b.WriteString("\n" + ProjectTotalLine(res, opt.Threshold) + "\n")
+	b.WriteString(BranchesLine(res) + "\n")
 	b.WriteString("\n" + ExcludedBlock(res.Excluded, opt.ExcludedBy))
 	b.WriteString(TracesLine(res.Counts))
 	return b.String()
 }
+
+// ProjectTotalLine is "38 paths total · 20 covered · 18 missed · 52.6%
+// project coverage" (the percentage threshold-aware, see Pct). The text
+// and HTML reports both print it.
+func ProjectTotalLine(res coverage.Result, threshold *float64) string {
+	return fmt.Sprintf("%d paths total · %d covered · %d missed · %s project coverage",
+		res.Paths, res.Covered, res.Paths-res.Covered, Pct(coverage.Percent(res.Covered, res.Paths), threshold))
+}
+
+// BranchesLine is "Branches: 39/50 (78.0%)" for the whole project.
+func BranchesLine(res coverage.Result) string {
+	return fmt.Sprintf("Branches: %d/%d (%s)", res.BranchesTaken, res.Branches, Pct(coverage.Percent(res.BranchesTaken, res.Branches), nil))
+}
+
+// WorkflowStats is a workflow's line in the full report, without colour:
+// "2/3 paths · 66.7% · branches 3/4 · priority Medium", or with
+// "(truncated at maxPaths=2000)" when the listing was cut. The text and
+// HTML reports both print it.
+func WorkflowStats(w coverage.WorkflowResult) string { return workflowStats(w, false, true) }
 
 // ExcludedBlock is the excluded line followed by each excluded workflow
 // with its reason. coverage and report both print it, always, even for 0

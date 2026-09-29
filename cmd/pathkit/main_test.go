@@ -189,3 +189,48 @@ func TestBinaryReportExitCodes(t *testing.T) {
 		})
 	}
 }
+
+// report --html from the real program (M8): exit 0 and exit 2 write the
+// page and the trend, exit 1 writes nothing, and "--html out.html" (with a
+// space) explains how to name the file.
+func TestBinaryReportHTML(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary; skipped with -short (CI runs it)")
+	}
+	bin := buildPathkit(t)
+	orders := "../../testdata/pilot/orders"
+	traces := ordersTraces(t)
+	dir := t.TempDir()
+	tests := []struct {
+		name    string
+		args    []string
+		code    int
+		written bool
+		stderr  string // substring
+	}{
+		{"exit 0 writes", []string{orders, "--html=" + filepath.Join(dir, "ok.html")}, 0, true, "pathkit report: wrote "},
+		{"exit 2 still writes", []string{orders, "--fail-under", "90", "--html=" + filepath.Join(dir, "low.html")}, 2, true, "is below --fail-under 90%"},
+		{"exit 1 writes nothing", []string{"../../testdata/fixtures/rules/...", "--html=" + filepath.Join(dir, "none.html")}, 1, false, "in scope but not analyzable"},
+		{"a space instead of =", []string{"--html", "out.html"}, 1, false, "write --html=out.html (with =)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, stderr, code := runBinary(t, bin, append([]string{"report", "--traces", traces}, tt.args...)...)
+			page := ""
+			for _, a := range tt.args {
+				if p, ok := strings.CutPrefix(a, "--html="); ok {
+					page = p
+				}
+			}
+			_, err := os.Stat(page)
+			if code != tt.code || (err == nil) != tt.written || !strings.Contains(stderr, tt.stderr) {
+				t.Errorf("exit %d, written=%v, stderr %q; want exit %d, written=%v, %q", code, err == nil, stderr, tt.code, tt.written, tt.stderr)
+			}
+			if tt.written {
+				if _, err := os.Stat(filepath.Join(dir, "report-history.json")); err != nil {
+					t.Errorf("no report-history.json next to the page")
+				}
+			}
+		})
+	}
+}

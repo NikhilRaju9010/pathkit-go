@@ -210,8 +210,10 @@ func TestAnalyzeNotAnalyzable(t *testing.T) {
 // failUnder, html, out, json, noColor and allowStale are checked but not
 // used until M6–M8: a config that sets them all changes nothing, and no
 // command mentions them.
-// analyze ignores the report-only keys (out, json, noColor: applied by
-// report since M7b, TestReportConfigKeys) and html (M8).
+// analyze ignores the report-only keys: out, json and noColor (applied by
+// report since M7, TestReportConfigKeys and TestNoColorConfigKey) and html
+// (applied by report since M8, TestReportHTMLConfigKey). failUnder and
+// allowStale belong to coverage and report (TestAllowStaleConfigKey).
 func TestLaterKeysAreNotApplied(t *testing.T) {
 	p := absPath(t, pilot)
 	dir := t.TempDir()
@@ -224,7 +226,7 @@ func TestLaterKeysAreNotApplied(t *testing.T) {
 	}
 	for _, f := range []string{"out.txt", "report.html", filepath.Join(filepath.Dir(cfg), "out.txt"), filepath.Join(filepath.Dir(cfg), "report.html")} {
 		if _, err := os.Stat(f); err == nil {
-			t.Errorf("%s was written; analyze never applies out, and html arrives in M8", f)
+			t.Errorf("%s was written; analyze never applies out or html (they are for report)", f)
 		}
 	}
 }

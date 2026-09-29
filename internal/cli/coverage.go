@@ -64,7 +64,7 @@ func runCoverage(cmd *cobra.Command, target string, opt coverageOptions) error {
 	} else {
 		output = render.CoverageText(m.res, m.threshold) + "\n" + render.ExcludedBlock(m.res.Excluded, m.excludedBy) + render.TracesLine(m.res.Counts)
 	}
-	return finish(cmd, "coverage", m, output, output, opt.out, opt.clean)
+	return finish(cmd, "coverage", m, output, output, opt.out, opt.clean, nil)
 }
 
 // The --json shape (schemaVersion 1), documented in SETUP-GUIDE.md.

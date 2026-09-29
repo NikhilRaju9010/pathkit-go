@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="pathkit-go">
+<title>PathKit report</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --card: #f6f8fa;
+  --covered: #1a7f37; --missed: #cf222e; --high: #cf222e; --medium: #9a6700; --low: #1a7f37;
+  --tab: #0969da;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d; --card: #151b23;
+    --covered: #3fb950; --missed: #f85149; --high: #f85149; --medium: #d29922; --low: #3fb950;
+    --tab: #4493f8;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 1.4rem; margin: 0 0 4px; }
+h2 { font-size: 1.1rem; margin: 24px 0 8px; }
+h3 { font-size: 1rem; margin: 0; overflow-wrap: anywhere; }
+.meta { color: var(--muted); margin: 0 0 16px; overflow-wrap: anywhere; }
+code, .path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; }
+
+ 
+.tabs > input { position: absolute; opacity: 0; pointer-events: none; }
+.tabs > label { display: inline-block; padding: 8px 16px; cursor: pointer; border-bottom: 3px solid transparent; color: var(--muted); font-weight: 600; }
+.tabs > input:checked + label { color: var(--fg); border-bottom-color: var(--tab); }
+.tabs > input:focus-visible + label { outline: 2px solid var(--tab); }
+.panel { display: none; border-top: 1px solid var(--line); padding-top: 8px; }
+#tab-coverage:checked ~ #panel-coverage, #tab-analysis:checked ~ #panel-analysis { display: block; }
+
+.total { font-size: 1.1rem; font-weight: 600; margin: 8px 0 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 12px 0; }
+.card header { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.file { color: var(--muted); overflow-wrap: anywhere; }
+.stats { margin: 4px 0 8px; }
+.badge { display: inline-block; padding: 0 8px; border-radius: 10px; font-weight: 600; border: 1px solid currentColor; }
+.prio-High { color: var(--high); } .prio-Medium { color: var(--medium); } .prio-Low { color: var(--low); }
+.added { color: var(--muted); font-style: italic; }
+.truncated { color: var(--medium); font-weight: 600; }
+ol.paths { margin: 0; padding-left: 0; list-style: none; }
+ol.paths li { padding: 3px 0; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: baseline; }
+ol.paths li:first-child { border-top: none; }
+.num { color: var(--muted); min-width: 2.5em; text-align: right; flex: none; }
+.path { flex: 1; overflow-wrap: anywhere; }
+.mark { font-weight: 600; flex: none; }
+.mark.covered { color: var(--covered); } .mark.missed { color: var(--missed); }
+.excluded ul, .trend ol { margin: 4px 0; padding-left: 20px; }
+.reason { color: var(--muted); }
+.traces, .fail-under { overflow-wrap: anywhere; }
+.trend li { margin: 4px 0; }
+.trend meter { width: 160px; max-width: 40vw; vertical-align: middle; }
+.scope-changed { color: var(--medium); font-weight: 600; }
+.note { color: var(--muted); }
+
+</style>
+</head>
+<body>
+<main>
+<h1>PathKit report</h1>
+<p class="meta">Generated 2026-09-29 10:00 UTC · ./orders · no config file (no scope in use)</p>
+
+<div class="tabs">
+<input type="radio" name="tab" id="tab-coverage" checked>
+<label for="tab-coverage">Coverage</label>
+<input type="radio" name="tab" id="tab-analysis">
+<label for="tab-analysis">Analysis</label>
+
+<section class="panel" id="panel-coverage">
+<p class="total" data-total-paths="3" data-total-covered="2">3 paths total · 2 covered · 1 missed · 66.7% project coverage</p>
+<p class="branches">Branches: 3/4 (75.0%)</p>
+<article class="card" data-workflow="orders.OrderWorkflow" data-covered="2" data-paths="3" data-priority="Medium" data-truncated="false">
+<header><h3>orders.OrderWorkflow</h3><span class="file">orders/orders.go</span><span class="badge prio-Medium">Medium</span></header>
+<p class="stats">2/3 paths · 66.7% · branches 3/4 · priority Medium</p>
+<ol class="paths">
+<li data-number="1" data-covered="true"><span class="num">1.</span><code class="path">Start -&gt; if in.AmountCents &lt;= 0 --true--&gt; End (completed)</code><span class="mark covered">covered</span></li>
+<li data-number="2" data-covered="true"><span class="num">2.</span><code class="path">Start -&gt; if in.AmountCents &lt;= 0 --false--&gt; ChargeCard (activity) --failure--&gt; End (failed)</code><span class="mark covered">covered</span></li>
+<li data-number="3" data-covered="false"><span class="num">3.</span><code class="path">Start -&gt; if in.AmountCents &lt;= 0 --false--&gt; ChargeCard (activity) --success--&gt; End (completed)</code><span class="mark missed">missed</span></li>
+</ol>
+</article>
+<p class="traces" data-read="2" data-counted="2" data-unmatched="0" data-stale="0" data-incomplete="0" data-excluded-traces="0" data-unknown="0" data-unreadable="0" data-other="0">Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable</p>
+<section class="trend">
+<h2>Trend (last 1 report run)</h2>
+<ol>
+<li data-trend-covered="2" data-trend-paths="3">2026-09-29 10:00 UTC · 2/3 · 66.7% <meter min="0" max="100" value="66.7">66.7%</meter></li>
+</ol>
+</section>
+</section>
+
+<section class="panel" id="panel-analysis">
+<article class="card" data-analysis-workflow="orders.OrderWorkflow">
+<header><h3>orders.OrderWorkflow</h3><span class="file">orders/orders.go</span></header>
+<p class="stats">Total paths: 3</p>
+<ol class="paths">
+<li data-number="1"><span class="num">1.</span><code class="path">Start -&gt; if in.AmountCents &lt;= 0 --true--&gt; End (completed)</code></li>
+<li data-number="2"><span class="num">2.</span><code class="path">Start -&gt; if in.AmountCents &lt;= 0 --false--&gt; ChargeCard (activity) --failure--&gt; End (failed)</code></li>
+<li data-number="3"><span class="num">3.</span><code class="path">Start -&gt; if in.AmountCents &lt;= 0 --false--&gt; ChargeCard (activity) --success--&gt; End (completed)</code></li>
+</ol>
+</article>
+</section>
+</div>
+
+<section class="excluded" data-excluded="0">
+<h2>0 workflows excluded (no scope in use)</h2>
+</section>
+</main>
+</body>
+</html>

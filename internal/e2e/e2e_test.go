@@ -12,12 +12,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -523,8 +525,29 @@ func TestCoverageMatchesKey(t *testing.T) {
 	}
 	t.Chdir(t.TempDir())
 	traces := t.TempDir()
+	// Owner's requirement (M8): pathkit test never deletes a
+	// report-history.json: not next to the default page, not in the
+	// trace folder it clears, not even in its own overlay folder.
+	histories := []string{
+		filepath.Join(".pathkit", "report-history.json"),
+		filepath.Join(".pathkit", "overlay", "report-history.json"),
+		filepath.Join(traces, "report-history.json"),
+	}
+	for _, h := range histories {
+		if err := os.MkdirAll(filepath.Dir(h), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(h, []byte("keep me"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if stdout, stderr, code := pathkit(t, "test", pilot+"/...", "--traces", traces); code != 0 {
 		t.Fatalf("pathkit test: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	for _, h := range histories {
+		if data, err := os.ReadFile(h); err != nil || string(data) != "keep me" {
+			t.Errorf("pathkit test deleted or changed %s: %v", h, err)
+		}
 	}
 
 	check := func(t *testing.T, args []string, wantCovered, wantPaths int, wantPct float64, skip string) {
@@ -621,6 +644,17 @@ func TestCoverageMatchesKey(t *testing.T) {
 		if !strings.Contains(text, "\n"+wantTotal+"\n") || !strings.Contains(text, "\nTraces: 21 read · ") {
 			t.Errorf("report text lacks %q or the Traces line:\n%s", wantTotal, text)
 		}
+
+		// M8: the HTML page shows exactly report's numbers.
+		out := filepath.Join(t.TempDir(), "report.html")
+		if _, stderr, code := pathkit(t, append([]string{"report", pilot + "/...", "--traces", traces, "--html=" + out}, args...)...); code != 0 {
+			t.Fatalf("report --html: exit %d %s", code, stderr)
+		}
+		page, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		htmlMatchesReport(t, string(page), rep, wantTotal)
 	}
 	// D11 from EXPECTED.md's numbers: 33.3% High; 50%, 60%, 66.7% Medium; 100% Low.
 	priorities := map[string]string{
@@ -637,6 +671,154 @@ func TestCoverageMatchesKey(t *testing.T) {
 		delete(scoped, "shipment.ShipmentWorkflow")
 		agree(t, []string{"--config", cfg}, "29 paths total · 17 covered · 12 missed · 58.6% project coverage", scoped)
 	})
+
+	// M8, D5: the Analysis tab numbers every path exactly as analyze
+	// does (report.html's and analysis.html's alike).
+	t.Run("same path numbers as analyze", func(t *testing.T) {
+		text, _, code := pathkit(t, "analyze", pilot+"/...")
+		if code != 0 {
+			t.Fatal("analyze failed")
+		}
+		want := analyzeListing(text)
+		r, a := filepath.Join(t.TempDir(), "r.html"), filepath.Join(t.TempDir(), "a.html")
+		pathkit(t, "report", pilot+"/...", "--traces", traces, "--html="+r)
+		pathkit(t, "analyze", pilot+"/...", "--html="+a)
+		for _, file := range []string{r, a} {
+			page, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := analysisTab(string(page))
+			if len(got) != 8 || !reflect.DeepEqual(got, want) {
+				t.Errorf("%s: the Analysis tab differs from analyze\n got %v\nwant %v", filepath.Base(file), got, want)
+			}
+		}
+	})
+}
+
+// analyzeListing reads analyze's text output: workflow -> its numbered
+// path lines ("1. Start -> ...").
+func analyzeListing(text string) map[string][]string {
+	out := map[string][]string{}
+	name := ""
+	for _, line := range strings.Split(text, "\n") {
+		if n, ok := strings.CutPrefix(line, "Workflow: "); ok {
+			name = n
+		} else if m := regexp.MustCompile(`^  (\d+\. .*)$`).FindStringSubmatch(line); m != nil && name != "" {
+			out[name] = append(out[name], m[1])
+		}
+	}
+	return out
+}
+
+var (
+	analysisCardRe = regexp.MustCompile(`(?s)<article class="card" data-analysis-workflow="([^"]*)">(.*?)</article>`)
+	coverageCardRe = regexp.MustCompile(`(?s)<article class="card" data-workflow="([^"]*)" data-covered="(\d+)" data-paths="(\d+)" data-priority="([^"]*)" data-truncated="(true|false)">(.*?)</article>`)
+	pathLineRe     = regexp.MustCompile(`<li data-number="(\d+)"(?: data-covered="(true|false)")?><span class="num">(\d+)\.</span><code class="path">(.*?)</code>`)
+	attrRe         = func(name string) *regexp.Regexp { return regexp.MustCompile(` ` + name + `="([^"]*)"`) }
+)
+
+// analysisTab reads a page's Analysis tab: workflow -> "N. <path>" lines.
+func analysisTab(page string) map[string][]string {
+	out := map[string][]string{}
+	for _, card := range analysisCardRe.FindAllStringSubmatch(page, -1) {
+		name := html.UnescapeString(card[1])
+		for _, li := range pathLineRe.FindAllStringSubmatch(card[2], -1) {
+			out[name] = append(out[name], li[3]+". "+html.UnescapeString(li[4]))
+		}
+	}
+	return out
+}
+
+// htmlMatchesReport requires the page's numbers, read from its data-*
+// attributes and visible text, to equal report --json field by field.
+func htmlMatchesReport(t *testing.T, page, reportJSON, wantTotal string) {
+	t.Helper()
+	var rep struct {
+		Workflows []struct {
+			Name     string
+			File     string
+			Priority *string
+			Paths    struct{ Total, Covered int }
+			PathList []struct {
+				Number  int
+				Text    string
+				Covered bool
+			}
+		}
+		Excluded []struct{ Name, Reason string }
+		Total    struct{ Total, Covered int }
+		Traces   map[string]int
+	}
+	if err := json.Unmarshal([]byte(reportJSON), &rep); err != nil {
+		t.Fatal(err)
+	}
+	attr := func(src, name string) string {
+		m := attrRe(name).FindStringSubmatch(src)
+		if m == nil {
+			t.Fatalf("no %s attribute", name)
+		}
+		return html.UnescapeString(m[1])
+	}
+	num := func(s string) int { n, _ := strconv.Atoi(s); return n }
+
+	if num(attr(page, "data-total-paths")) != rep.Total.Total || num(attr(page, "data-total-covered")) != rep.Total.Covered {
+		t.Errorf("total: html %s/%s, json %d/%d", attr(page, "data-total-covered"), attr(page, "data-total-paths"), rep.Total.Covered, rep.Total.Total)
+	}
+	if !strings.Contains(html.UnescapeString(page), ">"+wantTotal+"</p>") {
+		t.Errorf("the visible total line is not %q", wantTotal)
+	}
+
+	cards := coverageCardRe.FindAllStringSubmatch(page, -1)
+	if len(cards) != len(rep.Workflows) {
+		t.Fatalf("%d workflows in the page, %d in the JSON", len(cards), len(rep.Workflows))
+	}
+	for i, c := range cards {
+		w := rep.Workflows[i]
+		prio := ""
+		if w.Priority != nil {
+			prio = *w.Priority
+		}
+		if html.UnescapeString(c[1]) != w.Name || num(c[2]) != w.Paths.Covered || num(c[3]) != w.Paths.Total || c[4] != prio {
+			t.Errorf("workflow %d: html %s %s/%s %s; json %s %d/%d %s", i, c[1], c[2], c[3], c[4], w.Name, w.Paths.Covered, w.Paths.Total, prio)
+		}
+		if !strings.Contains(c[6], `<span class="file">`+w.File+`</span>`) {
+			t.Errorf("%s: file %s not shown", w.Name, w.File)
+		}
+		lis := pathLineRe.FindAllStringSubmatch(c[6], -1)
+		if len(lis) != len(w.PathList) {
+			t.Fatalf("%s: %d paths in the page, %d in the JSON", w.Name, len(lis), len(w.PathList))
+		}
+		for j, li := range lis {
+			p := w.PathList[j]
+			if num(li[1]) != p.Number || (li[2] == "true") != p.Covered || html.UnescapeString(li[4]) != p.Text {
+				t.Errorf("%s path %d: html %s covered=%s %q; json %d covered=%v %q", w.Name, j+1, li[1], li[2], html.UnescapeString(li[4]), p.Number, p.Covered, p.Text)
+			}
+		}
+	}
+
+	var excluded []string
+	for _, m := range regexp.MustCompile(`<li data-excluded-workflow="([^"]*)"><code>[^<]*</code>: <span class="reason">([^<]*)</span>`).FindAllStringSubmatch(page, -1) {
+		excluded = append(excluded, html.UnescapeString(m[1])+": "+html.UnescapeString(m[2]))
+	}
+	var wantExcluded []string
+	for _, e := range rep.Excluded {
+		wantExcluded = append(wantExcluded, e.Name+": "+e.Reason)
+	}
+	if !slices.Equal(excluded, wantExcluded) {
+		t.Errorf("excluded: html %v, json %v", excluded, wantExcluded)
+	}
+
+	for jsonKey, attrName := range map[string]string{"read": "data-read", "counted": "data-counted", "unmatched": "data-unmatched",
+		"stale": "data-stale", "incomplete": "data-incomplete", "excluded": "data-excluded-traces", "unknownWorkflow": "data-unknown",
+		"unreadable": "data-unreadable", "otherWorkflows": "data-other"} {
+		if got := num(attr(page, attrName)); got != rep.Traces[jsonKey] {
+			t.Errorf("traces %s: html %d, json %d", jsonKey, got, rep.Traces[jsonKey])
+		}
+	}
+	if !strings.Contains(page, ">Traces: 21 read · ") {
+		t.Errorf("the visible Traces line is missing")
+	}
 }
 
 // pathkit prepare writes the overlay and prints the go test command; that
