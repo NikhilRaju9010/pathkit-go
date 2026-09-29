@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
@@ -132,4 +133,25 @@ func Check(f File, g *model.Graph, hash string) Outcome {
 		return Outcome{Kind: Unmatched, Reason: mm.Reason}
 	}
 	return Outcome{Kind: Matched, Path: p}
+}
+
+// ClearOlderThan deletes the trace files in dir last written before
+// cutoff (only *.trace.json files), and returns how many it deleted.
+func ClearOlderThan(dir string, cutoff time.Time) (int, error) {
+	files, err := List(dir)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, f := range files {
+		info, err := os.Stat(f)
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		if err := os.Remove(f); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }

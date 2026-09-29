@@ -10,9 +10,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -481,5 +483,141 @@ func TestAddedByConfigRecorded(t *testing.T) {
 	stdout, _, code = pathkit(t, "traces", dir, "--config", cfg, "--traces", traces)
 	if code != 0 || !strings.Contains(stdout, "scope.lowerFlow: path 1 (J1.true → End (completed))\n") {
 		t.Errorf("traces: exit %d\n%s", code, stdout)
+	}
+}
+
+// covJSON is the part of "pathkit coverage --json" these tests read.
+type covJSON struct {
+	Workflows []struct {
+		Name     string
+		Paths    struct{ Total, Covered int }
+		PathList []struct {
+			Steps        []string
+			End          string
+			Compensation bool
+			Covered      bool
+		}
+	}
+	Excluded []struct{ Name, Reason string }
+	Total    struct {
+		Total, Covered int
+		Percent        float64
+	}
+}
+
+// pathkit coverage on real recorded runs gives exactly what EXPECTED.md
+// predicts: 20 of 38 (52.6%) for the whole pilot, 17 of 29 (58.6%) with
+// the no-shipment scope, and for every workflow the very paths the key's
+// tests point to.
+func TestCoverageMatchesKey(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test on the pilot; skipped with -short")
+	}
+	pilot := abs(t, "../../testdata/pilot")
+	cfg := abs(t, "../../testdata/scopes/no-shipment/.pathkitrc.json")
+	key, err := expected.Read(filepath.Join(pilot, "EXPECTED.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	traces := t.TempDir()
+	if stdout, stderr, code := pathkit(t, "test", pilot+"/...", "--traces", traces); code != 0 {
+		t.Fatalf("pathkit test: exit %d\n%s\n%s", code, stdout, stderr)
+	}
+
+	check := func(t *testing.T, args []string, wantCovered, wantPaths int, wantPct float64, skip string) {
+		stdout, stderr, code := pathkit(t, append([]string{"coverage", pilot + "/...", "--traces", traces, "--json"}, args...)...)
+		if code != 0 || stderr != "" {
+			t.Fatalf("coverage: exit %d\n%s", code, stderr)
+		}
+		var got covJSON
+		if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Total.Covered != wantCovered || got.Total.Total != wantPaths || got.Total.Percent != wantPct {
+			t.Errorf("total %d/%d = %v%%, want %d/%d = %v%%", got.Total.Covered, got.Total.Total, got.Total.Percent, wantCovered, wantPaths, wantPct)
+		}
+		for _, w := range got.Workflows {
+			ew := key[w.Name]
+			if ew == nil || w.Name == skip {
+				t.Errorf("%s is in the coverage but shouldn't be", w.Name)
+				continue
+			}
+			// The set of covered paths must be exactly the paths the key's
+			// tests point to (compared as keys, with the note).
+			var gotKeys, wantKeys []string
+			for _, p := range w.PathList {
+				if p.Covered {
+					k := strings.Join(p.Steps, " ") + "|" + p.End
+					gotKeys = append(gotKeys, withNote(k, p.Compensation))
+				}
+			}
+			seen := map[int]bool{}
+			for _, tst := range ew.Tests {
+				if !seen[tst.Path] {
+					seen[tst.Path] = true
+					p := ew.Paths[tst.Path-1]
+					wantKeys = append(wantKeys, withNote(p.Key, p.Compensation))
+				}
+			}
+			slices.Sort(gotKeys)
+			slices.Sort(wantKeys)
+			if w.Paths.Covered != ew.Covered || w.Paths.Total != ew.Count || !slices.Equal(gotKeys, wantKeys) {
+				t.Errorf("%s: %d/%d covered %v; EXPECTED.md: %d/%d covered %v", w.Name, w.Paths.Covered, w.Paths.Total, gotKeys, ew.Covered, ew.Count, wantKeys)
+			}
+		}
+	}
+	t.Run("whole pilot", func(t *testing.T) { check(t, nil, 20, 38, 52.6, "") })
+	t.Run("no-shipment scope", func(t *testing.T) {
+		check(t, []string{"--config", cfg}, 17, 29, 58.6, "shipment.ShipmentWorkflow")
+	})
+
+	// The text report's total line, as the setup guide shows it.
+	stdout, _, _ := pathkit(t, "coverage", pilot+"/...", "--traces", traces)
+	if !strings.Contains(stdout, "\n38 paths total · 20 covered · 18 missed · 52.6% coverage\n") {
+		t.Errorf("text total line missing:\n%s", stdout)
+	}
+}
+
+// pathkit prepare writes the overlay and prints the go test command; that
+// command, run by hand (not through pathkit), records traces. A plain
+// "go test" records nothing.
+func TestPrepare(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs go test; skipped with -short")
+	}
+	orders := abs(t, "../../testdata/pilot/orders")
+	t.Chdir(t.TempDir())
+	traces := abs(t, "traces")
+	stdout, stderr, code := pathkit(t, "prepare", orders, "--traces", traces)
+	if code != 0 {
+		t.Fatalf("prepare: exit %d\n%s", code, stderr)
+	}
+	line := strings.TrimSpace(stdout)
+	if !strings.HasPrefix(line, "go test -overlay=") || strings.Count(stdout, "\n") != 1 ||
+		!strings.Contains(stderr, "pathkit prepare: run it in "+orders+"\n") {
+		t.Fatalf("stdout %q\nstderr %q", stdout, stderr)
+	}
+
+	goTest := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("go", args...)
+		cmd.Dir = orders
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("go %v: %v\n%s", args, err, out)
+		}
+	}
+	goTest("test", "-count=1", ".") // plain go test: records nothing
+	if n := len(readTraces(t, traces)); n != 0 {
+		t.Fatalf("plain go test wrote %d traces, want 0", n)
+	}
+	goTest(strings.Fields(line)[1:]...) // exactly the printed command
+	files := readTraces(t, traces)
+	if len(files) != 3 {
+		t.Fatalf("the printed command wrote %d traces, want 3 (the orders tests)", len(files))
+	}
+	stdout, _, code = pathkit(t, "coverage", orders, "--traces", traces)
+	if code != 0 || !strings.Contains(stdout, "Covered: 3/3 (100.0%)") {
+		t.Errorf("coverage of the prepared run: exit %d\n%s", code, stdout)
 	}
 }

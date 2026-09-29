@@ -2,10 +2,10 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (M5 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` and `report` are not implemented yet; `pathkit traces` shows recorded runs in the meantime. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development (M6 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` shows which paths your tests ran; the project-wide `report` arrives in M7. This guide grows with each milestone. See `PLAN.md` for progress.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
-> A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`. *(`pathkit prepare`, for adding the overlay flag to your own `go test` command, arrives in M6.)*
+> A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`, or with the exact command `pathkit prepare` prints (section 5).
 
 ## Commands
 
@@ -13,8 +13,10 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 | --- | --- | --- |
 | `pathkit analyze <file>` | Lists every possible path through the workflows in one file (or a package folder, or `folder/...`). | yes (M2; all constructs since M4) |
 | `pathkit test [folder \| folder/...]` | Runs your Go tests and records which path each workflow run took. | yes (M3) |
-| `pathkit traces [folder \| folder/...]` | Shows which path each recorded run took (a debug view until `coverage` exists). | yes (M3) |
-| `pathkit coverage <file> --traces <dir>` | Shows which of one workflow's paths your tests ran. | coming in M6 |
+| `pathkit traces [folder \| folder/...]` | Shows which path each recorded run took (a debug view). | yes (M3) |
+| `pathkit coverage <file \| folder \| folder/...>` | Shows which paths your tests ran, workflow by workflow, with a total; `--fail-under` for CI. | yes (M6) |
+| `pathkit clean` | Deletes recorded trace files. | yes (M6) |
+| `pathkit prepare [folder \| folder/...]` | Prints the `go test -overlay=...` command that records traces, for running `go test` yourself. | yes (M6) |
 | `pathkit report <dir> --traces <dir>` | The same across every workflow in a project, with a project-wide total. | coming in M7 |
 | `pathkit --version` | Prints the installed version. | yes |
 
@@ -65,8 +67,8 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
 | `--limit <n>` | Print at most `n` paths, plus a "... and N more" note. |
 | `--mermaid` | Print a Mermaid diagram instead (paste into https://mermaid.live). |
 | `--out <path>` | Also write exactly what was printed to a file. |
-| `--config <file>` | Use this config file instead of searching for `.pathkitrc.json` (see section 5). |
-| `--include a,b` / `--exclude a,b` | Only these workflows count / leave these out, for this run (section 5). |
+| `--config <file>` | Use this config file instead of searching for `.pathkitrc.json` (see section 6). |
+| `--include a,b` / `--exclude a,b` | Only these workflows count / leave these out, for this run (section 6). |
 | `--all` | Show every workflow, ignoring the config file and `--include`/`--exclude`; a line on stderr says the config was ignored. |
 
 **Which functions are workflows:** exported functions (or methods) whose first parameter is `workflow.Context` and whose last result is `error`.
@@ -169,7 +171,7 @@ Line numbers stay the same in the copy, so test failures and panics still point 
 | Flag | Effect |
 | --- | --- |
 | `--traces <dir>` | Where to write trace files (default: the config's `"traces"`, else `.pathkit/traces`). |
-| `--config`, `--include`, `--exclude` | Which workflows are recorded (section 5). Excluded workflows' tests still run; they just aren't recorded. |
+| `--config`, `--include`, `--exclude` | Which workflows are recorded (section 6). Excluded workflows' tests still run; they just aren't recorded. |
 | `--keep-traces` | Keep old trace files. By default each run first deletes the old ones (only `*.trace.json` files). |
 | `-- <go test flags>` | Everything after `--` goes to `go test`, e.g. `pathkit test ./... -- -run TestOrder -v`. |
 
@@ -198,7 +200,96 @@ A trace doesn't know which test produced it; to see one test's path, run only th
 
 Add `.pathkit/` to your `.gitignore`. It holds PathKit's marked-up copies (`.pathkit/overlay/`) and your traces. Go's own build and test commands never look inside it, but `gofmt -l .` does, and lists the copies as unformatted. That's harmless; to keep gofmt's output clean, run it on your tracked files only (`gofmt -l $(git ls-files '*.go')`) or on your source folders.
 
-## 5. Choose which workflows count (`.pathkitrc.json`)
+## 5. See your coverage (`coverage`)
+
+After `pathkit test`, ask which paths your tests ran:
+
+```bash
+pathkit coverage testdata/pilot/...
+```
+
+```
+Workflow: orders.OrderWorkflow
+Total paths: 3
+Covered: 3/3 (100.0%)
+Branches: 4/4 (100.0%)
+
+Covered paths:
+  1. Start -> if in.AmountCents <= 0 --true--> End (completed)
+  2. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)
+  3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
+Untested paths:
+  (none)
+...
+38 paths total · 20 covered · 18 missed · 52.6% coverage
+Branches: 39/50 (78.0%)
+
+Traces: 21 read · 21 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
+```
+
+- **A path counts as covered** when at least one recorded run took it. Running it twice still counts once. The path numbers are the ones `analyze` prints.
+- **Loops:** a run that went round a loop several times counts as the path of its last trip (the loop rule in section 3).
+- **Branches** count exits instead of whole paths: of all the exits on the listed paths, how many some run took. Branch coverage uses each run's raw steps (before loop folding), so a branch can show as taken even when no covered path uses it. It is shown to help you, but `--fail-under` never looks at it.
+- **The scope** (section 6) applies: excluded workflows are listed with their reasons at the end, and their traces count as "excluded".
+
+| Flag | Effect |
+| --- | --- |
+| `--traces <dir>` | Trace folder (default: the config's `"traces"`, else `.pathkit/traces`, the same place `pathkit test` writes). |
+| `--function <name>` | Only this workflow. |
+| `--fail-under <percent>` | Exit code **2** when path coverage is below it (config: `"failUnder"`; the flag wins). The report is still printed first. |
+| `--allow-stale` | Also count traces recorded for an older version of a workflow, when they still fit a path (config: `"allowStale"`). |
+| `--json` | Print JSON instead (shape below). |
+| `--out <file>` | Also write exactly what was printed to a file. |
+| `--clean` | Delete the trace files after the report. Only when the report was produced (exit 0 or 2), never after an error. |
+| `--config`, `--include`, `--exclude` | Scope, as in section 6. |
+
+**Exit codes:**
+- `0`: all good;
+- `1`: a real error (bad argument, no trace files, a workflow in scope that can't be analyzed, …);
+- `2`: coverage is below `--fail-under`.
+
+If the rounded number would look the same as the threshold, PathKit prints more decimals so you can see why: `coverage 66.67% is below --fail-under 66.7%`.
+
+**Traces that don't count are always shown, never dropped.** Each one gets a warning on stderr, and the `Traces:` line counts them. They never change the exit code.
+
+| Kind | What it means | Fix |
+| --- | --- | --- |
+| `stale` | The workflow's code changed after this run was recorded (comments and formatting don't count). Not counted. | Re-run `pathkit test`. For a change you know is cosmetic (a renamed variable), pass `--allow-stale`: a stale trace that still fits a path then counts, and that path is marked `(stale trace)`. One that no longer fits is reported as unmatched. |
+| `unmatched` | The run doesn't fit any path; the warning names the exact step where it left the map. | Usually the workflow changed; re-record. If it persists, it's a PathKit bug worth reporting. |
+| `incomplete` | The run never finished (panic, timeout, or stopped). | Look at that test. |
+| `excluded` | The workflow is out of scope. | Nothing (it's listed on purpose). |
+| `unknown workflow` | No such workflow in what you asked `coverage` about. | Point `coverage` at the right folder. |
+| `unreadable` | Not a valid trace file (or a different trace format version). | Delete it and re-record. |
+
+**`--json`** prints one object:
+- `schemaVersion` (1) and `tool`;
+- `workflows`: for each, `name`, `addedByConfig`, `paths` and `branches` (each `{total, covered, percent}`), `truncated`, and `pathList` (for each path: `number`, `id`, `text`, `steps`, `end`, `compensation`, `covered`, `traces`, `staleTrace`);
+- `excluded`: `[{name, reason}]`;
+- `total` and `branches`;
+- `traces`: the counts;
+- `failUnder`: `{threshold, passed}`, or `null` when no threshold is set.
+
+`percent` has one decimal; use `covered`/`total` for exact math.
+
+**Cleaning up.** `pathkit test` clears old traces at the start of each run (unless `--keep-traces`). To delete them yourself:
+
+```bash
+pathkit clean                    # every *.trace.json in the trace folder
+pathkit clean --older-than 7d    # only ones older than 7 days (also 12h, 30m)
+```
+
+Only `*.trace.json` files are ever deleted.
+
+**Running `go test` yourself (`pathkit prepare`).** If your CI or IDE runs `go test` directly, let PathKit write its marked-up copies and print the command to use:
+
+```bash
+pathkit prepare ./...
+go test -overlay=/your/project/.pathkit/overlay/overlay.json -count=1 ./...
+```
+
+Only that command records traces; a plain `go test` records nothing. Run `prepare` again after you change a workflow, because the copies are made from the code as it was when you ran it.
+
+## 6. Choose which workflows count (`.pathkitrc.json`)
 
 Some workflows can't be tested yet (say, they need a real bank sandbox). Counting them would drag your coverage down and make the number mean less. A `.pathkitrc.json` file says which workflows count. Think of a report card where some subjects aren't graded this term: they're listed as "not graded, because …", and the average is taken over the rest.
 
@@ -245,7 +336,7 @@ Workflow: scope.lowerFlow (added by config)
 
 **Example with the sample project:** excluding `ShipmentWorkflow` changes the project from 38 paths with 20 covered (52.6%) to 29 paths with 17 covered (58.6%). The number went up only because something was taken out. That's why every exclusion shows its reason, and why `report` (M7) will always print how many workflows were excluded.
 
-**A workflow in scope that PathKit can't analyze** (for example one using `goto`) is always printed as `in scope but not analyzable: … (fix it, or exclude it in .pathkitrc.json with a reason)`. From M6/M7, `coverage` and `report` will refuse to run while one is in scope, so the percentage always covers exactly what's in scope.
+**A workflow in scope that PathKit can't analyze** (for example one using `goto`) is always printed as `in scope but not analyzable: … (fix it, or exclude it in .pathkitrc.json with a reason)`. `coverage` (and `report` from M7) refuses to run while one is in scope (exit 1), so the percentage always covers exactly what's in scope.
 
 **All keys:**
 
@@ -254,13 +345,13 @@ Workflow: scope.lowerFlow (added by config)
 | `packages` | Where your workflows are (default `./...` from the file's folder). Names are checked against these. It is also the folder `pathkit test`/`traces` use when you give none (only when it lists one). | now |
 | `traces` | Trace folder (default `.pathkit/traces`). | now |
 | `workflows.include` / `workflows.exclude` | See above. | now |
-| `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code. | checked now, used from M6 |
+| `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). | now (`coverage`; `report` from M7) |
 | `out`, `json`, `noColor` | Report output options. | checked now, used from M7 |
 | `html` | `true` or a file path for the HTML report. | checked now, used from M8 |
 
-Keys marked "checked now" are validated, so a typo or wrong type is still reported, but they do nothing yet, and no command claims to apply them. Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
+Keys marked "checked now" are validated, so a typo or wrong type is still reported, but they do nothing yet, and no command claims to apply them. (`out`, `json` and `noColor` in the config are for `report`; `coverage` uses only its own `--out` and `--json` flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
 
-## 6. Errors and exit codes
+## 7. Errors and exit codes
 
 Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 
@@ -268,7 +359,7 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | --- | --- |
 | `0` | Success. |
 | `1` | A real error (bad argument, missing file, ...). The message says what. |
-| `2` | The report was produced, but coverage is below `--fail-under`. *(From M6.)* Lets CI tell "coverage too low" apart from "PathKit failed". |
+| `2` | The report was produced, but coverage is below `--fail-under`. Lets CI tell "coverage too low" apart from "PathKit failed". |
 
 | Message | Cause | Fix |
 | --- | --- | --- |
@@ -287,7 +378,7 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `no workflows could be analyzed` | Every workflow found was skipped (see the `skipping ...` lines). | Rewrite the construct named in the `skipping` line (see "Never supported" above), or analyze another file. |
 | `skipping <workflow>: goto at ... is not supported: ...` | The workflow uses `goto` or Go's `select`, which PathKit never maps. | Rewrite with `break`/`continue`/`return`, or `workflow.Selector`; other workflows are still analyzed. |
 | `<path>/.pathkitrc.json: invalid JSON at line 3, column 32: ...` | The config file isn't valid JSON. | Fix the file at that line (a missing comma, say). |
-| `<path>/.pathkitrc.json: unknown key "workflow"` | A misspelled key. | Check the spelling against section 5. |
+| `<path>/.pathkitrc.json: unknown key "workflow"` | A misspelled key. | Check the spelling against section 6. |
 | `<path>/.pathkitrc.json: workflows.include is empty: ...` | `"include": []` would be ambiguous. | Remove it, or list the workflows that count. |
 | `<path>/.pathkitrc.json: exclude "X" needs a "reason"` | Every exclusion must say why. | Add `"reason": "..."`. |
 | `... include "X" matches no function ...` / `... exclude "X" matches no workflow ...` | A misspelled or missing name. | Fix the name; `pathkit analyze --all` lists every workflow. |
@@ -295,6 +386,10 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `... matches 2 functions (a.Run, b.Run); write it with its package ...` | A short name is ambiguous. | Write it as `a.Run`. |
 | `in scope but not analyzable: <workflow>: ...` | The workflow uses something PathKit never maps. | Fix it, or exclude it with a reason. |
 | `no workflows in scope to analyze (every workflow is excluded)` | The scope left nothing to show. | Check `include`/`exclude`, or use `--all`. |
+| `coverage 52.6% is below --fail-under 80%` (exit 2) | Path coverage is under your threshold. | Write tests for the untested paths listed above it. |
+| `invalid --fail-under value: ...` | `--fail-under` needs a number from 0 to 100. | e.g. `--fail-under 80`. |
+| `invalid --older-than value: ...` | `pathkit clean --older-than` needs an age. | e.g. `7d`, `12h`, `30m`. |
+| `... matches no workflow ...; did you mean "ShipmentWorkflow"?` | A typo in a workflow name (config, `--include`/`--exclude`, `--function`). | Use the suggested name. |
 | `invalid --limit value: ...` | `--limit` needs a positive whole number. | e.g. `--limit 20`. |
 | `--limit ignored because --summary was passed.` | Both flags together. A note only. | Use one or the other. |
 

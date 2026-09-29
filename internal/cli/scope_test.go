@@ -130,7 +130,7 @@ func TestAnalyzeScopeFlags(t *testing.T) {
 	}
 
 	_, stderr, code := run(t, "analyze", p+"/...", "--exclude", "ShipmentWorkflw")
-	if want := `pathkit analyze: --exclude "ShipmentWorkflw" matches no workflow in ` + p + "/...\n"; code != ExitError || stderr != want {
+	if want := `pathkit analyze: --exclude "ShipmentWorkflw" matches no workflow in ` + p + `/...; did you mean "ShipmentWorkflow"?` + "\n"; code != ExitError || stderr != want {
 		t.Errorf("misspelled --exclude: code=%d stderr=%q, want %q", code, stderr, want)
 	}
 }
@@ -156,7 +156,7 @@ func TestAnalyzeConfigErrors(t *testing.T) {
 		{"empty include", `{"workflows": {"include": []}}`,
 			"workflows.include is empty: remove it to include every workflow, or list the ones you want\n"},
 		{"misspelled include", `{"packages": ["` + p + `/..."], "workflows": {"include": ["OrderWorkflw"]}}`,
-			`include "OrderWorkflw" matches no function in the configured packages (` + p + "/...)\n"},
+			`include "OrderWorkflw" matches no function in the configured packages (` + p + `/...); did you mean "OrderWorkflow"?` + "\n"},
 		{"include of a non-workflow", `{"packages": ["` + f + `/scope/..."], "workflows": {"include": ["sendEmail"]}}`,
 			`include "sendEmail" is not a workflow: its first parameter is not workflow.Context` + "\n"},
 		{"unknown key", `{"workflow": {}}`, `unknown key "workflow"` + "\n"},

@@ -32,10 +32,12 @@ func TestErrorsUseOneLineStyleAndExitCode1(t *testing.T) {
 			"pathkit analyze: unknown flag: --sumary\n"},
 		{"coverage without file", []string{"coverage"},
 			"pathkit coverage: missing <file> argument\n"},
-		{"coverage without traces", []string{"coverage", "x.go"},
-			"pathkit coverage: missing required --traces <dir> argument\n"},
-		{"coverage not implemented yet", []string{"coverage", "x.go", "--traces", "t"},
-			"pathkit coverage: not implemented yet (planned for M6)\n"},
+		// --traces is optional for coverage since M6 (owner's decision):
+		// it defaults like pathkit test, so the file check comes first.
+		{"coverage file not found", []string{"coverage", "x.go"},
+			"pathkit coverage: Workflow file not found: x.go\n"},
+		{"coverage bad --fail-under", []string{"coverage", "x.go", "--fail-under", "abc"},
+			"pathkit coverage: invalid --fail-under value: \"abc\" (it must be a number from 0 to 100)\n"},
 		{"report without dir", []string{"report"},
 			"pathkit report: missing <dir> argument\n"},
 		{"report without traces", []string{"report", "."},

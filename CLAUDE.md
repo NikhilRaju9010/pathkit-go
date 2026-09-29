@@ -775,3 +775,44 @@ Two decisions changed along the way, both approved by the owner:
   - config folders `testdata/scopes/no-shipment` and `testdata/scopes/added`.
 
   `EXPECTED.md` was not edited.
+
+## 2026-09-29 — M6: `pathkit coverage`, `--fail-under`, `pathkit clean`, `pathkit prepare`
+
+**Owner's decisions (M6 plan, 2026-09-29):**
+1. **`--traces` defaults for `coverage`** (the flag, else the config's `"traces"`, else `.pathkit/traces`), like `pathkit test` and `pathkit traces`. The M0 "missing required --traces" check is gone for `coverage`; `report` keeps it until M7.
+2. **Traces that don't count warn but never change the exit code** (as in TS). Each gets a stderr warning (`pathkit coverage: warning: …`) naming the file and the reason, and the `Traces:` line counts every kind.
+3. **`pathkit prepare` is built in M6** (deferred from M3).
+4. **`--clean` deletes traces only when the report was fully produced** (exit 0 or 2), never on exit 1. Tested both ways, including an `--out` write that fails *after* the report printed: exit 1, and the traces are kept.
+5. **When one decimal makes the value look equal to the `--fail-under` threshold, more decimals are printed** until the difference shows: `coverage 66.67% is below --fail-under 66.7%` (`render.Pct`).
+6. **Branch coverage uses raw steps.** It counts every exit the run took, before loop folding, so a branch can show as taken even when no covered path uses it. This is written in `LIMITATIONS.md` and `SETUP-GUIDE.md`.
+
+**What was built:**
+- **`internal/coverage`**, a pure calculation. It classifies every trace with the existing `trace.Check`:
+  - matched: counted;
+  - unmatched: a warning with the exact step, from `Graph.Match`;
+  - stale: a warning, not counted;
+  - incomplete, unknown workflow, unreadable: warnings;
+  - excluded: counted in the summary;
+  - other (`--function` picked another workflow): counted in the summary.
+
+  A path is covered when at least one counted trace lands on it; repeats count once. **`--allow-stale`** (or config `allowStale`) matches a stale trace against the current map. If it fits, it counts and the path is marked `(stale trace)`; if not, it's unmatched. The **branch** total is the exits on the listed paths, `retry` edges included.
+- **`pathkit coverage <file|folder|folder/...>`**, in the TS format (`Workflow:`, `Total paths:`, `Covered: 2/3 (66.7%)`, `Branches:`, "Covered paths" / "Untested paths" with `analyze`'s numbers). It adds TS `report`'s total line (`38 paths total · 20 covered · 18 missed · 52.6% coverage`), M5's excluded list and the `Traces:` line.
+  - It uses `loadScoped`, so the scope is identical to `analyze` and `test`. It refuses with exit 1 while a workflow in scope isn't analyzable (the M5 decision).
+  - Flags: `--function`, `--json`, `--out`, `--fail-under`, `--allow-stale`, `--clean`, and the scope flags.
+  - **`--fail-under`** compares the exact value (52.63 passes 52.6). The flag beats the config's `failUnder`. Below it, the report is printed, then the stderr line, then exit 2.
+- **`--json` (schemaVersion 1)** is documented in `SETUP-GUIDE.md` and pinned by the golden file `internal/cli/testdata/coverage_orders.json`. `->` is kept readable (no HTML escaping).
+- **`pathkit clean [--traces] [--older-than 30m|12h|7d] [--config]`** deletes only `*.trace.json` files. It prints `deleted N trace files from <dir>`, or `nothing to clean in <dir>`.
+- **`pathkit prepare [folder]`** writes the same overlay as `pathkit test` (the overlay writing is now a shared `writeOverlay`) and prints exactly one line on stdout, the `go test -overlay=… -count=1 <pattern>` command. Where to run it, and the "plain go test records nothing" note, go to stderr.
+- **Did-you-mean:** `scope.Suggest` finds the closest name by edit distance (at most 3 edits and a third of the length; case is ignored when measuring). It's added to every "matches no …" error: config `include`/`exclude`, `--include`/`--exclude`, and `--function` through the new `scope.MatchName`.
+
+**Tests added:**
+- **`internal/coverage`:** orders fully covered (a repeat counted once); `TestBranchesUseRawSteps` (polling, pending then complete: 1 path covered, 5 of 8 branches); `TestTraceKinds` (7 kinds, 5 exact warnings); `TestAllowStale`; `TestOthers`; `TestPercent`.
+- **`internal/render`:** `TestPct`, 7 cases including 52.59 vs 52.6 → `52.59%`.
+- **`internal/scope`:** `TestSuggest` (6 cases), and the hint in 4 exact errors plus one far-off name with no hint.
+- **`internal/cli`:** the text output checked in full, `--out`, the JSON golden, `--fail-under` (5 cases), the config `failUnder` and the flag override, `--clean` at exit 0, exit 2 and two exit-1 cases, errors (no traces, not analyzable, `--function` typo with a hint), `--function`, warnings, and `pathkit clean`.
+- **`cmd/pathkit` `TestBinaryCoverageExitCodes`:** 11 cases run against the **real built program**, checking exit codes 0, 1 and 2 and the stderr lines.
+- **`internal/e2e`:**
+  - `TestCoverageMatchesKey`: one real `pathkit test` of the pilot, then `coverage --json`. That gives **20/38 = 52.6%**, and **17/29 = 58.6%** with the no-shipment scope. For every workflow, **the set of covered paths equals the set `EXPECTED.md`'s tests point to**, notes included. The text total line is checked too.
+  - `TestPrepare`: the printed command, run with `exec` (not through PathKit), records 3 traces, and a plain `go test` records none.
+
+`EXPECTED.md` was not edited.

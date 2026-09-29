@@ -111,11 +111,15 @@ func Resolve(cfg *Config, flags Flags, fns []discover.Function, where string) (*
 }
 
 // matchError says why a name didn't pick exactly one function.
-type matchError struct{ matches []string }
+type matchError struct {
+	name    string
+	matches []string // what it matched (0, or more than 1)
+	known   []string // every name it could have meant, for the hint
+}
 
 func (e *matchError) of(kind, where string) string {
 	if len(e.matches) == 0 {
-		return fmt.Sprintf("matches no %s in %s", kind, where)
+		return withHint(fmt.Sprintf("matches no %s in %s", kind, where), e.name, e.known)
 	}
 	return fmt.Sprintf("matches %d %ss (%s); write it with its package, e.g. %q",
 		len(e.matches), kind, strings.Join(e.matches, ", "), e.matches[0])
@@ -125,11 +129,15 @@ func (e *matchError) of(kind, where string) string {
 // means. Accepted forms: Func, pkg.Func, Type.Method, pkg.Type.Method and
 // pkg.(*Type).Method.
 func pick(fns []discover.Function, name string, keep func(discover.Function) bool) (discover.Function, *matchError) {
-	want := strings.NewReplacer("(*", "", ")", "").Replace(strings.TrimSpace(name))
+	want := normalize(name)
 	var found []discover.Function
+	var known []string
 	for _, f := range fns {
-		full := f.Workflow.Name
-		if keep(f) && (full == want || strings.HasSuffix(full, "."+want)) {
+		if !keep(f) {
+			continue
+		}
+		known = append(known, f.Workflow.Name)
+		if nameMatches(f.Workflow.Name, want) {
 			found = append(found, f)
 		}
 	}
@@ -138,9 +146,37 @@ func pick(fns []discover.Function, name string, keep func(discover.Function) boo
 		for _, f := range found {
 			names = append(names, f.Workflow.Name)
 		}
-		return discover.Function{}, &matchError{names}
+		return discover.Function{}, &matchError{name: name, matches: names, known: known}
 	}
 	return found[0], nil
+}
+
+func normalize(name string) string {
+	return strings.NewReplacer("(*", "", ")", "").Replace(strings.TrimSpace(name))
+}
+
+// nameMatches: full is "pkg.Func" or "pkg.Type.Method"; want is any
+// accepted form of a name (already normalized).
+func nameMatches(full, want string) bool {
+	return full == want || strings.HasSuffix(full, "."+want)
+}
+
+// MatchName picks the one name in known (full workflow names) that name
+// means, with the same forms and errors as the scope config, including
+// the "did you mean" hint. flag names the option in the error.
+func MatchName(known []string, name, flag, where string) (string, error) {
+	want := normalize(name)
+	var found []string
+	for _, k := range known {
+		if nameMatches(k, want) {
+			found = append(found, k)
+		}
+	}
+	if len(found) == 1 {
+		return found[0], nil
+	}
+	e := &matchError{name: name, matches: found, known: known}
+	return "", fmt.Errorf("%s %q %s", flag, name, e.of("workflow", where))
 }
 
 // Entry is one workflow in scope.

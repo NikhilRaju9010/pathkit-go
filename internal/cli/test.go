@@ -62,6 +62,25 @@ Everything after "--" is passed to go test, for example:
 	return cmd
 }
 
+// writeOverlay writes the marked-up copies of workflows into the overlay
+// folder (the same for pathkit test and pathkit prepare) and returns the
+// absolute path of overlay.json. absTraces is baked into the recorder.
+func writeOverlay(workflows []recordable, absTraces string) (string, error) {
+	targets := make([]instrument.Target, len(workflows))
+	for i, r := range workflows {
+		targets[i] = instrument.Target{Workflow: r.wf, Graph: r.graph}
+	}
+	res, err := instrument.Instrument(targets, absTraces)
+	if err != nil {
+		return "", userError("%s", err)
+	}
+	overlay, err := instrument.WriteOverlay(res, overlayDir)
+	if err != nil {
+		return "", userError("could not write the overlay: %v", err)
+	}
+	return filepath.Abs(overlay)
+}
+
 // traceDirFor is the trace folder a command uses: --traces when given,
 // else the config's "traces" (relative to the config file), else the
 // default.
@@ -110,17 +129,9 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 
 	goTest := []string{"test"}
 	if len(workflows) > 0 {
-		targets := make([]instrument.Target, len(workflows))
-		for i, r := range workflows {
-			targets[i] = instrument.Target{Workflow: r.wf, Graph: r.graph}
-		}
-		res, err := instrument.Instrument(targets, absTraces)
+		overlay, err := writeOverlay(workflows, absTraces)
 		if err != nil {
-			return userError("%s", err)
-		}
-		overlay, err := instrument.WriteOverlay(res, overlayDir)
-		if err != nil {
-			return userError("could not write the overlay: %v", err)
+			return err
 		}
 		goTest = append(goTest, "-overlay="+overlay)
 	} else {

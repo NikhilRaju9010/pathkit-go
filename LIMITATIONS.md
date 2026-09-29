@@ -2,18 +2,24 @@
 
 PathKit either detects a pattern correctly or clearly does not detect it; it never silently guesses. This file is the honest list of what it does and doesn't cover.
 
-**Status:** building (M5 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
+**Status:** building (M6 done). Entries under "Found while building" are confirmed by real code and tests. Everything else is a **planned** limitation that follows from the proposed design in `CLAUDE.md`. Each entry must be confirmed (or corrected) by a real test when its milestone is built, and then its "planned" tag removed. New limitations found while building go here too.
 
 ## Carried over from the TypeScript version (planned)
 
 - **No following into other packages or child workflows.** A helper function in another package, or a child workflow started with `ExecuteChildWorkflow`, shows up as one step. What can go wrong *inside* it is not on this workflow's map. (TS had the same limit with files; in Go the boundary is the package.)
 - **Concurrency is not modelled.** Activities started together and waited on later (the Go version of TS `Promise.all`), and coroutines started with `workflow.Go`, don't create junctions. A workflow whose only branching is "which parallel steps failed" shows one path.
 - **Loops are "taken at least once" or "not taken", never counted.** "Succeeded on attempt 1" and "succeeded on attempt 3" are the same path. **Confirmed in M4b** (the loop rule, see "Found while building").
-- **Path enumeration stops at 2000 paths** per workflow and says so (`truncated at maxPaths=2000`). Branch coverage (planned) keeps giving a useful number beyond that.
+- **Path enumeration stops at 2000 paths** per workflow and says so (`truncated at maxPaths=2000`). Branch coverage (built in M6) keeps giving a useful number beyond that. A run that took a path beyond the first 2000 is reported as a warning, not counted.
 - **Activity, timer and signal calls are recognized only when made directly** through the Temporal `workflow` package's functions and types. A call made through your own wrapper function (`myExecute(ctx, ...)`) is not recognized as a Temporal call.
 - **Only code that runs in the workflow function itself is on the map.** Signal/Query/Update handlers registered with `SetQueryHandler`, `SetUpdateHandler` or a callback are separate entry points and are not followed.
 
 ## Found while building
+
+- **Branch coverage uses raw steps (M6).** Branch coverage uses each run's raw steps (before loop folding), so a branch can show as taken even when no covered path uses it. Example: "pending, then complete" covers only the "complete" path, but its first trip really took the switch's `default` exit and the loop's `retry` edge, and both count as branches taken. Branch coverage is shown only; `--fail-under` uses path coverage.
+- **Traces that don't count never change the exit code (M6, owner's decision).** A stale, unmatched, incomplete or unreadable trace is a warning on stderr and a number on the `Traces:` line, and is left out of the %. A CI job that must fail on those should check the `traces` counts in `--json`.
+- **`--allow-stale` trusts that the change was cosmetic (M6).** A stale trace that still fits a path is counted (the path is marked `(stale trace)`), even if the code change altered what that path does. Use it only for changes like renames; after a logic change, re-run `pathkit test`.
+- **`pathkit prepare` copies the code as it is at that moment (M6).** If you change a workflow and run the printed `go test` command again without re-running `prepare`, the old copy is compiled, and the traces it writes are stale for the new code. `coverage` reports them as stale; it never counts them silently.
+- **`coverage --clean` deletes only after a full report (M6).** Traces are deleted when the report was produced (exit 0 or 2), never after an error (exit 1), so a failed run never costs you your traces.
 
 - **`include` means "only these count" (M5).** With `workflows.include` in `.pathkitrc.json` (or `--include`), only the listed workflows are in scope. Every other workflow PathKit finds is listed as excluded with the reason `not in include list`, never dropped silently. To add one hidden workflow while keeping all the others, list them all in `include`, or leave `include` out and use `exclude` for the ones you don't want.
 - **An in-scope workflow PathKit can't analyze is always printed (M5), and will block `coverage`/`report` (M6/M7).** `analyze`, `pathkit test` and `pathkit traces` show `in scope but not analyzable: <workflow>: <reason>`. Fix it, or exclude it with a reason; then it appears in the excluded list instead.
@@ -87,4 +93,4 @@ These TS limitations should not exist in Go. Each needs a test in its milestone 
 - Any edit to the file, even a comment, making all its traces stale (per-workflow, format-insensitive hash). **Proven in M3** (`TestFunctionHash`).
 - Success and failure ending at one generic `End` (end kinds: completed / failed / continued-as-new). **Proven in M2** (`TestRules/EndKinds`).
 - Scope config matching only file names and only in `report` (workflow names, applied to `analyze` and `report`). **Proven in M5** for `analyze`, `pathkit test` and `pathkit traces` (`TestScopeExcludesShipment`); `report` uses the same code from M7.
-- No CI threshold (`--fail-under`, exit code 2) and no trace cleanup (`pathkit clean`, cleared per `pathkit test` run).
+- No CI threshold (`--fail-under`, exit code 2) and no trace cleanup (`pathkit clean`, cleared per `pathkit test` run). **Proven in M6** (`TestBinaryCoverageExitCodes` with the real program, `TestClean`, `TestCoverageClean`).
