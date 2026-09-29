@@ -141,23 +141,34 @@ func TestReportHTMLConfigKey(t *testing.T) {
 	orders := absPath(t, pilot+"/orders")
 	cwd := t.TempDir()
 	t.Chdir(cwd)
+	// wantFn, given the config file's own folder, builds the expected
+	// path with the system's separators (filepath.Join, never a
+	// hand-glued string: on Windows filepath.Dir(cfg) is "C:\...\001",
+	// and gluing "/out/r.html" onto it with a forward slash gives a
+	// mixed-separator path that never matches what the tool writes).
 	tests := []struct {
 		name, config string
 		args         []string
-		want         string // relative to the config's folder ("@") or the current folder
+		wantFn       func(cfgDir string) string // "" means none written
 		none         bool
 	}{
-		{"true: the default file, from the current folder", `{"html": true}`, nil, filepath.Join(".pathkit", "report.html"), false},
-		{"a path: relative to the config file", `{"html": "out/r.html"}`, nil, "@/out/r.html", false},
-		{"false: no file", `{"html": false}`, nil, "", true},
-		{"--html=false beats true", `{"html": true}`, []string{"--html=false"}, "", true},
-		{"--html=path beats the config", `{"html": "out/r.html"}`, []string{"--html=" + filepath.Join(cwd, "flag.html")}, filepath.Join(cwd, "flag.html"), false},
+		{"true: the default file, from the current folder", `{"html": true}`, nil,
+			func(string) string { return filepath.Join(".pathkit", "report.html") }, false},
+		{"a path: relative to the config file", `{"html": "out/r.html"}`, nil,
+			func(cfgDir string) string { return filepath.Join(cfgDir, "out", "r.html") }, false},
+		{"false: no file", `{"html": false}`, nil, nil, true},
+		{"--html=false beats true", `{"html": true}`, []string{"--html=false"}, nil, true},
+		{"--html=path beats the config", `{"html": "out/r.html"}`, []string{"--html=" + filepath.Join(cwd, "flag.html")},
+			func(string) string { return filepath.Join(cwd, "flag.html") }, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			os.RemoveAll(filepath.Join(cwd, ".pathkit"))
 			cfg := writeConfig(t, tt.config)
-			want := strings.Replace(tt.want, "@", filepath.Dir(cfg), 1)
+			var want string
+			if tt.wantFn != nil {
+				want = tt.wantFn(filepath.Dir(cfg))
+			}
 			_, stderr, code := run(t, append([]string{"report", orders, "--traces", traces, "--config", cfg}, tt.args...)...)
 			if code != ExitOK {
 				t.Fatalf("code=%d %s", code, stderr)
