@@ -772,7 +772,7 @@ func TestCoverageMatchesKey(t *testing.T) {
 		}
 		t.Chdir(pilot)
 		text, stderr, code := pathkit(t, "report", "./...", "--traces", traces)
-		if code != 0 || stderr != "" || text != read("baseline-report.txt") {
+		if code != 0 || stderr != "" || slashHeaders(text) != read("baseline-report.txt") {
 			t.Errorf("report text (classification off) differs from baseline-report.txt: exit %d %q", code, stderr)
 		}
 		js, _, _ := pathkit(t, "report", "./...", "--traces", traces, "--json")
@@ -789,7 +789,7 @@ func TestCoverageMatchesKey(t *testing.T) {
 		}
 
 		text, stderr, code = pathkit(t, "report", "./...", "--traces", traces, "--coverage-basis", "testable")
-		if code != 0 || stderr != "" || text != read("classified-report.txt") {
+		if code != 0 || stderr != "" || slashHeaders(text) != read("classified-report.txt") {
 			t.Errorf("classified report text differs from classified-report.txt: exit %d %q\n%s", code, stderr, text)
 		}
 		js, _, _ = pathkit(t, "report", "./...", "--traces", traces, "--json", "--coverage-basis", "testable")
@@ -1051,4 +1051,19 @@ func stripClassification(v any) {
 			stripClassification(c)
 		}
 	}
+}
+
+// workflowHeader matches the line that starts each workflow's block in the
+// text report: "pkg.Workflow (folder/file.go)".
+var workflowHeader = regexp.MustCompile(`(?m)^([A-Za-z_][\w.]*\.\w+ \()([^)\n]*)\)$`)
+
+// slashHeaders writes the file in those header lines with forward slashes.
+// The text report shows a file with the system's own separator (documented
+// in SETUP-GUIDE.md); the golden files are written with "/", so on Windows
+// the actual text is converted before it is compared. Nothing else changes.
+func slashHeaders(text string) string {
+	return workflowHeader.ReplaceAllStringFunc(text, func(line string) string {
+		m := workflowHeader.FindStringSubmatch(line)
+		return m[1] + filepath.ToSlash(m[2]) + ")"
+	})
 }
