@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -311,4 +312,62 @@ func mustGetwd(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return wd
+}
+
+// copyTree copies a folder (not the generated .pathkit folders).
+func copyTree(t *testing.T, from, to string) {
+	t.Helper()
+	err := filepath.WalkDir(from, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(from, p)
+		if d.IsDir() {
+			if d.Name() == ".pathkit" {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(to, rel), 0o755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(to, rel), data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A project folder reached through a symbolic link (macOS temp folders are
+// one: /var is a link to /private/var) must record the same traces as the
+// real folder, with the relative target "./...". The Go tool reports files
+// by their real path, so "go test" must run with the real working folder too.
+func TestTestFromSymlinkedFolder(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary and runs the sample project's tests; skipped with -short (CI runs it)")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("folder links need extra rights on Windows, and the fix does not apply there")
+	}
+	bin := buildPathkit(t)
+	pilot, _ := filepath.Abs("../../testdata/pilot")
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	copyTree(t, pilot, real)
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("cannot make a symbolic link here: %v", err)
+	}
+	for name, dir := range map[string]string{"real folder": real, "through a link": link} {
+		cmd := exec.Command(bin, "test", "./...") // relative target, as people type it
+		cmd.Dir = dir                             // os/exec sets PWD to this (logical) path
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", name, err, out)
+		}
+		if !strings.Contains(string(out), "recorded 21 traces (21 complete)") {
+			t.Errorf("%s: want 21 traces recorded:\n%s", name, out)
+		}
+	}
 }

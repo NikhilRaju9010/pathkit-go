@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -151,6 +152,18 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 	run.Dir = dir
 	run.Stdout, run.Stderr = stdout, stderr
 	run.Env = os.Environ()
+	// A folder reached through a symbolic link (macOS temp folders are one)
+	// keeps the link's name in $PWD, and "go test" would take that as the
+	// working folder; the Go tool names files by their real path, so the
+	// overlay would match nothing and no trace would be written. Name the
+	// real folder. (Not on Windows: $PWD does not work that way there.)
+	if runtime.GOOS != "windows" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			if real, err := filepath.EvalSymlinks(abs); err == nil {
+				run.Env = append(run.Env, "PWD="+real)
+			}
+		}
+	}
 	testErr := run.Run()
 
 	files, err := trace.List(absTraces)
