@@ -251,6 +251,20 @@ func TestBaselineScript(t *testing.T) {
 	script, _ := filepath.Abs("../../scripts/project-baseline.sh")
 	pilot, _ := filepath.Abs("../../testdata/pilot")
 	out := filepath.Join(t.TempDir(), "out")
+	// When this test fails, show what the script itself recorded, so one CI
+	// run is enough to see why (the files are small).
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		files, _ := filepath.Glob(filepath.Join(out, "*.err"))
+		files = append(files, filepath.Join(out, "exit-codes.txt"), filepath.Join(out, "test-output.txt"))
+		for _, f := range files {
+			if data, err := os.ReadFile(f); err == nil {
+				t.Logf("%s:\n%.2000s", filepath.Base(f), data)
+			}
+		}
+	})
 	rel, err := filepath.Rel(mustGetwd(t), bin)
 	if err != nil {
 		t.Skip("no relative path to the binary on this system")
