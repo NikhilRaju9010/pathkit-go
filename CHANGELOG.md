@@ -31,6 +31,10 @@ Some paths can never run (a loop the code always enters, the same value tested t
 - `pathkit explain` shows the workflow's file with forward slashes on every system.
 - The `report --unmatched` text explains in plain words that an error check on a helper's error is assumed never to fail.
 
+### Fixed
+
+- `pathkit test` recorded no traces when the project folder was reached through a symbolic link (macOS temporary folders are one). It now records them. The command printed by `pathkit prepare` still needs the real folder; see [LIMITATIONS.md](LIMITATIONS.md).
+
 ### Changed
 
 - Output changes are additive: existing text, `--json` keys and HTML stay as they were, and new fields are added.

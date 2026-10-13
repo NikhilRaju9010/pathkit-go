@@ -61,6 +61,8 @@ Go words used below: a *type assertion* is Go code that treats a value as anothe
 - **`pathkit test` writes its marked-up copies to `.pathkit/overlay/`** in the folder you run it from, and deletes only its own files there. Go's build and test commands never look there, but `gofmt -l .` does; add `.pathkit/` to your `.gitignore` and run gofmt on your tracked files.
 - **Two workflows with the same package name and function name in different folders** are named with the shortest unique tail of their import path (`a/dup.Work`, `b/dup.Work`). With a `.pathkitrc.json` the names are decided over the config's packages; without one, over what the command loaded, so record and report on the same folder (`./...`). Trace files record the workflow's package; a trace that names another package is "unknown workflow", never counted.
 
+- **Run `go test -overlay=...` from the real folder, not through a symbolic link.** A symbolic link is a folder name that points at another folder (macOS temporary folders are one: `/var` points at `/private/var`). `pathkit test` handles this itself. The command that `pathkit prepare` prints is run by your own shell, whose working folder keeps the link's name, and then the Go tool does not match the copied files and records no traces (`recorded 0 traces`). `cd` into the real folder (`cd -P .` does it) before running it.
+
 ## Coverage and reports
 
 - **Branch coverage uses raw steps**, before loop folding, so a branch can show as taken even when no covered path uses it. It is shown only; `--fail-under` uses path coverage.
