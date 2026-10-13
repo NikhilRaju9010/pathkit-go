@@ -61,7 +61,7 @@ func totalPaths(t *testing.T, stdout string) int {
 	return sum
 }
 
-// No config file: everything is in scope, exactly as before M5.
+// No config file: everything is in scope, exactly as with no scope at all.
 func TestNoConfigEverythingInScope(t *testing.T) {
 	p := absPath(t, pilot)
 	t.Chdir(t.TempDir())
@@ -171,7 +171,7 @@ func TestAnalyzeConfigErrors(t *testing.T) {
 			`include "OrderWorkflw" matches no function in the configured packages (` + p + `/...); did you mean "OrderWorkflow"?` + "\n"},
 		{"include of a non-workflow", `{"packages": [` + jsonString(f+"/scope/...") + `], "workflows": {"include": ["sendEmail"]}}`,
 			`include "sendEmail" is not a workflow: its first parameter is not workflow.Context` + "\n"},
-		{"unknown key", `{"workflow": {}}`, `unknown key "workflow"` + "\n"},
+		{"unknown key", `{"workflow": {}}`, `unknown key "workflow"; check its spelling against section 8 of SETUP-GUIDE.md` + "\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -207,13 +207,10 @@ func TestAnalyzeNotAnalyzable(t *testing.T) {
 	}
 }
 
-// failUnder, html, out, json, noColor and allowStale are checked but not
-// used until M6–M8: a config that sets them all changes nothing, and no
-// command mentions them.
 // analyze ignores the report-only keys: out, json and noColor (applied by
-// report since M7, TestReportConfigKeys and TestNoColorConfigKey) and html
-// (applied by report since M8, TestReportHTMLConfigKey). failUnder and
-// allowStale belong to coverage and report (TestAllowStaleConfigKey).
+// report, TestReportConfigKeys and TestNoColorConfigKey) and html (applied
+// by report, TestReportHTMLConfigKey). failUnder and allowStale belong to
+// coverage and report (TestAllowStaleConfigKey).
 func TestLaterKeysAreNotApplied(t *testing.T) {
 	p := absPath(t, pilot)
 	dir := t.TempDir()

@@ -3,7 +3,7 @@
 // path the hand-written answer key (testdata/pilot/EXPECTED.md) names.
 //
 // RULE: EXPECTED.md is never edited to make these tests pass. If PathKit
-// and the key disagree and the key looks wrong, stop and ask the owner.
+// and the key disagree and the key looks wrong, stop and ask.
 package e2e
 
 import (
@@ -259,7 +259,7 @@ func TestFixturesUnderOverlay(t *testing.T) {
 		t.Fatalf("panics fixture: exit %d\n%s\n%s", code, stdout, stderr)
 	}
 	// The panic happens while the return value is computed, so the run
-	// must NOT count as complete (the TS d0aa17a trap).
+	// must NOT count as complete (a known trap).
 	if files := readTraces(t, traces); len(files) != 1 || files[0].Status != "incomplete" {
 		t.Errorf("panics fixture: want 1 incomplete trace, got %+v", files)
 	}
@@ -338,6 +338,84 @@ var liveFixtures = map[string][]liveCase{
 		{"TestPeekFindsSignal", "waits.PeekWorkflow", "J1.received|completed"},
 		{"TestPeekFindsNothing", "waits.PeekWorkflow", "J1.not received|completed"},
 	},
+	// A context parameter written as "_" is named in the marked-up copy.
+	"unnamedctx": {
+		{"TestSignPositive", "unnamedctx.Sign", "J1.true|completed"},
+		{"TestSignNegative", "unnamedctx.Sign", "J1.false J2.true|completed"},
+		{"TestSignZero", "unnamedctx.Sign", "J1.false J2.false|completed"},
+		{"TestStrictEmptyName", "unnamedctx.Strict", "J1.true|failed"},
+		{"TestStrictNamed", "unnamedctx.Strict", "J1.false|completed"},
+	},
+	// Another handle of the same named signal channel can be closed.
+	"closedchannelleak": {
+		{"TestSameNameClosedReachesTheClosedSide", "closedchannelleak.SameNameClosed", "J1.true|completed"},
+		{"TestInlineCloseReachesTheClosedSide", "closedchannelleak.InlineClose", "J1.true|completed"},
+		{"TestHelperClosedReachesTheClosedSide", "closedchannelleak.HelperClosed", "J1.true|completed"},
+	},
+	// A channel the workflow closes itself really reaches "more == false".
+	"closedchannel": {
+		{"TestOwnClosedReachesTheClosedSide", "closedchannel.OwnClosed", "J1.true|completed"},
+		{"TestLateOwnClosedReachesTheClosedSide", "closedchannel.LateOwnClosed", "J1.true|completed"},
+		{"TestLateAssignedTwiceReachesTheClosedSide", "closedchannel.LateAssignedTwice", "J1.true|completed"},
+	},
+	// Near-misses of the list-built-from-list detector, run for real.
+	"builtlist": {
+		{"TestConditionalAppendAllSkipped", "builtlist.ConditionalAppend", "J1.iterate J2.false J1.retry J1.exit J3.exit|completed"},
+		{"TestContinueBeforeAppendAllSkipped", "builtlist.ContinueBeforeAppend", "J1.iterate J2.true J1.retry J1.exit J3.exit|completed"},
+		{"TestStartsNotEmptyFirstLoopSkipped", "builtlist.StartsNotEmpty", "J1.exit J2.iterate J2.retry J2.exit|completed"},
+		{"TestAppendedBetweenFirstLoopSkipped", "builtlist.AppendedBetween", "J1.exit J2.iterate J2.retry J2.exit|completed"},
+		{"TestReplacedBetweenFirstLoopRan", "builtlist.ReplacedBetween", "J1.iterate J1.retry J1.exit J2.true J3.iterate J3.retry J3.exit|completed"},
+		{"TestClosureAppendsFirstLoopSkipped", "builtlist.ClosureAppends", "J1.exit J2.true J3.iterate J3.retry J3.exit|completed"},
+		{"TestReturnBeforeAppendFirstLoopRan", "builtlist.ReturnBeforeAppend", "J1.iterate J2.true|completed"},
+		{"TestMethodResetFirstLoopRanSecondSkipped", "builtlist.MethodReset", "J1.iterate J1.retry J1.exit J2.true J3.exit|completed"},
+		{"TestMethodValueResetFirstLoopRanSecondSkipped", "builtlist.MethodValueReset", "J1.iterate J1.retry J1.exit J2.true J3.exit|completed"},
+		{"TestParenAddressFirstLoopRanSecondSkipped", "builtlist.ParenAddress", "J1.iterate J1.retry J1.exit J2.true J3.exit|completed"},
+	},
+	// Near-misses of the loop-exit-before-first-trip detector, run for real:
+	// each reaches "left the loop before its first trip".
+	"loopfirst": {
+		{"TestSetBeforeSkipsTheLoop", "loopfirst.SetBefore", "J1.true J2.exit|completed"},
+		{"TestClosureSetsBeforeSkipsTheLoop", "loopfirst.ClosureSetsBefore", "J1.true J2.exit|completed"},
+		{"TestAddressBeforeSkipsTheLoop", "loopfirst.AddressBefore", "J1.true J2.exit|completed"},
+		{"TestFromParameterSkipsTheLoop", "loopfirst.FromParameter", "J1.exit|completed"},
+		{"TestDeclaredOutsideOuterLoopSecondTrip", "loopfirst.DeclaredOutsideOuterLoop", "J1.iterate J2.exit J1.retry J1.exit|completed"},
+		{"TestAssignedBeforeSkipsTheLoop", "loopfirst.AssignedBefore", "J1.exit|completed"},
+		{"TestPackageLevelSecondRun", "loopfirst.PackageLevel", "J1.exit|completed"},
+		{"TestParenAssignSkipsTheLoop", "loopfirst.ParenAssign", "J1.true J2.exit|completed"},
+	},
+	// Near-misses of the contradictory-get-result detector, run for real:
+	// the first test sees Ok == true, the second then sees Ok == false.
+	"getvalue": {
+		{"TestSecondGetChangesIt", "getvalue.SecondGet", "J1.true J2.true|completed"},
+		{"TestWriteBetweenChangesIt", "getvalue.WriteBetween", "J1.true J2.true|completed"},
+		{"TestAddressPassedOnChangesIt", "getvalue.AddressPassedOn", "J1.true J2.true|completed"},
+		{"TestMethodOnResultChangesIt", "getvalue.MethodOnResult", "J1.true J2.true|completed"},
+		{"TestMethodValueOnResultChangesIt", "getvalue.MethodValueOnResult", "J1.true J2.true|completed"},
+		{"TestPointerAliasChangesIt", "getvalue.PointerAlias", "J1.true J2.true|completed"},
+		{"TestPointerPassedChangesIt", "getvalue.PointerPassed", "J1.true J2.true|completed"},
+		{"TestClosureWritesChangesIt", "getvalue.ClosureWrites", "J1.true J2.true|completed"},
+		{"TestPointerToPointerChangesIt", "getvalue.PointerToPointerPassed", "J1.true J2.true|completed"},
+		{"TestParenAliasChangesIt", "getvalue.ParenAlias", "J1.true J2.true|completed"},
+	},
+	// Near-misses of the data-flow detectors, run for real: these paths are
+	// reachable, so they must stay testable.
+	"dataflow": {
+		{"TestReassignedBothTrue", "dataflow.Reassigned", "J1.true J2.true|completed"},
+		{"TestListAppendedSecondLoopRuns", "dataflow.ListAppended", "J1.exit J2.iterate J2.retry J2.exit|completed"},
+		{"TestDifferentListsOneEmpty", "dataflow.DifferentLists", "J1.exit J2.iterate J2.retry J2.exit|completed"},
+		{"TestLongStringsOnlyFirstMatches", "dataflow.LongStrings", "J1.true J2.false|completed"},
+		{"TestMapLengthFilledThenNotEmpty", "dataflow.MapLength", "J1.true J2.false|completed"},
+		{"TestZeroThenStoreBothFalse", "dataflow.ZeroThenStore", "J1.false J2.false|completed"},
+	},
+	// Both special-test detectors: the SDK's own setters reach the branch.
+	"versiongate": {
+		{"TestOldBranchWithOnGetVersion", "versiongate.CatchEqDefault", "J1.true|completed"},
+		{"TestNewBranchByDefault", "versiongate.CatchEqDefault", "J1.false|"},
+	},
+	"historysuggest": {
+		{"TestSuggestedWithSetter", "historysuggest.CatchDirect", "J1.true|continued-as-new"},
+		{"TestNotSuggestedByDefault", "historysuggest.CatchDirect", "J1.false|"},
+	},
 	// The compensation defer is a note on the paths past it, never a branch.
 	"saga": {
 		// fails before the defer: no note (and nothing compensated)
@@ -380,7 +458,7 @@ func TestLiveFixtures(t *testing.T) {
 	}
 }
 
-// The scope example from the M5 plan: excluding ShipmentWorkflow (with a
+// The scope example: excluding ShipmentWorkflow (with a
 // reason) leaves 29 paths, of which the pilot's tests cover 17: 58.6%.
 // The numbers come from real runs (analyze, and one pathkit test of the
 // whole pilot), and must agree with EXPECTED.md, which is never edited.
@@ -403,7 +481,7 @@ func TestScopeExcludesShipment(t *testing.T) {
 		}
 	}
 	if wantPaths != 29 || wantCovered != 17 {
-		t.Fatalf("EXPECTED.md without shipment: %d paths, %d covered; the plan says 29 and 17", wantPaths, wantCovered)
+		t.Fatalf("EXPECTED.md without shipment: %d paths, %d covered; SETUP-GUIDE.md section 8 says 29 and 17", wantPaths, wantCovered)
 	}
 	t.Chdir(t.TempDir())
 
@@ -513,11 +591,12 @@ type covJSON struct {
 // predicts: 20 of 38 (52.6%) for the whole pilot, 17 of 29 (58.6%) with
 // the no-shipment scope, and for every workflow the very paths the key's
 // tests point to.
-// TestCoverageMatchesKey also runs with -short (M7a): it records the whole
+// TestCoverageMatchesKey also runs with -short: it records the whole
 // pilot once (a few seconds), so a quick local run still has one real
 // end-to-end check against EXPECTED.md.
 func TestCoverageMatchesKey(t *testing.T) {
 	pilot := abs(t, "../../testdata/pilot")
+	goldenDir := abs(t, "../../testdata/golden/pilot") // before any t.Chdir
 	cfg := abs(t, "../../testdata/scopes/no-shipment/.pathkitrc.json")
 	key, err := expected.Read(filepath.Join(pilot, "EXPECTED.md"))
 	if err != nil {
@@ -525,7 +604,7 @@ func TestCoverageMatchesKey(t *testing.T) {
 	}
 	t.Chdir(t.TempDir())
 	traces := t.TempDir()
-	// Owner's requirement (M8): pathkit test never deletes a
+	// pathkit test never deletes a
 	// report-history.json: not next to the default page, not in the
 	// trace folder it clears, not even in its own overlay folder.
 	histories := []string{
@@ -603,7 +682,7 @@ func TestCoverageMatchesKey(t *testing.T) {
 		t.Errorf("text total line missing:\n%s", stdout)
 	}
 
-	// M7b: report and coverage agree field by field, because they share one
+	// report and coverage agree field by field, because they share one
 	// code path (measure). report --json is coverage --json plus "file" and
 	// "priority" on each workflow and "excludedBy"; with those three
 	// removed, the two must be identical, unscoped and scoped.
@@ -634,8 +713,10 @@ func TestCoverageMatchesKey(t *testing.T) {
 		if !reflect.DeepEqual(c, r) {
 			t.Errorf("report --json (minus file, priority, excludedBy) differs from coverage --json\ncoverage:\n%s\nreport:\n%s", cov, rep)
 		}
-		if len(c) != 8 || len(c["workflows"].([]any)) != len(wantPriority) {
-			t.Errorf("compared %d top-level fields and %d workflows; want 8 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
+		// 8 fields as before, plus the 3 added with path classification
+		// (classification, coverageBasis, classificationShown).
+		if len(c) != 11 || len(c["workflows"].([]any)) != len(wantPriority) {
+			t.Errorf("compared %d top-level fields and %d workflows; want 11 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
 		}
 		if !maps.Equal(gotPriority, wantPriority) {
 			t.Errorf("priorities %v, want %v", gotPriority, wantPriority)
@@ -645,7 +726,7 @@ func TestCoverageMatchesKey(t *testing.T) {
 			t.Errorf("report text lacks %q or the Traces line:\n%s", wantTotal, text)
 		}
 
-		// M8: the HTML page shows exactly report's numbers.
+		// The HTML page shows exactly report's numbers.
 		out := filepath.Join(t.TempDir(), "report.html")
 		if _, stderr, code := pathkit(t, append([]string{"report", pilot + "/...", "--traces", traces, "--html=" + out}, args...)...); code != 0 {
 			t.Fatalf("report --html: exit %d %s", code, stderr)
@@ -672,7 +753,64 @@ func TestCoverageMatchesKey(t *testing.T) {
 		agree(t, []string{"--config", cfg}, "29 paths total · 17 covered · 12 missed · 58.6% project coverage", scoped)
 	})
 
-	// M8, D5: the Analysis tab numbers every path exactly as analyze
+	// Path classification on the real pilot, run from the
+	// pilot's own folder (so file names print as they do for a user):
+	//   - with classification off, the text is byte for byte what the
+	//     program printed BEFORE classification existed
+	//     (testdata/golden/pilot/baseline-report.txt), and the JSON minus
+	//     the new fields is the old JSON;
+	//   - with --coverage-basis, the classified output is pinned too;
+	//   - the numbers are the answer key's: 38 paths, 20 covered, 52.6%,
+	//     branches 39/50, and every path testable.
+	t.Run("pilot golden, classification off and on", func(t *testing.T) {
+		read := func(name string) string {
+			data, err := os.ReadFile(filepath.Join(goldenDir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(data)
+		}
+		t.Chdir(pilot)
+		text, stderr, code := pathkit(t, "report", "./...", "--traces", traces)
+		if code != 0 || stderr != "" || text != read("baseline-report.txt") {
+			t.Errorf("report text (classification off) differs from baseline-report.txt: exit %d %q", code, stderr)
+		}
+		js, _, _ := pathkit(t, "report", "./...", "--traces", traces, "--json")
+		var got, base map[string]any
+		if err := json.Unmarshal([]byte(js), &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(read("baseline-report.json")), &base); err != nil {
+			t.Fatal(err)
+		}
+		stripClassification(got)
+		if !reflect.DeepEqual(got, base) {
+			t.Errorf("report --json minus the new fields differs from baseline-report.json")
+		}
+
+		text, stderr, code = pathkit(t, "report", "./...", "--traces", traces, "--coverage-basis", "testable")
+		if code != 0 || stderr != "" || text != read("classified-report.txt") {
+			t.Errorf("classified report text differs from classified-report.txt: exit %d %q\n%s", code, stderr, text)
+		}
+		js, _, _ = pathkit(t, "report", "./...", "--traces", traces, "--json", "--coverage-basis", "testable")
+		if js != read("classified-report.json") {
+			t.Error("classified report --json differs from classified-report.json")
+		}
+		var cj covJSON
+		if err := json.Unmarshal([]byte(js), &cj); err != nil {
+			t.Fatal(err)
+		}
+		if cj.Total.Total != 38 || cj.Total.Covered != 20 || cj.Total.Percent != 52.6 {
+			t.Errorf("total %+v, want 38 paths, 20 covered, 52.6%%", cj.Total)
+		}
+		for _, w := range []string{"39/50 (78.0%)", "Testable:            38", "Cannot be tested:    0", "Needs special test:  0", "Needs review:        0"} {
+			if !strings.Contains(text, w) {
+				t.Errorf("classified text lacks %q", w)
+			}
+		}
+	})
+
+	// D5: the Analysis tab numbers every path exactly as analyze
 	// does (report.html's and analysis.html's alike).
 	t.Run("same path numbers as analyze", func(t *testing.T) {
 		text, _, code := pathkit(t, "analyze", pilot+"/...")
@@ -864,7 +1002,7 @@ func TestPrepare(t *testing.T) {
 	}
 }
 
-// CI must run every test: -short is for quick local runs only (M7a).
+// CI must run every test: -short is for quick local runs only.
 // This fails if a "go test" line in the CI workflow ever gets -short.
 func TestCIRunsEverything(t *testing.T) {
 	data, err := os.ReadFile("../../.github/workflows/ci.yml")
@@ -883,5 +1021,34 @@ func TestCIRunsEverything(t *testing.T) {
 	}
 	if runs == 0 {
 		t.Error("ci.yml has no go test line")
+	}
+}
+
+// stripClassification removes the fields added with path classification,
+// so what is left can be compared with output from before it existed.
+func stripClassification(v any) {
+	switch x := v.(type) {
+	case map[string]any:
+		for _, k := range []string{"stableId", "bucket", "label", "source", "confidence", "possibleInProduction", "explanation", "ruleId"} {
+			delete(x, k)
+		}
+		if _, ok := x["pathList"]; ok {
+			delete(x, "classification")
+		}
+		if _, ok := x["workflows"]; ok {
+			delete(x, "classification")
+			delete(x, "coverageBasis")
+			delete(x, "classificationShown")
+		}
+		if _, ok := x["threshold"]; ok {
+			delete(x, "basis")
+		}
+		for _, c := range x {
+			stripClassification(c)
+		}
+	case []any:
+		for _, c := range x {
+			stripClassification(c)
+		}
 	}
 }

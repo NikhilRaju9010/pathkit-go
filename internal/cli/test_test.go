@@ -34,7 +34,8 @@ func TestTracesNoTraceFiles(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "traces")
 	_, stderr, code := run(t, "traces", pilot+"/orders", "--traces", dir)
 	want := "pathkit traces: no trace files found in " + dir +
-		"; coverage is recorded only by \"pathkit test\" (plain \"go test\" records nothing)\n"
+		"; coverage is recorded only by \"pathkit test\" (plain \"go test\" records nothing). " +
+		"Run \"pathkit test ./...\" first, from the folder that holds go.mod, then run this command from the same folder (or point to the traces with --traces)\n"
 	if code != ExitError || stderr != want {
 		t.Errorf("code=%d stderr=%q\nwant %q", code, stderr, want)
 	}

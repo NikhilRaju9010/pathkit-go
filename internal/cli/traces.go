@@ -16,8 +16,9 @@ func newTracesCommand() *cobra.Command {
 	var traceDir string
 	var sf scopeFlags
 	cmd := &cobra.Command{
-		Use:   "traces [folder | folder/...]",
-		Short: "Show which path each recorded trace took (a debug view; coverage arrives in M6)",
+		Use:     "traces [folder | folder/...]",
+		Short:   "Show which path each recorded trace took (a debug view)",
+		Example: "  pathkit traces ./...",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "" // the config's package, else ./...
 			switch len(args) {
@@ -30,7 +31,7 @@ func newTracesCommand() *cobra.Command {
 			return runTraces(cmd, target, traceDir, sf)
 		},
 	}
-	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder the trace files are in (default: the config's \"traces\", else .pathkit/traces)")
+	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder the trace files are in (the config's \"traces\" sets another default)")
 	addScopeFlags(cmd, &sf, false)
 	return cmd
 }
@@ -78,7 +79,7 @@ func runTraces(cmd *cobra.Command, target, traceDir string, sf scopeFlags) error
 		r, ok := byName[f.Workflow]
 		var out trace.Outcome
 		if ok {
-			out = trace.Check(f, r.graph, r.hash)
+			out = trace.CheckIn(f, r.graph, r.hash, r.wf.Pkg.PkgPath)
 		} else {
 			out = trace.Check(f, nil, "")
 		}

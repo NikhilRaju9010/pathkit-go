@@ -21,13 +21,17 @@ type reportOptions struct {
 	noColor bool
 	clean   bool
 	html    string
+	hints   bool
+	// unmatched adds the unmatched-trace report (--unmatched).
+	unmatched bool
 }
 
 func newReportCommand() *cobra.Command {
 	var opt reportOptions
 	cmd := &cobra.Command{
-		Use:   "report [folder|folder/...]",
-		Short: "Show path coverage for every workflow in a project",
+		Use:     "report [folder|folder/...]",
+		Short:   "Show path coverage for every workflow in a project",
+		Example: "  pathkit report\n  pathkit report --hints --html=report.html",
 		Long: `Shows every in-scope workflow's path coverage, a priority label
 (High below 50%, Medium 50-80%, Low above 80%), the project total, the
 workflows excluded by the scope with their reasons, and what happened to
@@ -40,7 +44,12 @@ nothing).
 
 Exit codes: 0 fine, 1 a real error (including a package that doesn't
 compile, or an in-scope workflow PathKit can't analyze), 2 coverage
-below --fail-under.`,
+below --fail-under, or (with classification enabled) the CI check failed:
+testable coverage below classification.ci.fail_under_testable, or a
+testable path with no test or a needs-review path that is not in the
+baseline file (--baseline), or a path that had a test in the baseline
+and has none now (--allow-lost-tests lets that pass). --write-baseline
+writes that file.`,
 		Args: atMostOne("<folder>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := ""
@@ -51,15 +60,19 @@ below --fail-under.`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&opt.measure.traces, "traces", defaultTraceDir, "folder the trace files are in (default: the config's \"traces\", else .pathkit/traces)")
+	f.StringVar(&opt.measure.traces, "traces", defaultTraceDir, "folder the trace files are in (the config's \"traces\" sets another default)")
 	f.StringVar(&opt.out, "out", "", "also write the report to this `file`, always as plain text (default: the config's \"out\")")
+	f.StringVar(&opt.measure.coverageBasis, "coverage-basis", "", "which coverage --fail-under checks: `basis`: testable or overall (default: overall; testable when the config enables classification)")
 	f.StringVar(&opt.measure.failUnder, "fail-under", "", "exit 2 when path coverage is below this `percent` (0-100)")
 	f.BoolVar(&opt.json, "json", false, "print JSON instead of text (default: the config's \"json\")")
 	f.BoolVar(&opt.summary, "summary", false, "one line per workflow instead of every path")
+	f.BoolVar(&opt.hints, "hints", false, "under every testable path no test ran, say what a test must make happen to run it")
+	f.BoolVar(&opt.unmatched, "unmatched", false, "add a report of the traces that fit no path: where each left the map, what the map expected, and the likely cause")
 	f.BoolVar(&opt.noColor, "no-color", false, "never colour the output (also: the config's \"noColor\", or the NO_COLOR environment variable)")
 	f.BoolVar(&opt.measure.allowStale, "allow-stale", false, "also count traces recorded for an older version of a workflow, when they still fit a path")
 	f.BoolVar(&opt.clean, "clean", false, "delete the trace files after the report (only when the report was produced)")
 	addHTMLFlag(cmd, &opt.html, defaultReportHTML, "the report (both tabs)")
+	addCIFlags(cmd, &opt.measure.ci, true)
 	addScopeFlags(cmd, &opt.measure.scope, true)
 	return cmd
 }
@@ -103,17 +116,39 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 		enc := json.NewEncoder(&buf)
 		enc.SetEscapeHTML(false) // keep "->" readable in the path text
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(reportJSON(m.res, m.threshold, by)); err != nil {
+		out := reportJSON(m.res, m.threshold, by, m.basisInfo())
+		out.CI = m.ci.json(m.res)
+		if opt.hints {
+			ws := make([]jsonWorkflow, len(out.Workflows))
+			for i := range out.Workflows {
+				ws[i] = out.Workflows[i].jsonWorkflow
+			}
+			addHints(ws, m.res)
+			for i := range out.Workflows {
+				out.Workflows[i].jsonWorkflow = ws[i]
+			}
+		}
+		if opt.unmatched {
+			out.Unmatched = unmatchedJSON(m.res)
+		}
+		if err := enc.Encode(out); err != nil {
 			return err
 		}
 		return finish(cmd, "report", m, buf.String(), buf.String(), outFile, opt.clean, html)
 	}
-	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.threshold, ExcludedBy: by}
+	if opt.summary && opt.hints {
+		fmt.Fprintln(cmd.ErrOrStderr(), "pathkit report: --hints ignored because --summary was passed (it lists no paths).")
+	}
+	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.overallThreshold(), ExcludedBy: by, Classification: m.classView(), Hints: opt.hints}
 	plain := render.ReportText(m.res, ro)
 	printed := plain
 	if render.ColorEnabled(noColor, os.Getenv("NO_COLOR"), isTerminal(cmd.OutOrStdout())) {
 		ro.Color = true
 		printed = render.ReportText(m.res, ro)
+	}
+	if opt.unmatched {
+		plain += "\n" + render.UnmatchedSection(m.res)
+		printed += "\n" + render.UnmatchedSection(m.res)
 	}
 	return finish(cmd, "report", m, printed, plain, outFile, opt.clean, html)
 }
@@ -150,13 +185,22 @@ type (
 		Branches      jsonCount            `json:"branches"`
 		Traces        jsonTraces           `json:"traces"`
 		FailUnder     *jsonFailUnder       `json:"failUnder"`
+
+		Classification      jsonClassification `json:"classification"`
+		CoverageBasis       string             `json:"coverageBasis"`
+		ClassificationShown bool               `json:"classificationShown"`
+		CI                  *jsonCI            `json:"ci,omitempty"`
+		Unmatched           *[]jsonUnmatched   `json:"unmatchedTraces,omitempty"`
+		// Absent when no workflow reached the path cap.
+		PathCap *jsonPathCap `json:"pathCapWarning,omitempty"`
 	}
 )
 
-func reportJSON(res coverage.Result, threshold *float64, by []string) jsonReport {
-	c := coverageJSON(res, threshold)
+func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisInfo) jsonReport {
+	c := coverageJSON(res, threshold, bi)
 	out := jsonReport{SchemaVersion: c.SchemaVersion, Tool: c.Tool, Workflows: []jsonReportWorkflow{}, Excluded: c.Excluded,
-		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder}
+		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder,
+		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
 		// Forward slashes on every system, so the JSON is the same everywhere;

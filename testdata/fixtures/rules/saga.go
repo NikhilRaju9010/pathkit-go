@@ -8,7 +8,7 @@ import (
 
 // A saga compensation defer (the deferred call starts an activity, local
 // activity or child workflow) is a note on every path that passes it:
-// "[compensation (defer)]". It is never a branch (CLAUDE.md D3).
+// "[compensation (defer)]". It is never a branch (docs/DESIGN.md D3).
 
 func UsesDeferCompensation(ctx workflow.Context) (err error) {
 	ctx = withOptions(ctx)

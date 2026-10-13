@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "tool": "pathkit-go",
+  "workflows": [
+    {
+      "name": "orders.OrderWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 3,
+        "covered": 2,
+        "percent": 66.7
+      },
+      "branches": {
+        "total": 4,
+        "covered": 3,
+        "percent": 75
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "40dbc77a36",
+          "text": "Start -> if in.AmountCents <= 0 --true--> End (completed)",
+          "steps": [
+            "J1.true"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:743d711a77b4",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "b64b1d5b2f",
+          "text": "Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.false",
+            "J2.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:050e8acab1b0",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "8b4a38cb9f",
+          "text": "Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)",
+          "steps": [
+            "J1.false",
+            "J2.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:5179b1c99bbb",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 3,
+            "covered": 2
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 3,
+          "covered": 2,
+          "percent": 66.7
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 3,
+          "covered": 2,
+          "percent": 66.7
+        }
+      }
+    }
+  ],
+  "excluded": [],
+  "total": {
+    "total": 3,
+    "covered": 2,
+    "percent": 66.7
+  },
+  "branches": {
+    "total": 4,
+    "covered": 3,
+    "percent": 75
+  },
+  "traces": {
+    "read": 2,
+    "counted": 2,
+    "unmatched": 0,
+    "stale": 0,
+    "incomplete": 0,
+    "excluded": 0,
+    "unknownWorkflow": 0,
+    "unreadable": 0,
+    "otherWorkflows": 0
+  },
+  "failUnder": {
+    "threshold": 60,
+    "passed": true,
+    "basis": "overall"
+  },
+  "classification": {
+    "buckets": {
+      "testable": {
+        "paths": 3,
+        "covered": 2
+      },
+      "cannotBeTested": {
+        "paths": 0,
+        "covered": 0
+      },
+      "needsSpecialTest": {
+        "paths": 0,
+        "covered": 0
+      },
+      "needsReview": {
+        "paths": 0,
+        "covered": 0
+      }
+    },
+    "testableCoverage": {
+      "total": 3,
+      "covered": 2,
+      "percent": 66.7
+    },
+    "specialTestCoverage": {
+      "total": 0,
+      "covered": 0,
+      "percent": 0
+    },
+    "overallCoverage": {
+      "total": 3,
+      "covered": 2,
+      "percent": 66.7
+    }
+  },
+  "coverageBasis": "overall",
+  "classificationShown": false
+}

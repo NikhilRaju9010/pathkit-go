@@ -1,12 +1,12 @@
-# Pilot answer key
+# Sample project answer key
 
-This is the hand-written answer key for the pilot project, written in M1 **before** PathKit could analyze anything. Later milestones check the real tool against it:
+This is the hand-written answer key for the sample project. Path numbers here follow the order it was written in; the numbers `pathkit analyze` prints may differ, because the checks compare by decision exits, not by number. The tests check the real tool against it:
 
-- **M2 (`analyze`):** each workflow's path count, junctions, exits and end kinds must match.
-- **M3/M4 (`pathkit test`):** each test's trace must land on the path listed under "Tests".
-- **M6/M7 (`coverage`/`report`):** the covered counts and the project total must match.
+- **`analyze`:** each workflow's path count, junctions, exits and end kinds must match.
+- **`pathkit test`:** each test's trace must land on the path listed under "Tests".
+- **`coverage` / `report`:** the covered counts and the project total must match.
 
-The exact wording PathKit prints is decided in M2. What must match is the **number of paths, the junctions, their exits and the end kind**. If the real tool disagrees, don't quietly change this file. Add a note under "Disagreements" at the bottom saying who was wrong and why.
+The exact wording PathKit prints may differ. What must match is the **number of paths, the junctions, their exits and the end kind**. If the real tool disagrees, don't quietly change this file. Add a note under "Known differences" at the bottom saying which one was wrong and why.
 
 **How to read it.** `J1`, `J2`, … are junctions (decision points) in source order. "Err check" means an `if err != nil` right after a Temporal call. It is a junction with exits `failure` / `success` (design decision D2). "Transparent" means an `if` that PathKit deliberately does not count as a junction.
 
@@ -59,7 +59,7 @@ Junctions:
 - J2: err check after `CheckStatus`.
 - J3: `switch status`. No `default` is written, so an implicit `default` exit is added.
 
-Loop rule (defined once, in CLAUDE.md's D3 table, loop row): *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip.*
+Loop rule (defined once, in docs/DESIGN.md's D3 table, loop row): *each loop edge appears at most once on a listed path; a trace with several trips is folded by keeping only the last trip.*
 
 **5 paths:**
 1. J1 --exit--> End (completed), zero polls
@@ -97,7 +97,7 @@ Junctions:
 
 **Tests (shipment_test.go), 3/9 covered:** `TestShipmentDelivered` → 3, `TestShipmentTimerFiresLost` → 9, `TestShipmentLabelFails` → 1.
 
-This is the example where branch coverage (M6) should read much higher than path coverage.
+This is the example where branch coverage should read much higher than path coverage.
 
 ## 5. `fulfillment.OrderFulfillmentWorkflow` (fulfillment/fulfillment.go)
 
@@ -179,6 +179,6 @@ Transparent: `if err := workflow.GetLastCompletionResult(...); err == nil`. It i
 | reports.DailyReportWorkflow | 6 | 3 |
 | **Total** | **38** | **20 (52.6%)** |
 
-## Disagreements
+## Known differences
 
-*(None yet. Add an entry whenever the real tool and this key differ: the workflow, what the tool said, and which one was wrong and why.)*
+*(None. Add an entry whenever the real tool and this key differ: the workflow, what the tool said, and which one was wrong and why.)*

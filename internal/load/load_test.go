@@ -57,7 +57,7 @@ func writeModule(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// Owner's decision (M7): a package that doesn't compile stops the load,
+// A package that doesn't compile stops the load,
 // and every broken package is named with its real error (not go list's
 // "-: # <package>" summary line). A package that only imports a broken
 // one is not listed.
@@ -72,14 +72,14 @@ func TestEveryBrokenPackageIsNamed(t *testing.T) {
 	_, err := Load("./...")
 	want := "2 packages do not compile: " +
 		"example.com/bp/a: " + filepath.Join("a", "a.go") + ":3:13: cannot use \"s\" (untyped string constant) as int value in variable declaration; " +
-		"example.com/bp/b: " + filepath.Join("b", "b.go") + ":3:16: cannot use 1 (untyped int constant) as string value in variable declaration"
+		"example.com/bp/b: " + filepath.Join("b", "b.go") + ":3:16: cannot use 1 (untyped int constant) as string value in variable declaration; fix the build errors in your project first (\"go build ./...\" shows all of them), because PathKit needs code that compiles"
 	if err == nil || err.Error() != want {
 		t.Errorf("error =\n  %v\nwant\n  %s", err, want)
 	}
 
-	// One broken package keeps the M2 wording, now with the real error.
+	// One broken package keeps the short wording, with the real error.
 	_, err = Load("./b")
-	want = "package does not compile: example.com/bp/b: " + filepath.Join("b", "b.go") + ":3:16: cannot use 1 (untyped int constant) as string value in variable declaration"
+	want = "package does not compile: example.com/bp/b: " + filepath.Join("b", "b.go") + ":3:16: cannot use 1 (untyped int constant) as string value in variable declaration; fix the build error in your project first (\"go build ./...\" shows all of them), because PathKit needs code that compiles"
 	if err == nil || err.Error() != want {
 		t.Errorf("error =\n  %v\nwant\n  %s", err, want)
 	}

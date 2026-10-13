@@ -1,6 +1,6 @@
 // Package loops holds workflows with loops that PathKit's end-to-end test
 // runs for real under "pathkit test", so that traces with several trips
-// are folded by the loop rule (CLAUDE.md D3).
+// are folded by the loop rule (docs/DESIGN.md D3).
 package loops
 
 import (
@@ -126,7 +126,7 @@ func SumWorkflow(ctx workflow.Context, xs []int) (string, error) {
 }
 
 // CountBigWorkflow's loop has no Temporal call but has a junction (the
-// if), so it is a loop junction (the rule as amended on 2026-09-28) and a
+// if), so it is a loop junction (docs/DESIGN.md D3) and a
 // run with several items folds onto one path.
 func CountBigWorkflow(ctx workflow.Context, xs []int) (int, error) {
 	big := 0

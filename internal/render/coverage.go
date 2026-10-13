@@ -29,7 +29,22 @@ func Threshold(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + 
 // CoverageText prints a coverage result in the setup guide's format. The
 // total's percentage is threshold-aware (see Pct).
 func CoverageText(res coverage.Result, threshold *float64) string {
+	return CoverageTextTagged(res, threshold, false)
+}
+
+// CoverageTextTagged is CoverageText with, after each path that something
+// written down classified (a rule, an override, a comment), a tag naming
+// the bucket, label, source and rule id (ClassTag), when tags is true.
+func CoverageTextTagged(res coverage.Result, threshold *float64, tags bool) string {
+	return CoverageTextHints(res, threshold, tags, false)
+}
+
+// CoverageTextHints is CoverageTextTagged with, when hints is true, "how
+// to cover it" under every testable untested path (--hints).
+func CoverageTextHints(res coverage.Result, threshold *float64, tags, hints bool) string {
 	var b strings.Builder
+	b.WriteString(CapWarning(res))
+	b.WriteString(ZeroPathWarning(res))
 	single := len(res.Workflows) == 1
 	for i, w := range res.Workflows {
 		if i > 0 {
@@ -54,9 +69,15 @@ func CoverageText(res coverage.Result, threshold *float64) string {
 			if p.StaleTrace {
 				line += " (stale trace)"
 			}
+			if tags {
+				line += ClassTag(p.Class)
+			}
 			if p.Covered {
 				covered = append(covered, line)
 			} else {
+				if hints && WantsHint(p) {
+					line += "\n" + strings.TrimSuffix(hintLines(p), "\n")
+				}
 				untested = append(untested, line)
 			}
 		}

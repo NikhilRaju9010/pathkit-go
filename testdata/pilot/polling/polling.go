@@ -1,5 +1,5 @@
-// Package polling holds a workflow that polls a report job in a retry loop
-// (the Go version of the TypeScript demo's reportPollingWorkflow).
+// Package polling holds a workflow that polls a report job in a retry loop,
+// giving up after a fixed number of polls.
 package polling
 
 import (

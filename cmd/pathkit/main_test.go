@@ -68,7 +68,7 @@ func TestBinary(t *testing.T) {
 
 	t.Run("analyze without file exits 1", func(t *testing.T) {
 		stdout, stderr, code := runBinary(t, bin, "analyze")
-		if stdout != "" || stderr != "pathkit analyze: missing <file> argument\n" || code != 1 {
+		if stdout != "" || stderr != "pathkit analyze: missing <file> argument; give a .go file, a folder, or folder/... (for example: pathkit analyze ./...)\n" || code != 1 {
 			t.Errorf("got stdout=%q stderr=%q code=%d", stdout, stderr, code)
 		}
 	})
@@ -96,7 +96,7 @@ func ordersTraces(t *testing.T) string {
 }
 
 // The exit codes of "pathkit coverage", from the real program: 0 fine,
-// 1 any real error, 2 below --fail-under (CLAUDE.md D7, D9).
+// 1 any real error, 2 below --fail-under (docs/DESIGN.md D7, D9).
 func TestBinaryCoverageExitCodes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds the binary; skipped with -short (CI runs it)")
@@ -140,7 +140,7 @@ func TestBinaryCoverageExitCodes(t *testing.T) {
 	}
 }
 
-// The exit codes of "pathkit report", from the real program (M7b): 0 fine,
+// The exit codes of "pathkit report", from the real program: 0 fine,
 // 1 any real error (including an in-scope workflow PathKit can't analyze
 // and a package that doesn't compile), 2 below --fail-under.
 func TestBinaryReportExitCodes(t *testing.T) {
@@ -190,7 +190,7 @@ func TestBinaryReportExitCodes(t *testing.T) {
 	}
 }
 
-// report --html from the real program (M8): exit 0 and exit 2 write the
+// report --html from the real program: exit 0 and exit 2 write the
 // page and the trend, exit 1 writes nothing, and "--html out.html" (with a
 // space) explains how to name the file.
 func TestBinaryReportHTML(t *testing.T) {
@@ -233,4 +233,82 @@ func TestBinaryReportHTML(t *testing.T) {
 			}
 		})
 	}
+}
+
+// scripts/project-baseline.sh runs PathKit on a copy of a project and
+// leaves the project alone. Run for real on the pilot, with the binary named
+// by a RELATIVE path (the script changes folder, so a relative path must still work).
+func TestBaselineScript(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary and runs the pilot's tests; skipped with -short (CI runs it)")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil || runtime.GOOS == "windows" {
+		t.Skip("needs bash (not Windows)")
+	}
+	bin := buildPathkit(t)
+	script, _ := filepath.Abs("../../scripts/project-baseline.sh")
+	pilot, _ := filepath.Abs("../../testdata/pilot")
+	out := filepath.Join(t.TempDir(), "out")
+	rel, err := filepath.Rel(mustGetwd(t), bin)
+	if err != nil {
+		t.Skip("no relative path to the binary on this system")
+	}
+
+	cmd := exec.Command(bash, script, pilot, out)
+	cmd.Env = append(os.Environ(), "PATHKIT="+rel)
+	if o, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("script failed: %v\n%s", err, o)
+	}
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	if got := read("report.txt"); !strings.Contains(got, "38 paths total · 20 covered · 18 missed · 52.6% project coverage") {
+		t.Errorf("report.txt:\n%s", got)
+	}
+	if got := read("versions.txt"); !strings.Contains(got, "project folder unchanged: yes") || !strings.Contains(got, "v0.0.0-test") {
+		t.Errorf("versions.txt:\n%s", got)
+	}
+	for _, name := range []string{"report.json", "coverage.json", "analyze.txt", "test-output.txt", "exit-codes.txt"} {
+		if read(name) == "" {
+			t.Errorf("%s is empty", name)
+		}
+	}
+	traces, _ := filepath.Glob(filepath.Join(out, "traces", "*.trace.json"))
+	if len(traces) != 21 {
+		t.Errorf("%d trace files, want 21", len(traces))
+	}
+	// A fake pathkit that fails everything: the script must not say it worked.
+	fake := filepath.Join(t.TempDir(), "pathkit")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command(bash, script, pilot, filepath.Join(t.TempDir(), "out2"))
+	cmd.Env = append(os.Environ(), "PATHKIT="+fake)
+	if o, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(o), "every PathKit command failed") {
+		t.Errorf("a script whose every command failed should exit non-zero: err=%v\n%s", err, o)
+	}
+
+	// An output folder inside the project is refused.
+	cmd = exec.Command(bash, script, pilot, filepath.Join(pilot, "inside"))
+	cmd.Env = append(os.Environ(), "PATHKIT="+bin)
+	if o, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(o), "the output folder must be outside the project") {
+		t.Errorf("err=%v\n%s", err, o)
+	}
+	if _, err := os.Stat(filepath.Join(pilot, "inside")); err == nil {
+		t.Error("the refused run created a folder inside the project")
+	}
+}
+
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
 }

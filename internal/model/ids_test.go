@@ -10,7 +10,7 @@ import (
 )
 
 // Every exit's ID must round-trip through ExitFor and LookupEdge: that is
-// how M3's recorder and trace matcher will get IDs, with no second way in.
+// how the recorder and the trace matcher get IDs, with no second way in.
 func TestIDsRoundTrip(t *testing.T) {
 	workflows := workflowsIn(t, "../../testdata/pilot/...")
 	for _, name := range keyWorkflows(t) {

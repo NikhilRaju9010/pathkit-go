@@ -1,5 +1,5 @@
 // Package scope holds functions for PathKit's scope-config tests
-// (.pathkitrc.json, CLAUDE.md D8): some the automatic workflow rule finds,
+// (.pathkitrc.json, docs/DESIGN.md D8): some the automatic workflow rule finds,
 // some only "include" can add, and one that can never be a workflow.
 package scope
 

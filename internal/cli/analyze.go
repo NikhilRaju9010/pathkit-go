@@ -26,9 +26,10 @@ type analyzeOptions struct {
 func newAnalyzeCommand() *cobra.Command {
 	var opt analyzeOptions
 	cmd := &cobra.Command{
-		Use:   "analyze <file|folder|folder/...>",
-		Short: "List every possible path through the workflows in a file or package",
-		Args:  exactlyOne("<file>"),
+		Use:     "analyze <file|folder|folder/...>",
+		Short:   "List every possible path through the workflows in a file or package",
+		Example: "  pathkit analyze ./...\n  pathkit analyze orders/orders.go --summary",
+		Args:    exactlyOne("<file>"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAnalyze(cmd, args[0], opt)
 		},
@@ -69,7 +70,7 @@ func runAnalyze(cmd *cobra.Command, arg string, opt analyzeOptions) error {
 		fmt.Fprintf(stderr, "pathkit analyze: in scope but not analyzable: %s: %v %s\n", n.name, n.err, notAnalyzableHint)
 	}
 	if len(sc.mapped)+len(sc.notAnalyzable)+len(sc.excluded) == 0 {
-		return userError("%s has no exported workflow functions to analyze", arg)
+		return userError("%s has no exported workflow functions to analyze; PathKit looks for exported functions that take workflow.Context first and return error last (see section 3 of SETUP-GUIDE.md)", arg)
 	}
 
 	var blocks []string
@@ -97,6 +98,34 @@ func runAnalyze(cmd *cobra.Command, arg string, opt analyzeOptions) error {
 			return userError("no workflows in scope to analyze (every workflow is excluded)")
 		}
 		return userError("no workflows could be analyzed")
+	}
+
+	// The warning goes to stderr, before the listing, so the listing itself
+	// (and --mermaid output) stays exactly as it was.
+	var capped []string
+	for _, w := range pageWorkflows {
+		if w.Paths.Truncated {
+			capped = append(capped, w.Name)
+		}
+	}
+	if len(capped) > 0 {
+		fmt.Fprintln(stderr, "pathkit analyze: "+render.CapHeadline(capped))
+		for _, l := range render.CapAdvice() {
+			fmt.Fprintln(stderr, "  "+l)
+		}
+	}
+
+	var empty []string
+	for _, w := range pageWorkflows {
+		if len(w.Paths.List) == 0 && !w.Paths.Truncated {
+			empty = append(empty, w.Name)
+		}
+	}
+	if len(empty) > 0 {
+		fmt.Fprintln(stderr, "pathkit analyze: "+render.ZeroPathHeadline(empty))
+		for _, l := range render.ZeroPathAdvice() {
+			fmt.Fprintln(stderr, "  "+l)
+		}
 	}
 
 	output := strings.Join(blocks, "\n") + excludedBlock(sc.excluded)

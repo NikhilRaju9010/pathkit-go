@@ -1,0 +1,78 @@
+approval.ApprovalWorkflow (approval/approval.go)
+2/4 paths · 50.0% · branches 4/6 · priority Medium
+  1. Start -> AwaitWithTimeout (wait) --failure--> End (failed): missed
+  2. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == "approved" --true--> End (completed): covered
+  3. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == "approved" --false--> End (completed): missed
+  4. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --timeout--> End (completed): covered
+
+billing.SubscriptionWorkflow (billing/subscription.go)
+2/3 paths · 66.7% · branches 5/5 · priority Medium
+  1. Start -> for i < s.CyclesPerRun --iterate--> ChargeMonthly (activity) --failure--> End (failed): covered
+  2. Start -> for i < s.CyclesPerRun --iterate--> ChargeMonthly (activity) --success--> retry --> for i < s.CyclesPerRun --exit--> End (continued-as-new): covered
+  3. Start -> for i < s.CyclesPerRun --exit--> End (continued-as-new): missed
+
+fulfillment.OrderFulfillmentWorkflow (fulfillment/fulfillment.go)
+2/4 paths · 50.0% · branches 4/6 · priority Medium
+  1. Start -> ReserveInventory (activity) --failure--> End (failed): missed
+  2. Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --failure--> End (failed) [compensation (defer)]: covered
+  3. Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --success--> ShipOrder (activity) --failure--> End (failed) [compensation (defer)]: missed
+  4. Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --success--> ShipOrder (activity) --success--> End (completed) [compensation (defer)]: covered
+
+fulfillment.PaymentWorkflow (fulfillment/payment.go)
+2/4 paths · 50.0% · branches 4/6 · priority Medium
+  1. Start -> AuthorizeCard (activity) --failure--> End (failed): missed
+  2. Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --true--> FraudReview (activity) --failure--> End (failed): missed
+  3. Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --true--> FraudReview (activity) --success--> End (completed): covered
+  4. Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --false--> End (completed): covered
+
+orders.OrderWorkflow (orders/orders.go)
+3/3 paths · 100.0% · branches 4/4 · priority Low
+  1. Start -> if in.AmountCents <= 0 --true--> End (completed): covered
+  2. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed): covered
+  3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed): covered
+
+polling.ReportPollingWorkflow (polling/polling.go)
+3/5 paths · 60.0% · branches 7/8 · priority Medium
+  1. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --failure--> End (failed): missed
+  2. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --case "complete"--> End (completed): covered
+  3. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --case "failed"--> End (completed): covered
+  4. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --default--> retry --> for attempt <= in.MaxPolls --exit--> End (completed): covered
+  5. Start -> for attempt <= in.MaxPolls --exit--> End (completed): missed
+
+reports.DailyReportWorkflow (reports/dailyreport.go)
+3/6 paths · 50.0% · branches 5/6 · priority Medium
+  1. Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --failure--> End (failed): missed
+  2. Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --success--> EmailReport (activity) --failure--> End (failed): missed
+  3. Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --success--> EmailReport (activity) --success--> End (completed): covered
+  4. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --failure--> End (failed): covered
+  5. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --failure--> End (failed): missed
+  6. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --success--> End (completed): covered
+
+shipment.ShipmentWorkflow (shipment/shipment.go)
+3/9 paths · 33.3% · branches 6/9 · priority High
+  1. Start -> CreateLabel (activity) --failure--> End (failed): covered
+  2. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "delivered"--> NotifyCustomer (activity) --failure--> End (failed): missed
+  3. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "delivered"--> NotifyCustomer (activity) --success--> End (completed): covered
+  4. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "returned"--> NotifyCustomer (activity) --failure--> End (failed): missed
+  5. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "returned"--> NotifyCustomer (activity) --success--> End (completed): missed
+  6. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --default--> NotifyCustomer (activity) --failure--> End (failed): missed
+  7. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --default--> NotifyCustomer (activity) --success--> End (completed): missed
+  8. Start -> CreateLabel (activity) --success--> select (Selector) --timeout--> NotifyCustomer (activity) --failure--> End (failed): missed
+  9. Start -> CreateLabel (activity) --success--> select (Selector) --timeout--> NotifyCustomer (activity) --success--> End (completed): covered
+
+38 paths total · 20 covered · 18 missed · 52.6% project coverage
+Branches: 39/50 (78.0%)
+
+Classification:
+  Total paths:         38
+  Testable:            38
+  Cannot be tested:    0
+  Needs special test:  0
+  Needs review:        0
+Testable coverage:     20 / 38 = 52.6%  (testable paths only)
+Special-test coverage: 0 / 0
+Overall coverage:      20 / 38 = 52.6%  (all paths)
+Coverage basis used:   testable
+
+0 workflows excluded (no scope in use)
+Traces: 21 read · 21 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable

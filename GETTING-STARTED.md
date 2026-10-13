@@ -24,15 +24,9 @@ PathKit is a **command-line tool**, not a Go library. You never `import` it in y
 
 ## 3. Install PathKit
 
-PathKit hasn't had its first tagged release yet (that's milestone M9 — see `PLAN.md`), so for now you build it from a checkout of this repo. This is a one-time step; the binary you produce works on any of your own Go projects afterwards.
+PathKit hasn't had its first tagged release yet, so for now you build it from a checkout of this repo. This is a one-time step; the binary you produce works on any of your own Go projects afterwards.
 
-```bash
-git clone https://github.com/NikhilRaju9010/pathkit-go.git
-cd pathkit-go
-go build -o pathkit ./cmd/pathkit
-```
-
-That gives you one file, `pathkit`, in the current folder. Check it works:
+Follow the install steps in the [README](README.md#install); they end with a single `pathkit` file in the folder you built in. Check it works:
 
 ```bash
 ./pathkit --version
@@ -41,7 +35,7 @@ That gives you one file, `pathkit`, in the current folder. Check it works:
 Put it somewhere on your `PATH` so you can run `pathkit` from any folder, for example:
 
 ```bash
-mv pathkit ~/go/bin/          # or anywhere already on your PATH
+mv pathkit ~/go/bin/          # or any folder already on your PATH (create it if needed)
 pathkit --version
 ```
 
@@ -89,7 +83,7 @@ Total paths: 3
 
 Each numbered line is one complete trip through the workflow. If a workflow you expect to see doesn't show up, it's almost always one of these two things:
 
-- **It isn't recognized as a workflow.** PathKit finds workflows automatically by shape: the function is **exported** (capitalized name), its **first parameter is `workflow.Context`**, and its **last return value is `error`**. A helper function or an unexported workflow won't be picked up on its own — see section 6 of `SETUP-GUIDE.md` (`.pathkitrc.json`'s `workflows.include`) to add it by name.
+- **It isn't recognized as a workflow.** PathKit finds workflows automatically by shape: the function is **exported** (capitalized name), its **first parameter is `workflow.Context`**, and its **last return value is `error`**. A helper function or an unexported workflow won't be picked up on its own — see section 8 of `SETUP-GUIDE.md` (`.pathkitrc.json`'s `workflows.include`) to add it by name.
 - **It uses a construct PathKit can't map yet** (`goto`, Go's own `select`, or an unusual shape of `workflow.Selector`). PathKit will say exactly why in an error, naming the file and line.
 
 Useful flags: `--summary` (just the count per workflow), `--limit N` (only the first N paths), `--mermaid` (a diagram instead of text), `--out file.txt` (also save the output).
@@ -106,7 +100,7 @@ This is the part people most often get wrong, so read it carefully:
 pathkit test ./...
 ```
 
-This is a drop-in replacement for `go test ./...` — it runs your existing tests exactly as they are (no changes needed to your test files), but it also secretly compiles a marked-up copy of your workflow code (never touching your real files) so it can watch which path each test run takes. You'll see something like:
+This is a drop-in replacement for `go test ./...` — it runs your existing tests exactly as they are (no changes needed to your test files), but it also compiles a marked-up copy of your workflow code (never touching your real files) so it can watch which path each test run takes. You'll see something like:
 
 ```
 pathkit test: recorded 21 traces (21 complete) in .pathkit/traces
@@ -151,7 +145,7 @@ pathkit report ./...
 
 Add `--fail-under 80` to either command to make PathKit exit with code `2` when coverage is below that percentage — handy for CI. And add `--html` to `report` to get one shareable web page (`.pathkit/report.html`) you can open in a browser or send to a teammate — no server, no internet needed.
 
-If you ever see `no trace files found ...`, it means step 6 was skipped, or you ran plain `go test` instead of `pathkit test` — go back and re-run your tests through PathKit.
+If you ever see `no trace files found ...`, it means the "run your tests" step (section 6) was skipped, or you ran plain `go test` instead of `pathkit test` — go back and re-run your tests through PathKit.
 
 ---
 
@@ -177,14 +171,14 @@ If some workflows can't be tested yet (they need a real external system, say), o
   "packages": ["./internal/workflows/..."],
   "workflows": {
     "exclude": [
-      { "name": "LegacyBillingWorkflow", "reason": "needs a real bank sandbox" }
+      { "name": "LegacyPaymentsWorkflow", "reason": "needs an external test system" }
     ]
   },
   "failUnder": 80
 }
 ```
 
-Every exclusion is always shown in `report`'s output with its reason, so nobody can quietly inflate the coverage number. Full details are in section 6 of `SETUP-GUIDE.md`.
+Every exclusion is always shown in `report`'s output with its reason, so nobody can quietly inflate the coverage number. Full details are in section 8 of `SETUP-GUIDE.md`.
 
 ---
 
@@ -198,7 +192,7 @@ Every exclusion is always shown in `report`'s output with its reason, so nobody 
 | `in scope but not analyzable: <workflow>: ...` | PathKit found the workflow but can't map one of its constructs yet. | The message names the construct and line. Rewrite it, or exclude it in `.pathkitrc.json` with a reason. |
 | `Directory not found: ...` / `Workflow file not found: ...` | Wrong path, or you're not in the folder you think you are. | Check the path and your current folder (`pwd`). |
 
-For the complete error table and every flag, see [SETUP-GUIDE.md, section 7](SETUP-GUIDE.md#7-errors-and-exit-codes). For known gaps and edge cases, see [LIMITATIONS.md](LIMITATIONS.md).
+For the complete error table and every flag, see [SETUP-GUIDE.md, section 9](SETUP-GUIDE.md#9-errors-and-exit-codes). For known gaps and edge cases, see [LIMITATIONS.md](LIMITATIONS.md).
 
 ---
 

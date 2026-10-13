@@ -80,7 +80,7 @@ func TestReportHTMLTrend(t *testing.T) {
 	}
 }
 
-// Owner's requirement (M8): a missing or damaged report-history.json gives
+// A missing or damaged report-history.json gives
 // a warning and starts fresh; it never fails the report.
 func TestReportHTMLHistoryMissingOrDamaged(t *testing.T) {
 	traces := ordersTraces(t)
@@ -108,7 +108,7 @@ func TestReportHTMLHistoryMissingOrDamaged(t *testing.T) {
 	}
 }
 
-// Owner's requirement (M8): pathkit clean and --clean never delete
+// pathkit clean and --clean never delete
 // report-history.json, even when it sits in the trace folder. (pathkit
 // test is checked end to end in internal/e2e, TestCoverageMatchesKey.)
 func TestHistorySurvivesCleanup(t *testing.T) {
@@ -238,7 +238,7 @@ func TestAnalyzeHTML(t *testing.T) {
 	}
 }
 
-// Owner's requirement (M8): a workflow cut at the path cap shows
+// A workflow cut at the path cap shows
 // "truncated" in the HTML, as the text report does.
 func TestHTMLTruncated(t *testing.T) {
 	rules := absPath(t, fixtures+"/rules/...")
@@ -325,7 +325,7 @@ func TestHTMLEscapesUserCode(t *testing.T) {
 	}
 }
 
-// The allowStale config key (applied since M6; its test added in M8): a
+// The allowStale config key : a
 // trace from an older version of the code counts with it, not without.
 func TestAllowStaleConfigKey(t *testing.T) {
 	traces := t.TempDir()
@@ -344,7 +344,7 @@ func TestAllowStaleConfigKey(t *testing.T) {
 	}
 }
 
-// The noColor config key (applied since M7; its test added in M8), with
+// The noColor config key , with
 // stdout pretending to be a terminal.
 func TestNoColorConfigKey(t *testing.T) {
 	old := isTerminal

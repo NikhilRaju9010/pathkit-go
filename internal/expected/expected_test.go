@@ -12,7 +12,7 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 )
 
-// The real answer key is read completely, including the parts the M2/M3
+// The real answer key is read completely, including the parts the first
 // reader silently skipped: the loop's "retry" step and the tests listed
 // as bullets under polling's **Tests** line.
 func TestReadRealKey(t *testing.T) {
@@ -96,8 +96,8 @@ const minimal = "# key\n" + // 1
 	"| --- | --- | --- |\n" + // 11
 	"| a.W | 2 | 1 |\n" + // 12
 	"| **Total** | **2** | **1 (50.0%)** |\n" + // 13
-	"## Disagreements\n" + // 14
-	"*(None yet. A quoted J1 --x--> End here is fine.)*\n" // 15
+	"## Known differences\n" + // 14
+	"*(None. A quoted J1 --x--> End here is fine.)*\n" // 15
 
 func readString(t *testing.T, doc string) error {
 	t.Helper()

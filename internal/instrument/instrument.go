@@ -23,6 +23,7 @@ import (
 	"text/template"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
+	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
 
@@ -40,6 +41,10 @@ const maxResults = 8
 
 const recVar = "pathkitRec"
 
+// ctxVar is the name given to a workflow's context parameter that the
+// user wrote as "_", so the recorder can be started with it.
+const ctxVar = "pathkitCtx"
+
 // Target is one workflow to instrument, with its graph.
 type Target struct {
 	Workflow discover.Workflow
@@ -51,6 +56,9 @@ type Edit struct {
 	Offset int    // byte offset in the original file
 	Order  int    // for edits at the same offset: lower Order ends up first
 	Text   string // never contains a line break
+	// Delete is how many original bytes at Offset the text replaces. It is
+	// used for one thing only: naming a context parameter written as "_".
+	Delete int
 }
 
 // Result holds the generated sources, keyed by the real file path they
@@ -113,20 +121,30 @@ func workflowEdits(t Target) ([]Edit, error) {
 		return nil, err
 	}
 	params := wf.Func.Type.Params.List
-	if len(params[0].Names) == 0 || params[0].Names[0].Name == "_" {
-		return nil, fmt.Errorf("cannot record %s: its workflow.Context parameter has no name", wf.Name)
+	if len(params[0].Names) == 0 {
+		return nil, fmt.Errorf("cannot record %s: its parameters have no names (func %s(workflow.Context, ...)); give them names", wf.Name, wf.Func.Name.Name)
 	}
 	ctxName := params[0].Names[0].Name
+	var edits []Edit
+	if ctxName == "_" {
+		// "func W(_ workflow.Context, ...)": name the parameter in the
+		// marked-up copy (one character replaced by a name, same line).
+		ctxName = ctxVar
+		edits = append(edits, Edit{Offset: off(params[0].Names[0]), Delete: 1, Text: ctxVar})
+	}
 
 	hash := model.FunctionHash(fset, wf.Func)
-	edits := []Edit{{
+	edits = append(edits, Edit{
 		Offset: off(wf.Func.Body) + 1, // just after the function's "{"
-		Text:   fmt.Sprintf(" %s := pathkitStart(%s, %q, %q); defer %s.flush();", recVar, ctxName, wf.Name, hash, recVar),
-	}}
+		Text:   fmt.Sprintf(" %s := pathkitStart(%s, %q, %q, %q); defer %s.flush();", recVar, ctxName, wf.Name, hash, wf.Pkg.PkgPath, recVar),
+	})
 
 	labels := labelsOf(wf.Func.Body)
 	for _, j := range g.Junctions {
 		if j.Kind == model.Loop {
+			if err := checkLoopCondition(wf, j); err != nil {
+				return nil, err
+			}
 			e, err := loopEdits(g, j, labels, off, end)
 			if err != nil {
 				return nil, fmt.Errorf("%v in %s", err, wf.Name)
@@ -226,7 +244,7 @@ func fallthroughEdits(body *ast.BlockStmt, off func(ast.Node) int) ([]Edit, map[
 	return edits, fellInto
 }
 
-// loopEdits records a loop junction (the loop rule, CLAUDE.md D3). Just
+// loopEdits records a loop junction (the loop rule, docs/DESIGN.md D3). Just
 // before the loop statement (before its label, if it has one), enter
 // hands the recorder the loop's three exit IDs from the model and resets
 // the loop. After that, every decision at the loop's head goes through
@@ -337,7 +355,7 @@ func breaksLeaving(body *ast.BlockStmt, label string) []*ast.BranchStmt {
 
 // returnEdits marks a return so the run counts as complete only after all
 // return values were evaluated. (Marking before the return would count a
-// run whose return value panics as complete: the TS d0aa17a trap.)
+// run whose return value panics as complete: a known trap.)
 //   - bare "return": nothing left to evaluate, so mark just before it.
 //   - "return a, b": becomes "return pathkitRet2[T0, T1](pathkitRec, a, b)";
 //     the helper sets the flag after a and b are evaluated. Explicit type
@@ -394,6 +412,43 @@ func resultTypeTexts(wf discover.Workflow) ([]string, error) {
 	return out, nil
 }
 
+// checkLoopCondition stops before go test runs when a loop's condition
+// has a named bool type ("type Flag bool; for !v"). loopEdits wraps the
+// condition in pathkitRec.loop, which takes a plain bool, and Go does not
+// pass a Flag where a bool is wanted, so the marked-up copy would fail to
+// compile with an error that points at PathKit's copy instead of the
+// user's file (LIMITATIONS.md).
+func checkLoopCondition(wf discover.Workflow, j *model.Junction) error {
+	s, ok := j.Stmt.(*ast.ForStmt)
+	if !ok || s.Cond == nil {
+		return nil
+	}
+	tv, ok := wf.Pkg.TypesInfo.Types[s.Cond]
+	if !ok {
+		return nil
+	}
+	if b, ok := types.Unalias(tv.Type).(*types.Basic); ok && b.Info()&types.IsBoolean != 0 {
+		return nil // bool or untyped bool
+	}
+	pos := wf.Pkg.Fset.Position(s.Cond.Pos())
+	// The condition as the user wrote it (types.ExprString shortens func
+	// literals, which would make the suggested fix invalid Go).
+	cond := types.ExprString(s.Cond)
+	if src, err := os.ReadFile(pos.Filename); err == nil {
+		if endPos := wf.Pkg.Fset.Position(s.Cond.End()); endPos.Offset <= len(src) {
+			cond = strings.Join(strings.Fields(string(src[pos.Offset:endPos.Offset])), " ")
+		}
+	}
+	typ := types.TypeString(tv.Type, func(p *types.Package) string {
+		if p == wf.Pkg.Types {
+			return ""
+		}
+		return p.Name()
+	})
+	return fmt.Errorf("cannot record %s: the loop condition `%s` at %s:%d has the type %s, not the plain type bool, and pathkit can record a loop condition only of the plain type bool; write `for bool(%s)` instead (it means the same), or exclude the workflow in .pathkitrc.json with a reason",
+		wf.Name, cond, load.DisplayPath(pos.Filename), pos.Line, typ, cond)
+}
+
 func checkNames(wf discover.Workflow) error {
 	scope := wf.Pkg.Types.Scope()
 	for _, name := range scope.Names() {
@@ -401,17 +456,30 @@ func checkNames(wf discover.Workflow) error {
 			return fmt.Errorf("cannot record %s: the package already declares %q, a name pathkit needs", wf.Name, name)
 		}
 	}
+	// pathkitCtx is only added when the context parameter is written "_";
+	// then any package-level name or local declaration of it would clash.
+	if params := wf.Func.Type.Params.List; len(params) > 0 && len(params[0].Names) > 0 && params[0].Names[0].Name == "_" {
+		if scope.Lookup(ctxVar) != nil {
+			return fmt.Errorf("cannot record %s: the package already declares %q, a name pathkit needs for a context parameter written \"_\"; name that parameter in your code, or rename %s", wf.Name, ctxVar, ctxVar)
+		}
+	}
 	clash := false
 	ast.Inspect(wf.Func, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok && id.Name == recVar {
-			if _, isVar := wf.Pkg.TypesInfo.Defs[id].(*types.Var); isVar {
-				clash = true
-			}
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return !clash
+		}
+		obj := wf.Pkg.TypesInfo.Defs[id]
+		if _, isVar := obj.(*types.Var); isVar && id.Name == recVar {
+			clash = true
+		}
+		if obj != nil && id.Name == ctxVar {
+			clash = true // any local variable, constant, type or label
 		}
 		return !clash
 	})
 	if clash {
-		return fmt.Errorf("cannot record %s: it already uses the name %q, which pathkit needs", wf.Name, recVar)
+		return fmt.Errorf("cannot record %s: it already uses the name %q or %q, which pathkit needs", wf.Name, recVar, ctxVar)
 	}
 	return nil
 }
@@ -431,7 +499,7 @@ func Apply(src []byte, edits []Edit) []byte {
 		if strings.ContainsAny(e.Text, "\r\n") {
 			panic("instrument: an edit must never add a line break")
 		}
-		out = append(out[:e.Offset], append([]byte(e.Text), out[e.Offset:]...)...)
+		out = append(out[:e.Offset], append([]byte(e.Text), out[e.Offset+e.Delete:]...)...)
 	}
 	return out
 }
@@ -448,6 +516,7 @@ import (
 	pathkitjson "encoding/json"
 	pathkitos "os"
 	pathkitfilepath "path/filepath"
+	pathkitstrings "strings"
 	pathkittime "time"
 
 	pathkitworkflow "go.temporal.io/sdk/workflow"
@@ -455,11 +524,12 @@ import (
 
 const pathkitTraceDir = {{printf "%q" .TraceDir}}
 
-// pathkitTrace is trace file format schemaVersion 1 (see CLAUDE.md).
+// pathkitTrace is trace file format schemaVersion 1 (see docs/DESIGN.md).
 type pathkitTrace struct {
 	SchemaVersion int      ` + "`json:\"schemaVersion\"`" + `
 	Tool          string   ` + "`json:\"tool\"`" + `
 	Workflow      string   ` + "`json:\"workflow\"`" + `
+	Package       string   ` + "`json:\"package,omitempty\"`" + `
 	FunctionHash  string   ` + "`json:\"functionHash\"`" + `
 	Status        string   ` + "`json:\"status\"`" + `
 	Steps         []string ` + "`json:\"steps\"`" + `
@@ -476,15 +546,15 @@ type pathkitRecorder struct {
 	loops       map[string]*pathkitLoop // by junction ID, e.g. "J1"
 }
 
-// pathkitLoop is one loop's state in this run (the loop rule, CLAUDE.md D3).
+// pathkitLoop is one loop's state in this run (the loop rule, docs/DESIGN.md D3).
 type pathkitLoop struct {
 	iterate, exit, retry string // the loop's exit IDs, from pathkit's model
 	entered              bool   // the body started since the loop statement began
 	broke                bool   // a break just left this range loop
 }
 
-func pathkitStart(ctx pathkitworkflow.Context, workflow, hash string) *pathkitRecorder {
-	r := &pathkitRecorder{trace: pathkitTrace{SchemaVersion: 1, Tool: "pathkit-go", Workflow: workflow, FunctionHash: hash, Steps: []string{}}}
+func pathkitStart(ctx pathkitworkflow.Context, workflow, hash, pkg string) *pathkitRecorder {
+	r := &pathkitRecorder{trace: pathkitTrace{SchemaVersion: 1, Tool: "pathkit-go", Workflow: workflow, Package: pkg, FunctionHash: hash, Steps: []string{}}}
 	if info := pathkitworkflow.GetInfo(ctx); info != nil {
 		r.trace.WorkflowID, r.trace.RunID = info.WorkflowExecution.ID, info.WorkflowExecution.RunID
 	}
@@ -572,7 +642,7 @@ func (r *pathkitRecorder) flush() {
 	var b [6]byte
 	_, _ = pathkitrand.Read(b[:])
 	_ = pathkitos.MkdirAll(pathkitTraceDir, 0o755)
-	name := r.trace.Workflow + "." + pathkithex.EncodeToString(b[:]) + ".trace.json"
+	name := pathkitstrings.ReplaceAll(r.trace.Workflow, "/", "_") + "." + pathkithex.EncodeToString(b[:]) + ".trace.json"
 	_ = pathkitos.WriteFile(pathkitfilepath.Join(pathkitTraceDir, name), append(data, '\n'), 0o644)
 }
 `))

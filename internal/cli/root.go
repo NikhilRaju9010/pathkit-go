@@ -39,7 +39,7 @@ func newRootCommand() *cobra.Command {
 	root.SetVersionTemplate("{{.Version}}\n")
 
 	root.AddCommand(newAnalyzeCommand(), newTestCommand(), newTracesCommand(), newCoverageCommand(), newReportCommand(),
-		newCleanCommand(), newPrepareCommand())
+		newCleanCommand(), newPrepareCommand(), newExplainCommand())
 	return root
 }
 

@@ -87,7 +87,7 @@ func TestReportSummaryOneLinePerWorkflow(t *testing.T) {
 
 func TestReportJSONGolden(t *testing.T) {
 	traces := ordersTraces(t)
-	golden := absPath(t, "testdata/report_orders.json")
+	golden := absPath(t, "testdata/report_orders.classified.json")
 	inPilot(t)
 	stdout, _, code := run(t, "report", "./orders", "--traces", traces, "--json", "--fail-under", "60")
 	want, err := os.ReadFile(golden)
@@ -95,7 +95,7 @@ func TestReportJSONGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	if code != ExitOK || stdout != string(want) {
-		t.Errorf("code=%d, --json differs from testdata/report_orders.json:\n%s", code, stdout)
+		t.Errorf("code=%d, --json differs from testdata/report_orders.classified.json:\n%s", code, stdout)
 	}
 }
 
@@ -271,7 +271,7 @@ func TestReportErrors(t *testing.T) {
 		{"broken package", []string{"report", fixtures + "/...", "--traces", traces},
 			"pathkit report: package does not compile: example.com/fixtures/broken: "},
 		{"no traces", []string{"report", pilot + "/orders", "--traces", empty},
-			"pathkit report: no trace files found in " + empty + `; coverage is recorded only by "pathkit test" (plain "go test" records nothing)` + "\n"},
+			"pathkit report: no trace files found in " + empty + `; coverage is recorded only by "pathkit test" (plain "go test" records nothing). Run "pathkit test ./..." first, from the folder that holds go.mod, then run this command from the same folder (or point to the traces with --traces)` + "\n"},
 		{"missing folder", []string{"report", "nowhere/..."},
 			"pathkit report: Directory not found: nowhere\n"},
 	}

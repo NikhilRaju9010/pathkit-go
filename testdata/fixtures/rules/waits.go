@@ -8,7 +8,7 @@ import (
 
 // An if on the "did it arrive?" result of AwaitWithTimeout (exits
 // signaled / timeout), ReceiveWithTimeout or ReceiveAsync (received /
-// not received) is a junction (CLAUDE.md D3).
+// not received) is a junction (docs/DESIGN.md D3).
 
 func UsesAwaitResult(ctx workflow.Context) (string, error) {
 	done := false

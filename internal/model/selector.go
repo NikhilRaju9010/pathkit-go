@@ -13,7 +13,7 @@ import (
 )
 
 // selectorInfo is one workflow.Selector in the one shape PathKit maps
-// (CLAUDE.md D3): created with NewSelector in this function, its Add…
+// (docs/DESIGN.md D3): created with NewSelector in this function, its Add…
 // calls plain statements in the same block, each with an inline func
 // literal, and exactly one Select call after them.
 type selectorInfo struct {

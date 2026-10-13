@@ -68,7 +68,7 @@ type PathList struct {
 
 // Paths lists every path, depth first, taking exits in display order.
 // Each exit, and each loop's retry edge, is used at most once per path
-// (the analyzer half of the loop rule, CLAUDE.md D3): so a loop adds the
+// (the analyzer half of the loop rule, docs/DESIGN.md D3): so a loop adds the
 // paths "not entered" (exit), "entered and left from inside the body"
 // (iterate, then return or break) and "entered, went round, then left"
 // (iterate, body, retry, exit). A road that would need a second retry is

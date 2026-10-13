@@ -7,7 +7,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// Every switch with at least one case is a junction (CLAUDE.md D3): one
+// Every switch with at least one case is a junction (docs/DESIGN.md D3): one
 // exit per case in source order, plus "default", written or not.
 
 func UsesSwitch(ctx workflow.Context, s string) (string, error) {

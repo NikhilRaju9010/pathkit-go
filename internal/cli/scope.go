@@ -8,19 +8,25 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/tools/go/packages"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/classify"
 	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
 	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 )
 
-// scopeFlags are the flags every scoped command has (CLAUDE.md D8).
+// scopeFlags are the flags every scoped command has (docs/DESIGN.md D8).
 type scopeFlags struct {
 	config  string
 	include []string
 	exclude []string
 	all     bool // analyze only: ignore the scope
+	// wantNames (not a flag): the command resolves workflow names from the
+	// classification section (coverage and report), so the configured
+	// packages must be loaded to check them.
+	wantNames bool
 	// everyPackage (report only, not a flag): with no target, load every
 	// entry of the config's "packages", not just a single one.
 	everyPackage bool
@@ -45,8 +51,8 @@ type recordable struct {
 }
 
 // notAnalyzable is an in-scope workflow PathKit can't map. It is always
-// printed, never dropped from view (owner's decision, 2026-09-28; from
-// M6/M7, coverage and report refuse to run while one is in scope).
+// printed, never dropped from view (coverage and report refuse to run
+// while one is in scope).
 type notAnalyzable struct {
 	name string
 	err  error
@@ -61,6 +67,12 @@ type scoped struct {
 	mapped        []recordable
 	excluded      []scope.Excluded
 	notAnalyzable []notAnalyzable
+	// names are every workflow-like function the names in the config were
+	// checked against (full names, "orders.OrderWorkflow").
+	names []string
+	// defaulted: no folder was given, so the config's own packages (all of
+	// them for report) are what was loaded.
+	defaulted bool
 }
 
 // loadScoped loads target and applies the scope from .pathkitrc.json (or
@@ -71,9 +83,9 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := scope.Load(sf.config, cwd)
+	cfg, err := loadConfig(sf.config, cwd)
 	if err != nil {
-		return nil, userError("%s", err)
+		return nil, err
 	}
 	flags := scope.Flags{Include: sf.include, Exclude: sf.exclude}
 	if sf.all {
@@ -87,6 +99,7 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 	}
 
 	targets := []string{target}
+	defaulted := target == "" // the config's own packages are what was loaded
 	if target == "" {
 		targets = []string{"./..."}
 		if cfg != nil {
@@ -104,19 +117,35 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 	if err != nil {
 		return nil, userError("%s", err)
 	}
-	fns := discover.All(res.Packages)
+	// Names must not depend on which folder this command was given: with a
+	// config they are decided over the config's packages (loaded once more
+	// when the command was given another folder), else over what was loaded.
+	namer := discover.NewNamer(res.Packages)
+	if cfg != nil && !sf.all && !defaulted {
+		// Best effort: if the config's packages cannot be loaded here,
+		// the names come from what this command loaded (a config problem
+		// is reported where it matters, when its names are needed).
+		all := append([]*packages.Package(nil), res.Packages...)
+		for _, p := range cfg.Packages {
+			if r, err := load.Load(cfg.Abs(p)); err == nil {
+				all = append(all, r.Packages...)
+			}
+		}
+		namer = discover.NewNamer(all)
+	}
+	fns := discover.AllWith(namer, res.Packages)
 
 	// Names are checked against the config's packages, so a misspelled
 	// name is caught even when this command loaded only one file.
 	nameSet, where := fns, target
-	if cfg != nil && (cfg.HasInclude || len(cfg.Exclude) > 0 || flags.Include != nil || len(flags.Exclude) > 0) {
+	if cfg != nil && (cfg.HasInclude || len(cfg.Exclude) > 0 || flags.Include != nil || len(flags.Exclude) > 0 || sf.wantNames && cfg.Classification.Enabled && classificationNames(cfg) > 0) {
 		nameSet, where = nil, "the configured packages ("+strings.Join(cfg.Packages, ", ")+")"
 		for _, p := range cfg.Packages {
 			r, err := load.Load(cfg.Abs(p))
 			if err != nil {
 				return nil, userError("%s: packages: %v", cfg.Path, err)
 			}
-			nameSet = append(nameSet, discover.All(r.Packages)...)
+			nameSet = append(nameSet, discover.AllWith(namer, r.Packages)...)
 		}
 	}
 	rules, err := scope.Resolve(cfg, flags, nameSet, where)
@@ -134,11 +163,15 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 		fns = inFile
 	}
 	applied := rules.Apply(fns)
-	out := &scoped{target: target, res: res, cfg: cfg, excluded: applied.Excluded}
+	out := &scoped{target: target, res: res, cfg: cfg, excluded: applied.Excluded, defaulted: defaulted}
+	for _, f := range nameSet {
+		out.names = append(out.names, f.Workflow.Name)
+	}
 	for _, e := range applied.InScope {
 		g, err := model.Build(e.Workflow)
 		var u *model.UnsupportedError
-		if errors.As(err, &u) {
+		var pe *model.PragmaError
+		if errors.As(err, &u) || errors.As(err, &pe) {
 			out.notAnalyzable = append(out.notAnalyzable, notAnalyzable{e.Workflow.Name, err})
 			continue
 		}
@@ -191,4 +224,26 @@ func excludedBlock(excluded []scope.Excluded) string {
 		fmt.Fprintf(&b, "  %s: %s\n", e.Name, e.Reason)
 	}
 	return b.String()
+}
+
+// classificationNames counts the workflow names the classification section
+// refers to (overrides and rules).
+func classificationNames(cfg *scope.Config) int {
+	return len(cfg.Classification.Overrides) + len(cfg.Classification.Rules)
+}
+
+// loadConfig reads the config file and checks what only the classify
+// package knows (detector names), so every command that loads a config
+// reports a misspelled detector, whether or not classification is enabled.
+func loadConfig(explicit, cwd string) (*scope.Config, error) {
+	cfg, err := scope.Load(explicit, cwd)
+	if err != nil {
+		return nil, userError("%s", err)
+	}
+	if cfg != nil {
+		if err := classify.CheckDetectorNames(cfg.Classification.DisabledDetectors); err != nil {
+			return nil, userError("%s: %s", cfg.Path, err)
+		}
+	}
+	return cfg, nil
 }

@@ -1,0 +1,26 @@
+{
+  "packages": ["../../pilot/..."],
+  "classification": {
+    "enabled": true,
+    "paths": {
+      "mark_untestable": [
+        {
+          "workflow": "billing.SubscriptionWorkflow",
+          "stable_id": "s1:59aa014811bd",
+          "label": "manual",
+          "reason": "input count is never 0",
+          "added_by": "example-user",
+          "added_on": "2026-10-09"
+        },
+        {
+          "workflow": "polling.ReportPollingWorkflow",
+          "stable_id": "s1:c048fc889a4c",
+          "label": "manual",
+          "reason": "input count is never 0",
+          "added_by": "example-user",
+          "added_on": "2026-10-09"
+        }
+      ]
+    }
+  }
+}

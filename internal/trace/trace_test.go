@@ -55,8 +55,30 @@ func TestMissingDirHasNoTraces(t *testing.T) {
 }
 
 func TestNoTracesMessage(t *testing.T) {
-	want := `no trace files found in .pathkit/traces; coverage is recorded only by "pathkit test" (plain "go test" records nothing)`
+	want := `no trace files found in .pathkit/traces; coverage is recorded only by "pathkit test" (plain "go test" records nothing). Run "pathkit test ./..." first, from the folder that holds go.mod, then run this command from the same folder (or point to the traces with --traces)`
 	if got := NoTracesMessage(".pathkit/traces"); got != want {
 		t.Errorf("got %q", got)
+	}
+}
+
+// The package field is optional: an older file without it still loads, and
+// a new one keeps it. A trace for another package is not matched to a
+// workflow of the same name (CheckIn).
+func TestPackageFieldIsOptional(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"schemaVersion":1,"tool":"pathkit-go","workflow":"orders.OrderWorkflow","functionHash":"abc","status":"complete","steps":["J1.true"]}`
+	withPkg := `{"schemaVersion":1,"tool":"pathkit-go","workflow":"orders.OrderWorkflow","package":"example.com/p/orders","functionHash":"abc","status":"complete","steps":["J1.true"]}`
+	for name, body := range map[string]string{"old.trace.json": old, "new.trace.json": withPkg} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o, err := Read(filepath.Join(dir, "old.trace.json"))
+	if err != nil || o.Package != "" {
+		t.Fatalf("old: %+v, %v", o, err)
+	}
+	n, err := Read(filepath.Join(dir, "new.trace.json"))
+	if err != nil || n.Package != "example.com/p/orders" {
+		t.Fatalf("new: %+v, %v", n, err)
 	}
 }

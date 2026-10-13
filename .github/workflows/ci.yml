@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# The jobs only read the code, so the token needs no write access.
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -11,6 +15,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60 # a stuck run stops after an hour, not after GitHub's six-hour default
     steps:
       - uses: actions/checkout@v7
 
@@ -38,18 +43,18 @@ jobs:
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
       - name: go test (with race detector)
-        run: go test -race ./...
+        run: go test -race -timeout 30m ./...
 
       # The pilot project (testdata/pilot) is a separate Go module, so the
       # commands above skip it. It is checked on its own here.
-      - name: pilot — go vet
+      - name: sample project — go vet
         working-directory: testdata/pilot
         run: go vet ./...
 
-      - name: pilot — staticcheck
+      - name: sample project — staticcheck
         working-directory: testdata/pilot
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
-      - name: pilot — go test (with race detector)
+      - name: sample project — go test (with race detector)
         working-directory: testdata/pilot
-        run: go test -race ./...
+        run: go test -race -timeout 30m ./...

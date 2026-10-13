@@ -9,24 +9,24 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
 )
 
 func newCleanCommand() *cobra.Command {
 	var traceDir, olderThan, config string
 	cmd := &cobra.Command{
-		Use:   "clean",
-		Short: "Delete recorded trace files (only *.trace.json files)",
-		Args:  cobra.NoArgs,
+		Use:     "clean",
+		Short:   "Delete recorded trace files (only *.trace.json files)",
+		Example: "  pathkit clean\n  pathkit clean --older-than 7d",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
-			cfg, err := scope.Load(config, cwd)
+			cfg, err := loadConfig(config, cwd)
 			if err != nil {
-				return userError("%s", err)
+				return err
 			}
 			dir := traceDirFor(cmd, traceDir, cfg)
 			cutoff := time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC) // no --older-than: everything
@@ -50,7 +50,7 @@ func newCleanCommand() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&traceDir, "traces", defaultTraceDir, "trace folder (default: the config's \"traces\", else .pathkit/traces)")
+	f.StringVar(&traceDir, "traces", defaultTraceDir, "trace folder (the config's \"traces\" sets another default)")
 	f.StringVar(&olderThan, "older-than", "", "delete only traces older than this `age`, e.g. 30m, 12h, 7d")
 	f.StringVar(&config, "config", "", "use this config `file` instead of searching for .pathkitrc.json")
 	return cmd
