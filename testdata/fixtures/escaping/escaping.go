@@ -1,6 +1,6 @@
 // Package escaping has a workflow whose code is full of characters that
 // mean something in HTML (<, >, &, both kinds of quotes), to prove the
-// HTML report escapes everything that comes from user code (M8).
+// HTML report escapes everything that comes from user code.
 package escaping
 
 import (

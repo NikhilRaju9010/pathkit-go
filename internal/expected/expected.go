@@ -1,7 +1,7 @@
 // Package expected reads testdata/pilot/EXPECTED.md, the answer key written
-// by hand in M1. It is used only by tests. The answer key is never edited
+// by hand, before PathKit could analyze anything. It is used only by tests. The answer key is never edited
 // to make a test pass: if PathKit and the key disagree and the key looks
-// wrong, the project owner decides.
+// wrong, a person decides.
 //
 // The reader is strict: it never skips something it doesn't understand.
 // Every path line must be read completely (every step, the end station,
@@ -160,7 +160,7 @@ func (r *reader) header(line string) error {
 	case line == "## Totals":
 		r.part = "totals"
 		r.rows = map[string][2]int{}
-	case line == "## Disagreements":
+	case line == "## Known differences":
 		r.part = "disagreements"
 	default:
 		m := sectionRe.FindStringSubmatch(line)

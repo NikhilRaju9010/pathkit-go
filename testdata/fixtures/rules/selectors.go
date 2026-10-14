@@ -6,7 +6,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// A workflow.Selector's Select call is a junction (CLAUDE.md D3): one
+// A workflow.Selector's Select call is a junction (docs/DESIGN.md D3): one
 // exit per Add… call, labelled by what it waits for. Each exit's road is
 // its callback's body, then the code after Select.
 

@@ -59,12 +59,12 @@ func TestCoverageText(t *testing.T) {
 
 func TestCoverageJSONGolden(t *testing.T) {
 	stdout, _, code := run(t, "coverage", pilot+"/orders/orders.go", "--traces", ordersTraces(t), "--json", "--fail-under", "60")
-	want, err := os.ReadFile("testdata/coverage_orders.json")
+	want, err := os.ReadFile("testdata/coverage_orders.classified.json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if code != ExitOK || stdout != string(want) {
-		t.Errorf("code=%d, --json differs from testdata/coverage_orders.json:\n%s", code, stdout)
+		t.Errorf("code=%d, --json differs from testdata/coverage_orders.classified.json:\n%s", code, stdout)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestCoverageFailUnderFromConfig(t *testing.T) {
 	}
 }
 
-// Owner's condition (M6): --clean deletes traces only when the report was
+// --clean deletes traces only when the report was
 // fully produced (exit 0 or 2), never after an error (exit 1).
 func TestCoverageClean(t *testing.T) {
 	file := pilot + "/orders/orders.go"
@@ -149,7 +149,7 @@ func TestCoverageClean(t *testing.T) {
 func TestCoverageErrors(t *testing.T) {
 	empty := t.TempDir()
 	_, stderr, code := run(t, "coverage", pilot+"/orders/orders.go", "--traces", empty)
-	if want := "pathkit coverage: no trace files found in " + empty + `; coverage is recorded only by "pathkit test" (plain "go test" records nothing)` + "\n"; code != ExitError || stderr != want {
+	if want := "pathkit coverage: no trace files found in " + empty + `; coverage is recorded only by "pathkit test" (plain "go test" records nothing). Run "pathkit test ./..." first, from the folder that holds go.mod, then run this command from the same folder (or point to the traces with --traces)` + "\n"; code != ExitError || stderr != want {
 		t.Errorf("no traces: code=%d stderr=%q", code, stderr)
 	}
 
@@ -174,7 +174,7 @@ func TestCoverageFunction(t *testing.T) {
 }
 
 // Warnings for traces that don't count go to stderr and never change the
-// exit code (owner's decision, M6).
+// exit code.
 func TestCoverageWarnings(t *testing.T) {
 	traces := ordersTraces(t)
 	writeTrace(t, traces, "c-unmatched", map[string]any{"schemaVersion": 1, "workflow": "orders.OrderWorkflow",

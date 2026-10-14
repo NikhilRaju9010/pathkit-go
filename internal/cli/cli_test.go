@@ -23,7 +23,7 @@ func TestErrorsUseOneLineStyleAndExitCode1(t *testing.T) {
 		wantStderr string
 	}{
 		{"analyze without file", []string{"analyze"},
-			"pathkit analyze: missing <file> argument\n"},
+			"pathkit analyze: missing <file> argument; give a .go file, a folder, or folder/... (for example: pathkit analyze ./...)\n"},
 		{"analyze with two files", []string{"analyze", "a.go", "b.go"},
 			"pathkit analyze: expected one <file> argument, got 2\n"},
 		{"analyze file not found", []string{"analyze", "x.go"},
@@ -31,14 +31,14 @@ func TestErrorsUseOneLineStyleAndExitCode1(t *testing.T) {
 		{"misspelled flag", []string{"analyze", "--sumary", "x.go"},
 			"pathkit analyze: unknown flag: --sumary\n"},
 		{"coverage without file", []string{"coverage"},
-			"pathkit coverage: missing <file> argument\n"},
-		// --traces is optional for coverage since M6 (owner's decision):
+			"pathkit coverage: missing <file> argument; give a .go file, a folder, or folder/... (for example: pathkit coverage ./...)\n"},
+		// --traces is optional for coverage:
 		// it defaults like pathkit test, so the file check comes first.
 		{"coverage file not found", []string{"coverage", "x.go"},
 			"pathkit coverage: Workflow file not found: x.go\n"},
 		{"coverage bad --fail-under", []string{"coverage", "x.go", "--fail-under", "abc"},
 			"pathkit coverage: invalid --fail-under value: \"abc\" (it must be a number from 0 to 100)\n"},
-		// Since M7b the folder (default ./... or the config's packages)
+		// The folder (default ./... or the config's packages)
 		// and --traces (default like coverage) are optional for report.
 		{"report with two folders", []string{"report", "a", "b"},
 			"pathkit report: expected at most one <folder> argument, got 2\n"},

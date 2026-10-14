@@ -49,7 +49,7 @@ func (b *builder) findUnsupported() *UnsupportedError {
 // isCompensation reports a saga compensation defer: the deferred call
 // starts an activity, local activity or child workflow, directly or
 // inside a deferred function literal. Other defers (defer cancel(), a
-// deferred log call) are not compensation. (CLAUDE.md D3: noted on the
+// deferred log call) are not compensation. (docs/DESIGN.md D3: noted on the
 // path, never a branch.)
 func (b *builder) isCompensation(d *ast.DeferStmt) bool {
 	hit := false

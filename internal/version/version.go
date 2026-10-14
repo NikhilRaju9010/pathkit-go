@@ -3,7 +3,7 @@ package version
 
 import "runtime/debug"
 
-// Version is stamped in at build time by the release tool, with
+// Version is stamped in at build time with
 // -ldflags "-X github.com/NikhilRaju9010/pathkit-go/internal/version.Version=v0.1.0".
 // It is empty in a normal local build.
 var Version = ""

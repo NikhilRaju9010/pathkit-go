@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -26,8 +27,9 @@ func newTestCommand() *cobra.Command {
 	var keep bool
 	var sf scopeFlags
 	cmd := &cobra.Command{
-		Use:   "test [folder | folder/...] [-- go test flags]",
-		Short: "Run your Go tests and record which workflow paths they take",
+		Use:     "test [folder | folder/...] [-- go test flags]",
+		Short:   "Run your Go tests and record which workflow paths they take",
+		Example: "  pathkit test ./...\n  pathkit test ./... -- -run TestOrder -count=1",
 		Long: `Runs "go test" with a marked-up copy of your workflows swapped in
 (go test -overlay), and writes one trace file per workflow run.
 Your source files and go.mod are never changed.
@@ -56,7 +58,7 @@ Everything after "--" is passed to go test, for example:
 			return runTest(cmd, target, goArgs, traceDir, keep, sf)
 		},
 	}
-	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder to write trace files into (default: the config's \"traces\", else .pathkit/traces)")
+	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder to write trace files into (the config's \"traces\" sets another default)")
 	cmd.Flags().BoolVar(&keep, "keep-traces", false, "keep old trace files instead of clearing them first")
 	addScopeFlags(cmd, &sf, false)
 	return cmd
@@ -135,7 +137,7 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 		}
 		goTest = append(goTest, "-overlay="+overlay)
 	} else {
-		fmt.Fprintln(stderr, "pathkit test: no workflows in scope to record; running the tests without recording")
+		fmt.Fprintln(stderr, "pathkit test: no workflows in scope to record (no exported workflow functions found, or the scope leaves none); running the tests without recording")
 	}
 	goTest = append(goTest, pattern)
 	// Cached test results would skip running the tests, so no traces would
@@ -150,6 +152,18 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 	run.Dir = dir
 	run.Stdout, run.Stderr = stdout, stderr
 	run.Env = os.Environ()
+	// A folder reached through a symbolic link (macOS temp folders are one)
+	// keeps the link's name in $PWD, and "go test" would take that as the
+	// working folder; the Go tool names files by their real path, so the
+	// overlay would match nothing and no trace would be written. Name the
+	// real folder. (Not on Windows: $PWD does not work that way there.)
+	if runtime.GOOS != "windows" {
+		if abs, err := filepath.Abs(dir); err == nil {
+			if real, err := filepath.EvalSymlinks(abs); err == nil {
+				run.Env = append(run.Env, "PWD="+real)
+			}
+		}
+	}
 	testErr := run.Run()
 
 	files, err := trace.List(absTraces)
@@ -167,7 +181,7 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 	if testErr != nil {
 		var exitErr *exec.ExitError
 		if errors.As(testErr, &exitErr) {
-			return userError("go test failed (%v)", exitErr)
+			return userError("go test failed (%v); traces recorded so far are kept. Fix the failing tests, then run \"pathkit test\" again", exitErr)
 		}
 		return userError("could not run go test: %v", testErr)
 	}

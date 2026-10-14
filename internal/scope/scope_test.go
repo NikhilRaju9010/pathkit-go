@@ -61,7 +61,7 @@ func TestScopeRules(t *testing.T) {
 		in       []string
 		excluded []string
 	}{
-		{"no config, no flags: every automatic workflow, as before M5", nil, Flags{},
+		{"no config, no flags: every automatic workflow, with no scope", nil, Flags{},
 			[]string{"a.Run", "b.Run", "scope.Svc.Handle", "scope.VisibleFlow"}, nil},
 		{"config without workflows: the same", cfgWith(nil), Flags{},
 			[]string{"a.Run", "b.Run", "scope.Svc.Handle", "scope.VisibleFlow"}, nil},

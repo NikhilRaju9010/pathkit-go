@@ -19,6 +19,13 @@ type ReportOptions struct {
 	// "--include", "--exclude"), for the excluded line. Empty: no scope
 	// in use.
 	ExcludedBy []string
+	// Classification, when not nil, adds the classification block (buckets,
+	// testable and overall coverage, the basis used) before the excluded
+	// line. nil prints exactly what PathKit printed before classification.
+	Classification *ClassificationView
+	// Hints adds "how to cover it" under every testable path no test ran
+	// (--hints).
+	Hints bool
 }
 
 // ReportText prints a whole-project report: one block per workflow (or
@@ -27,6 +34,8 @@ type ReportOptions struct {
 // exactly as coverage prints them.
 func ReportText(res coverage.Result, opt ReportOptions) string {
 	var b strings.Builder
+	b.WriteString(CapWarning(res))
+	b.WriteString(ZeroPathWarning(res))
 	if opt.Summary {
 		width := 0
 		for _, w := range res.Workflows {
@@ -51,13 +60,22 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 				if p.StaleTrace {
 					line += " (stale trace)"
 				}
+				if opt.Classification != nil {
+					line += ClassTag(p.Class)
+				}
 				b.WriteString(line + "\n")
+				if opt.Hints && WantsHint(p) {
+					b.WriteString(hintLines(p))
+				}
 			}
 		}
 	}
 
 	b.WriteString("\n" + ProjectTotalLine(res, opt.Threshold) + "\n")
 	b.WriteString(BranchesLine(res) + "\n")
+	if opt.Classification != nil {
+		b.WriteString("\n" + ClassificationBlock(res, *opt.Classification))
+	}
 	b.WriteString("\n" + ExcludedBlock(res.Excluded, opt.ExcludedBy))
 	b.WriteString(TracesLine(res.Counts))
 	return b.String()
@@ -84,7 +102,7 @@ func WorkflowStats(w coverage.WorkflowResult) string { return workflowStats(w, f
 
 // ExcludedBlock is the excluded line followed by each excluded workflow
 // with its reason. coverage and report both print it, always, even for 0
-// (CLAUDE.md D8), so nobody can quietly raise coverage by excluding
+// (docs/DESIGN.md D8), so nobody can quietly raise coverage by excluding
 // things; it is the one wording for both.
 func ExcludedBlock(excluded []scope.Excluded, by []string) string {
 	var b strings.Builder

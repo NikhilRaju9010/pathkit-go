@@ -95,7 +95,7 @@ func TestReadValid(t *testing.T) {
   "traces": ".pathkit/traces",
   "workflows": {
     "include": ["OrderWorkflow", "pkg.(*Svc).Run"],
-    "exclude": [{ "name": "LegacyBillingWorkflow", "reason": "needs real bank sandbox" }]
+    "exclude": [{ "name": "LegacyPaymentsWorkflow", "reason": "needs an external test system" }]
   },
   "failUnder": 80,
   "html": true,
@@ -108,11 +108,42 @@ func TestReadValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.HasInclude || len(c.Include) != 2 || len(c.Exclude) != 1 || c.Exclude[0].Reason != "needs real bank sandbox" {
+	if !c.HasInclude || len(c.Include) != 2 || len(c.Exclude) != 1 || c.Exclude[0].Reason != "needs an external test system" {
 		t.Errorf("workflows read wrong: %+v", c)
 	}
 	if c.FailUnder == nil || *c.FailUnder != 80 || c.HTML != true || c.Out != "report.txt" || !c.NoColor {
 		t.Errorf("later keys read wrong: %+v", c)
+	}
+}
+
+// A config saved by a Windows editor can start with a UTF-8 byte order
+// mark; it must read like the same file without one. A UTF-16 file cannot
+// be read, and says how to fix it. Other junk at the start stays a plain
+// JSON error.
+func TestReadByteOrderMark(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"packages": ["./flows/..."]}`
+
+	withBOM := filepath.Join(dir, "bom.json")
+	write(t, withBOM, "\xef\xbb\xbf"+body)
+	c, err := Read(withBOM)
+	if err != nil {
+		t.Fatalf("a file with a UTF-8 byte order mark: %v", err)
+	}
+	if len(c.Packages) != 1 || c.Packages[0] != "./flows/..." {
+		t.Errorf("packages read wrong: %v", c.Packages)
+	}
+
+	utf16 := filepath.Join(dir, "utf16.json")
+	write(t, utf16, "\xff\xfe{\x00}\x00")
+	if _, err := Read(utf16); err == nil || !strings.Contains(err.Error(), "UTF-16") || !strings.HasPrefix(err.Error(), utf16) {
+		t.Errorf("a UTF-16 file: err = %v, want a message that names UTF-16 and starts with the path", err)
+	}
+
+	junk := filepath.Join(dir, "junk.json")
+	write(t, junk, "\xef\xbb"+body) // two of the three bytes: not a mark
+	if _, err := Read(junk); err == nil || strings.Contains(err.Error(), "UTF-16") {
+		t.Errorf("two stray bytes should stay a plain JSON error, got %v", err)
 	}
 }
 

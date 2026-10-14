@@ -8,7 +8,7 @@ func exactlyOne(name string) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
 		switch {
 		case len(args) == 0:
-			return userError("missing %s argument", name)
+			return userError("missing %s argument; give a .go file, a folder, or folder/... (for example: pathkit %s ./...)", name, cmd.Name())
 		case len(args) > 1:
 			return userError("expected one %s argument, got %d", name, len(args))
 		}

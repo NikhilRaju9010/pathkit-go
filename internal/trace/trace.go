@@ -1,4 +1,4 @@
-// Package trace reads, lists and clears trace files (format: CLAUDE.md,
+// Package trace reads, lists and clears trace files (format: docs/DESIGN.md,
 // "Trace file format (schemaVersion 1)") and checks each one against the
 // model's graph.
 package trace
@@ -25,15 +25,20 @@ const Suffix = ".trace.json"
 
 // File is one trace file.
 type File struct {
-	SchemaVersion int      `json:"schemaVersion"`
-	Tool          string   `json:"tool"`
-	Workflow      string   `json:"workflow"`
-	FunctionHash  string   `json:"functionHash"`
-	Status        string   `json:"status"`
-	Steps         []string `json:"steps"`
-	WorkflowID    string   `json:"workflowId"`
-	RunID         string   `json:"runId"`
-	RecordedAt    string   `json:"recordedAt"`
+	SchemaVersion int    `json:"schemaVersion"`
+	Tool          string `json:"tool"`
+	Workflow      string `json:"workflow"`
+	// Package is the workflow's import path. Optional: traces recorded by
+	// older versions do not have it and still load. It tells apart two
+	// workflows with the same package and function name in different
+	// folders.
+	Package      string   `json:"package,omitempty"`
+	FunctionHash string   `json:"functionHash"`
+	Status       string   `json:"status"`
+	Steps        []string `json:"steps"`
+	WorkflowID   string   `json:"workflowId"`
+	RunID        string   `json:"runId"`
+	RecordedAt   string   `json:"recordedAt"`
 
 	Path string `json:"-"` // where it was read from
 }
@@ -92,12 +97,13 @@ func Clear(dir string) (int, error) {
 
 // NoTracesMessage is the message shown when a trace folder has no traces.
 func NoTracesMessage(dir string) string {
-	return fmt.Sprintf("no trace files found in %s; coverage is recorded only by \"pathkit test\" (plain \"go test\" records nothing)", dir)
+	return fmt.Sprintf("no trace files found in %s; coverage is recorded only by \"pathkit test\" (plain \"go test\" records nothing). Run \"pathkit test ./...\" first, from the folder that holds go.mod, then run this command from the same folder (or point to the traces with --traces)", dir)
 }
 
 // Kind is how a trace compares with the current code.
 type Kind string
 
+// The ways a trace can compare with the current code.
 const (
 	Matched         Kind = "matched"
 	Unmatched       Kind = "unmatched"
@@ -114,13 +120,25 @@ type Outcome struct {
 	Kind   Kind
 	Path   model.Path // when Matched
 	Reason string     // when not Matched
+	// Mismatch is the matcher's own account when Unmatched: the steps
+	// that fitted and where the walk stood (the unmatched-trace report).
+	Mismatch *model.Mismatch
 }
 
 // Check compares a trace with the workflow's current graph. g is nil when
 // the workflow isn't among the analyzed ones; hash is its current
 // model.FunctionHash.
-func Check(f File, g *model.Graph, hash string) Outcome {
+func Check(f File, g *model.Graph, hash string) Outcome { return CheckIn(f, g, hash, "") }
+
+// CheckIn is Check that also compares the import path of the package the
+// workflow is in (pkg; "" when unknown). A trace that names a package
+// different from pkg was recorded for another workflow with the same name,
+// and is reported as such, never matched. A trace with no package field
+// (an older file) is checked as before.
+func CheckIn(f File, g *model.Graph, hash, pkg string) Outcome {
 	switch {
+	case g != nil && f.Package != "" && pkg != "" && f.Package != pkg:
+		return Outcome{Kind: UnknownWorkflow, Reason: fmt.Sprintf("recorded for the workflow of that name in package %s, but the workflow here is in package %s", f.Package, pkg)}
 	case g == nil:
 		return Outcome{Kind: UnknownWorkflow, Reason: "workflow not found in the analyzed packages (or not analyzable)"}
 	case f.Status != "complete":
@@ -130,7 +148,7 @@ func Check(f File, g *model.Graph, hash string) Outcome {
 	}
 	p, mm := g.Match(f.Steps)
 	if mm != nil {
-		return Outcome{Kind: Unmatched, Reason: mm.Reason}
+		return Outcome{Kind: Unmatched, Reason: mm.Reason, Mismatch: mm}
 	}
 	return Outcome{Kind: Matched, Path: p}
 }

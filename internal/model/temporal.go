@@ -75,7 +75,7 @@ func (b *builder) isTemporalCall(call *ast.CallExpr) bool {
 
 // errSource describes where an error variable's value came from, using its
 // nearest assignment before pos. temporal is true when that is one of the
-// Temporal calls whose error check is a junction (CLAUDE.md D2).
+// Temporal calls whose error check is a junction (docs/DESIGN.md D2).
 func (b *builder) errSource(obj types.Object, ifs *ast.IfStmt) (label string, temporal bool) {
 	rhs, _, ok := b.nearestAssign(obj, ifs.Cond.Pos())
 	if !ok {

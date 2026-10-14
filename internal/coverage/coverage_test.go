@@ -113,11 +113,11 @@ func TestTraceKinds(t *testing.T) {
 		msgs = append(msgs, w.Message)
 	}
 	wantMsgs := []string{
-		`trace 2-unmatched (orders.OrderWorkflow) fits no path: step 1 "J2.failure" does not fit: the path is at J1 (if in.AmountCents <= 0)`,
-		"trace 3-incomplete (orders.OrderWorkflow): the run never finished (panic, timeout, or stopped)",
+		`trace 2-unmatched (orders.OrderWorkflow) fits no path: step 1 "J2.failure" does not fit: the path is at J1 (if in.AmountCents <= 0) ("pathkit report --unmatched" shows the likely cause)`,
+		"trace 3-incomplete (orders.OrderWorkflow): the run never finished (panic, timeout, or stopped); fix the test that stops it, then run \"pathkit test\" again",
 		"trace 5-stale was recorded for an older version of orders.OrderWorkflow; re-run pathkit test, or pass --allow-stale",
-		"trace 6-unknown: workflow nope.Nope is not among the analyzed workflows",
-		"could not read trace 7-broken: not a valid trace file: unexpected end of JSON input",
+		"trace 6-unknown: workflow nope.Nope is not among the analyzed workflows (it is outside the folder you gave, or was renamed or removed); give the folder that holds it, or run \"pathkit clean\" and \"pathkit test\" again",
+		"could not read trace 7-broken: not a valid trace file: unexpected end of JSON input; delete the file, or run \"pathkit clean\" and then \"pathkit test\" again",
 	}
 	if !slices.Equal(msgs, wantMsgs) {
 		t.Errorf("warnings:\n  %s\nwant:\n  %s", strings.Join(msgs, "\n  "), strings.Join(wantMsgs, "\n  "))

@@ -10,15 +10,16 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 )
 
-// pathkit prepare (CLAUDE.md D4): for people who run "go test" themselves.
+// pathkit prepare (docs/DESIGN.md D4): for people who run "go test" themselves.
 // It writes the same overlay "pathkit test" uses and prints the go test
 // command that records traces with it.
 func newPrepareCommand() *cobra.Command {
 	var traceDir string
 	var sf scopeFlags
 	cmd := &cobra.Command{
-		Use:   "prepare [folder | folder/...]",
-		Short: "Write the overlay and print the go test command that records traces",
+		Use:     "prepare [folder | folder/...]",
+		Short:   "Write the overlay and print the go test command that records traces",
+		Example: "  pathkit prepare ./...",
 		Long: `Writes the marked-up copies of your in-scope workflows to .pathkit/overlay
 and prints the "go test -overlay=..." command to run. Only that command
 records traces; a plain "go test" records nothing. Run prepare again after
@@ -35,7 +36,7 @@ you change a workflow.`,
 			return runPrepare(cmd, target, traceDir, sf)
 		},
 	}
-	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder the recorded traces go to (default: the config's \"traces\", else .pathkit/traces)")
+	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder the recorded traces go to (the config's \"traces\" sets another default)")
 	addScopeFlags(cmd, &sf, false)
 	return cmd
 }

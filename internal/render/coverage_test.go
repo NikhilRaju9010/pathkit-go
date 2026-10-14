@@ -7,7 +7,7 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 )
 
-// Owner's condition (M6): when one decimal would make the value look equal
+// When one decimal would make the value look equal
 // to the --fail-under threshold, more decimals are shown.
 func TestPct(t *testing.T) {
 	f := func(v float64) *float64 { return &v }

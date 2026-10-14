@@ -9,7 +9,7 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
 
-// Build builds the graph of one answer-key workflow. Since M4 every
+// Build builds the graph of one answer-key workflow. Every
 // workflow in EXPECTED.md must be mapped, so anything that stops it is an
 // error for the caller to fail on: not found by discovery, skipped as
 // unsupported (the error names the construct), or any other build error.

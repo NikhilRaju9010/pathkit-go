@@ -2,47 +2,41 @@
 
 PathKit answers one question about Temporal Go workflows: **"which execution paths exist, and which ones do my tests actually run?"**
 
-> **Status: early development (M8 of M9 done).** `pathkit analyze` and `pathkit test` map and record all the workflow constructs PathKit v1 supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` shows which paths your tests ran, `report` gives the whole project at a glance, and `--html` turns it into one shareable web page. This guide grows with each milestone. See `PLAN.md` for progress.
+> **Status: early development, no tagged release yet.** `pathkit analyze` and `pathkit test` map and record every workflow construct PathKit supports: `if`/`else`, Temporal error checks, `switch`, loops, `workflow.Selector` races, timed waits, child workflows, saga compensation and continue-as-new. `coverage` shows which paths your tests ran, `report` gives the whole project at a glance, `--html` turns it into one shareable web page, and path classification tells impossible paths apart from real gaps.
 
 > **Important: coverage is recorded only by `pathkit test`, not by plain `go test`.**
 > A plain `go test` compiles your original workflow code, so it records nothing, and your tests still pass or fail as usual, which makes this easy to miss. `coverage` and `report` would then show 0% and say that no trace files were found. Always record coverage with `pathkit test`, or with the exact command `pathkit prepare` prints (section 5).
 
 ## Commands
 
-| Command | What it does | Available |
-| --- | --- | --- |
-| `pathkit analyze <file>` | Lists every possible path through the workflows in one file (or a package folder, or `folder/...`). | yes (M2; all constructs since M4) |
-| `pathkit test [folder \| folder/...]` | Runs your Go tests and records which path each workflow run took. | yes (M3) |
-| `pathkit traces [folder \| folder/...]` | Shows which path each recorded run took (a debug view). | yes (M3) |
-| `pathkit coverage <file \| folder \| folder/...>` | Shows which paths your tests ran, workflow by workflow, with a total; `--fail-under` for CI. | yes (M6) |
-| `pathkit clean` | Deletes recorded trace files. | yes (M6) |
-| `pathkit prepare [folder \| folder/...]` | Prints the `go test -overlay=...` command that records traces, for running `go test` yourself. | yes (M6) |
-| `pathkit report [folder \| folder/...]` | The whole project at a glance: every workflow's coverage with a High/Medium/Low priority, the project total, the excluded workflows, `--summary`, `--json`; `--html` for a shareable web page. | yes (M7; `--html` M8) |
-| `pathkit --version` | Prints the installed version. | yes |
+| Command | What it does |
+| --- | --- |
+| `pathkit analyze <file>` | Lists every possible path through the workflows in one file (or a package folder, or `folder/...`). |
+| `pathkit test [folder \| folder/...]` | Runs your Go tests and records which path each workflow run took. |
+| `pathkit traces [folder \| folder/...]` | Shows which path each recorded run took (a debug view). |
+| `pathkit coverage <file \| folder \| folder/...>` | Shows which paths your tests ran, workflow by workflow, with a total; `--fail-under` for CI. |
+| `pathkit clean` | Deletes recorded trace files. |
+| `pathkit prepare [folder \| folder/...]` | Prints the `go test -overlay=...` command that records traces, for running `go test` yourself. |
+| `pathkit report [folder \| folder/...]` | The whole project at a glance: every workflow's coverage with a High/Medium/Low priority, the project total, the excluded workflows, `--summary`, `--json`; `--html` for a shareable web page. |
+| `pathkit explain <stableId> [folder]` | Says why one path got its bucket and label, and who decided (section 5). |
+| `pathkit --version` | Prints the installed version. |
 
 ## 1. Requirements
 
 - **Go 1.26 or newer.** (PathKit's dependencies, `golang.org/x/tools` and the Temporal Go SDK, both require Go 1.26.0.)
-- A Go project with Temporal workflows (`go.temporal.io/sdk`). *(Needed from M2.)*
+- A Go project with Temporal workflows (`go.temporal.io/sdk`).
 
 ## 2. Install
 
-Release binaries and `go install ...@latest` arrive with the first release (M9). Until then, build from a checkout:
+Prebuilt binaries are not provided. Build from a checkout: the install steps are in the [README](README.md#install).
 
-```bash
-git clone https://github.com/NikhilRaju9010/pathkit-go.git
-cd pathkit-go
-go build -o pathkit ./cmd/pathkit
-./pathkit --version
-```
-
-`--version` prints just the version. A build from a git checkout shows a version made from the commit, like `v0.0.0-20260928070644-65ea0f53be27` (with `+dirty` if you have uncommitted changes); `go run` shows `dev`.
+`--version` prints just the version. A build from a git checkout shows a version made from the commit, like `v0.0.0-20250101000000-abcdef123456` (with `+dirty` if you have uncommitted changes); `go run` shows `dev`.
 
 ## Sample project
 
 The repo includes a small pretend Temporal project at `testdata/pilot/` (an online shop: orders, approvals, polling, shipping, a saga with a child workflow, a subscription that continues as new, and a daily scheduled report). It's what PathKit is tested against. `testdata/pilot/EXPECTED.md` lists, by hand, every path PathKit should find and which ones the sample tests cover. To run the sample's own tests: `cd testdata/pilot && go test ./...`.
 
-**PathKit's own tests (for contributors).** `go test ./...` at the repo root runs everything, including the slow end-to-end tests that run `pathkit test` once per sample test (about 70 seconds). For a quick check while you work, use `go test -short ./...` (about 20 seconds). It skips the slow end-to-end tests but still records the whole sample project once and checks it against `EXPECTED.md`. CI always runs the full suite, never `-short`, and a test fails if `-short` ever appears in CI's `go test` line. Before committing, run the full `go test ./...` once.
+**PathKit's own tests (for contributors).** `go test ./...` at the repo root runs everything, including the slow end-to-end tests that run `pathkit test` once per sample test (a few minutes on a typical laptop). For a quick check while you work, use `go test -short ./...` (much quicker). It skips the slow end-to-end tests but still records the whole sample project once and checks it against `EXPECTED.md`. CI always runs the full suite, never `-short`, and a test fails if `-short` ever appears in CI's `go test` line. Before committing, run the full `go test ./...` once.
 
 ## 3. See all paths (`analyze`)
 
@@ -67,10 +61,10 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
 | --- | --- |
 | `--summary` | Only the workflow name and total path count. Best for big workflows. |
 | `--limit <n>` | Print at most `n` paths, plus a "... and N more" note. |
-| `--mermaid` | Print a Mermaid diagram instead (paste into https://mermaid.live). |
+| `--mermaid` | Print a Mermaid diagram instead (paste into https://mermaid.live; that sends the diagram text, which includes your decision text, to that website, so use a local Mermaid viewer if that matters). |
 | `--out <path>` | Also write exactly what was printed to a file. |
-| `--config <file>` | Use this config file instead of searching for `.pathkitrc.json` (see section 6). |
-| `--include a,b` / `--exclude a,b` | Only these workflows count / leave these out, for this run (section 6). |
+| `--config <file>` | Use this config file instead of searching for `.pathkitrc.json` (see section 8). |
+| `--include a,b` / `--exclude a,b` | Only these workflows count / leave these out, for this run (section 8). |
 | `--all` | Show every workflow, ignoring the config file and `--include`/`--exclude`; a line on stderr says the config was ignored. |
 
 **Which functions are workflows:** exported functions (or methods) whose first parameter is `workflow.Context` and whose last result is `error`.
@@ -86,7 +80,7 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
   Start -> Measure (activity) --success--> switch size --case "huge"--> if lane == "" --false--> End (completed)
   ```
 
-  **Watch out:** when you don't write a `default` but your cases already cover every possible value, the added `default` path can never happen. It then shows as never covered and lowers your coverage. For now, write the `default` yourself (for example one that returns an error) so it's a real, testable path. (An override comment for this may come later; it doesn't exist yet.)
+  **Watch out:** when you don't write a `default` but your cases already cover every possible value, the added `default` path can never happen. It then shows as never covered and lowers your coverage. For now, write the `default` yourself (for example one that returns an error) so it's a real, testable path. (Or, with classification switched on, mark that path with a `//pathkit:untestable` comment: see "Marking paths as untestable".)
 - A `for` or `range` loop is a junction when it contains a Temporal call (any call into the Temporal SDK) or any junction, such as an `if`. It has the exits `iterate` (go into the loop) and `exit` (the condition is false, or the range ran out). When the loop body finishes, or hits `continue`, the path goes `retry -->` back to the loop. A loop with neither a Temporal call nor a junction inside is not a junction: PathKit walks through it once.
 
   **The loop rule.** PathKit never counts trips. Think of a roundabout: it only matters which exit you finally took, not how many times you went round. So a loop gives at most three kinds of path:
@@ -119,7 +113,7 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
   Anything else is skipped with a reason, for example:
 
   ```
-  pathkit analyze: skipping rules.SelectorNamedCallback: workflow.Selector at selectors_unsupported.go:61 is not supported: the callback of AddFuture must be an inline func literal, so PathKit can follow it
+  pathkit analyze: in scope but not analyzable: rules.SelectorNamedCallback: workflow.Selector at selectors_unsupported.go:61 is not supported: the callback of AddFuture must be an inline func literal, so PathKit can follow it
   ```
 - An `if` on the "did it arrive in time?" answer is a junction:
   - `if !ok` after `ok, err := workflow.AwaitWithTimeout(...)` has the exits `signaled` / `timeout`;
@@ -143,7 +137,7 @@ You can pass a `.go` file (only the workflows declared in that file), a package 
 **Never supported:** `goto`, and Go's own `select` statement (Temporal workflows must use `workflow.Selector`). The note says why:
 
 ```
-pathkit analyze: skipping rules.UsesLabel: goto at unsupported.go:21 is not supported: PathKit maps break, continue and return, but not goto
+pathkit analyze: in scope but not analyzable: rules.UsesLabel: goto at unsupported.go:21 is not supported: PathKit maps break, continue and return, but not goto (fix it, or exclude it in .pathkitrc.json with a reason)
 ```
 
 ## 4. Record which paths your tests run (`pathkit test`)
@@ -160,7 +154,7 @@ ok  	example.com/pilot/fulfillment	0.086s
 ok  	example.com/pilot/orders	0.086s
 ok  	example.com/pilot/reports	0.081s
 ...
-pathkit test: recorded 8 traces (8 complete) in .pathkit/traces
+pathkit test: recorded 21 traces (21 complete) in .pathkit/traces
 ```
 
 What happens:
@@ -170,10 +164,12 @@ What happens:
 
 Line numbers stay the same in the copy, so test failures and panics still point at your real file and line.
 
+Flags for `pathkit test`:
+
 | Flag | Effect |
 | --- | --- |
 | `--traces <dir>` | Where to write trace files (default: the config's `"traces"`, else `.pathkit/traces`). |
-| `--config`, `--include`, `--exclude` | Which workflows are recorded (section 6). Excluded workflows' tests still run; they just aren't recorded. |
+| `--config`, `--include`, `--exclude` | Which workflows are recorded (section 8). Excluded workflows' tests still run; they just aren't recorded. |
 | `--keep-traces` | Keep old trace files. By default each run first deletes the old ones (only `*.trace.json` files). |
 | `-- <go test flags>` | Everything after `--` goes to `go test`, e.g. `pathkit test ./... -- -run TestOrder -v`. |
 
@@ -186,11 +182,11 @@ pathkit traces ./...
 ```
 
 ```
-orders.OrderWorkflow: path 1 (J1.true → End (completed))
-orders.OrderWorkflow: path 2 (J1.false J2.failure → End (failed))
-orders.OrderWorkflow: path 3 (J1.false J2.success → End (completed))
+approval.ApprovalWorkflow: path 2 (J1.success J2.signaled J3.true → End (completed))
+approval.ApprovalWorkflow: path 4 (J1.success J2.timeout → End (completed))
+billing.SubscriptionWorkflow: path 1 (J1.iterate J2.failure → End (failed))
 ...
-8 traces: 8 matched
+21 traces: 21 matched
 ```
 
 The path numbers are the ones `pathkit analyze` prints. A trace can also show as:
@@ -202,6 +198,13 @@ A trace doesn't know which test produced it; to see one test's path, run only th
 
 Add `.pathkit/` to your `.gitignore`. It holds PathKit's marked-up copies (`.pathkit/overlay/`) and your traces. Go's own build and test commands never look inside it, but `gofmt -l .` does, and lists the copies as unformatted. That's harmless; to keep gofmt's output clean, run it on your tracked files only (`gofmt -l $(git ls-files '*.go')`) or on your source folders.
 
+### What PathKit writes (and never changes)
+
+**PathKit never modifies the project it reads.** It does not change your source files, `go.mod`, `go.sum` or tests. It writes only:
+
+- to the `.pathkit/` folder in the folder you run it from (the marked-up copies and the recorded traces); add `.pathkit/` to your `.gitignore`;
+- to files and folders you ask for with a flag or a config key: `--write-baseline` (the baseline file), `--html` (the page, plus a `report-history.json` next to it), `--out` (a copy of the output) and `--traces` (where the traces go).
+
 ## 5. See your coverage (`coverage`)
 
 After `pathkit test`, ask which paths your tests ran:
@@ -211,17 +214,17 @@ pathkit coverage testdata/pilot/...
 ```
 
 ```
-Workflow: orders.OrderWorkflow
-Total paths: 3
-Covered: 3/3 (100.0%)
-Branches: 4/4 (100.0%)
+Workflow: approval.ApprovalWorkflow
+Total paths: 4
+Covered: 2/4 (50.0%)
+Branches: 4/6 (66.7%)
 
 Covered paths:
-  1. Start -> if in.AmountCents <= 0 --true--> End (completed)
-  2. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)
-  3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
+  2. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == "approved" --true--> End (completed)
+  4. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --timeout--> End (completed)
 Untested paths:
-  (none)
+  1. Start -> AwaitWithTimeout (wait) --failure--> End (failed)
+  3. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == "approved" --false--> End (completed)
 ...
 38 paths total · 20 covered · 18 missed · 52.6% coverage
 Branches: 39/50 (78.0%)
@@ -233,23 +236,21 @@ Traces: 21 read · 21 counted · 0 unmatched · 0 stale · 0 incomplete · 0 exc
 - **A path counts as covered** when at least one recorded run took it. Running it twice still counts once. The path numbers are the ones `analyze` prints.
 - **Loops:** a run that went round a loop several times counts as the path of its last trip (the loop rule in section 3).
 - **Branches** count exits instead of whole paths: of all the exits on the listed paths, how many some run took. Branch coverage uses each run's raw steps (before loop folding), so a branch can show as taken even when no covered path uses it. It is shown to help you, but `--fail-under` never looks at it.
-- **The scope** (section 6) applies: the excluded line is always printed (even `0 workflows excluded (no scope in use)`), followed by each excluded workflow with its reason, in exactly the same wording as `report` (section 5b). Their traces count as "excluded".
+- **The scope** (section 8) applies: the excluded line is always printed (even `0 workflows excluded (no scope in use)`), followed by each excluded workflow with its reason, in exactly the same wording as `report` (section 6). Their traces count as "excluded".
 
 | Flag | Effect |
 | --- | --- |
 | `--traces <dir>` | Trace folder (default: the config's `"traces"`, else `.pathkit/traces`, the same place `pathkit test` writes). |
 | `--function <name>` | Only this workflow. |
 | `--fail-under <percent>` | Exit code **2** when path coverage is below it (config: `"failUnder"`; the flag wins). The report is still printed first. |
+| `--coverage-basis testable\|overall` | Which coverage `--fail-under` checks (see "Testable and overall coverage" below). Default: `overall`, or `testable` when the config switches classification on. |
 | `--allow-stale` | Also count traces recorded for an older version of a workflow, when they still fit a path (config: `"allowStale"`). |
 | `--json` | Print JSON instead (shape below). |
 | `--out <file>` | Also write exactly what was printed to a file. |
 | `--clean` | Delete the trace files after the report. Only when the report was produced (exit 0 or 2), never after an error. |
-| `--config`, `--include`, `--exclude` | Scope, as in section 6. |
+| `--config`, `--include`, `--exclude` | Scope, as in section 8. |
 
-**Exit codes:**
-- `0`: all good;
-- `1`: a real error (bad argument, no trace files, a workflow in scope that can't be analyzed, …);
-- `2`: coverage is below `--fail-under`.
+**Exit codes:** `0` all good, `1` a real error, `2` coverage below `--fail-under` or the CI check failed. The full table is in section 9.
 
 If the rounded number would look the same as the threshold, PathKit prints more decimals so you can see why: `coverage 66.67% is below --fail-under 66.7%`.
 
@@ -270,9 +271,311 @@ If the rounded number would look the same as the threshold, PathKit prints more 
 - `excluded`: `[{name, reason}]`;
 - `total` and `branches`;
 - `traces`: the counts;
-- `failUnder`: `{threshold, passed}`, or `null` when no threshold is set.
+- `failUnder`: `{threshold, passed, basis}`, or `null` when no threshold is set;
+- added with path classification (everything above is unchanged): `classification`, `coverageBasis` and `classificationShown` at the top; `classification` inside each workflow; `stableId` (a path's id that survives unrelated edits; explained under "`stableId`" below), `bucket`, `label`, `source`, `confidence`, `possibleInProduction`, `explanation` and `ruleId` on each path. See "Testable and overall coverage" below;
+- added with the path-cap warning, only when a workflow reached the 2000-path cap: `pathCapWarning`: `{limit, workflows, message}`. It says that the workflow's path list and classification are incomplete (see "Path enumeration stops at 2000 paths per workflow" in LIMITATIONS.md). Absent otherwise.
 
 `percent` has one decimal; use `covered`/`total` for exact math.
+
+### Testable and overall coverage (path classification)
+
+Path classification tells the paths a test **can** run apart from paths that can never run (for example two checks of the same unchanged value that contradict each other). Every path is put in one **bucket**: `testable`, `cannot-be-tested`, `needs-special-test` or `needs-review`, and gets a reason label. Two coverage numbers follow from it:
+
+- **Testable coverage:** covered testable paths out of testable paths. This is the number a team works on.
+- **Overall coverage:** covered paths out of all paths. Nothing is hidden. It is the number `coverage` and `report` have always shown.
+
+**How paths are sorted:** every path starts as `testable`. With classification enabled, the automatic detectors (below), your rules and your overrides can move a path into another bucket; until something does, the two numbers are equal. A path that a real test ran is always `testable`, whatever anything else says.
+
+To see the new block in the text and HTML reports, either pass `--coverage-basis testable` (or `overall`), or switch it on in `.pathkitrc.json`:
+
+```json
+{ "classification": { "enabled": true } }
+```
+
+Without either, the text reports and the `--fail-under` message are exactly what they were before. `--all` ignores the config file, so with `--all` the config's switch does nothing (a `--coverage-basis` flag still works). The block looks like this:
+
+```
+Classification:
+  Total paths:         38
+  Testable:            38
+  Cannot be tested:    0
+  Needs special test:  0
+  Needs review:        0
+Testable coverage:     20 / 38 = 52.6%  (testable paths only)
+Special-test coverage: 0 / 0
+Overall coverage:      20 / 38 = 52.6%  (all paths)
+Coverage basis used:   testable (for --fail-under)
+```
+
+### Marking paths as untestable (path classification)
+
+Some paths can never run, and PathKit cannot always tell by itself. You can tell it, in three ways. A marked path stays on the map and stays in overall coverage; it only leaves testable coverage. All of this applies only when `"classification": {"enabled": true}` is set. Every override, rule and comment needs a **reason**; without one PathKit stops with an error that names the entry.
+
+**1. By path, in `.pathkitrc.json`.** Find the path's `stableId` with `pathkit coverage <folder> --json` (or `report --json`), then:
+
+```json
+{
+  "classification": {
+    "enabled": true,
+    "paths": {
+      "mark_untestable": [
+        { "workflow": "billing.SubscriptionWorkflow", "stable_id": "s1:59aa014811bd",
+          "label": "manual", "reason": "input count is never 0",
+          "added_by": "example-user", "added_on": "2026-10-09" }
+      ],
+      "mark_testable": [
+        { "workflow": "orders.OrderWorkflow", "stable_id": "s1:0123456789ab",
+          "reason": "PathKit was wrong about this one" }
+      ]
+    }
+  }
+}
+```
+
+- `workflow` is written like in `include`/`exclude` (`OrderWorkflow`, `orders.OrderWorkflow`); a misspelled one is an error with a hint. `label` is optional (default `manual`) and must be a label whose bucket is cannot-be-tested; `added_by` and `added_on` (a date, `2026-10-09`) are optional notes.
+- `mark_testable` forces a path to stay testable, whatever a rule or comment says.
+
+**2. By rule.** A rule says that a combination of decisions is impossible:
+
+```json
+"rules": [
+  { "id": "polls-at-least-once", "workflow": "ReportPollingWorkflow", "label": "loop-minimum",
+    "when": ["for attempt <= in.MaxPolls --exit"], "without": ["for attempt <= in.MaxPolls --iterate"],
+    "impossible": true, "reason": "MaxPolls is always at least 1 (checked by the caller)" }
+]
+```
+
+(The `without` part is explained below: here it means "the loop was skipped", not "the loop ran and then finished".)
+
+`when` entries are decisions written exactly as `pathkit analyze` prints them: the decision's text, then `--`, then the exit (`if o.AmountCents > 100_000 --true`). A path is marked when it takes **all** of them; extra spaces don't matter. `"impossible": true` is required (a rule can only say "impossible"). The label must be a cannot-be-tested label. The first matching rule is the main reason; others are listed as `extraReasons` in the JSON.
+
+**`without` (optional).** A list of decisions the path must **not** take. A rule marks a path only when it takes every `when` decision and none of the `without` ones. This is how to say "this loop was skipped": a skipped loop takes `--exit` and never `--iterate`, but a loop that ran and then finished also takes `--exit`.
+
+```json
+{ "id": "second-loop-needs-first", "workflow": "BuiltTwoLoops", "label": "same-list-loops",
+  "when": ["for range in.Items --exit", "for range timers --iterate"],
+  "without": ["for range in.Items --iterate"],
+  "impossible": true, "reason": "timers gets one timer per item, so it is empty when the first loop did not run" }
+```
+
+A misspelled `without` entry is an **error** (it would make the rule match more paths); a misspelled `when` entry only makes the rule match nothing, and it is reported as stale.
+
+**Decisions with the same text.** When a workflow has several decisions with exactly the same text (three `if more` checks, one per signal), `analyze` prints them all the same, but a rule must say which one it means:
+- `"if more #2 --false"` the second one; `"if more #1 --false"` the first (the number counts in source order);
+- `"any: if more --false"` any of them.
+
+Write the number with the count, `"if more #2/3 --false"` ("the second of 3"), to be warned when the number may have shifted: if the workflow has another number of decisions with that text, the rule is **not applied** and a warning says why, until you check it and update the entry. (The text of the decisions is the same by definition, so the count is what can change.)
+
+A plain `"if more --false"` is an **error** in such a workflow, and the message lists the decisions it could mean. A plain entry stays fine when its text is unique.
+
+**3. By comment, in your code.** On the decision's line, or the line above it:
+
+```go
+//pathkit:untestable exit="true" reason="express is never combined with a zero amount"
+if express && amount == 0 {
+```
+
+`exit` is the exit label as `analyze` prints it (`true`, `failure`, `case "legacy"`; put a `\"` for a quote inside it), and both `exit` and `reason` are required. Every path that takes that exit at that decision is marked. A comment PathKit cannot use (no reason, an unknown exit, nothing to mark on that line) makes the workflow "not analyzable" with the file and line, so `coverage` and `report` stop until it is fixed: a comment that silently did nothing would hide a decision someone made. This is **not** `//pathkit:ignore`, which takes a decision off the map entirely.
+
+**Which one wins** (strongest first): `mark_testable`/`mark_untestable` in the config, then a comment, then a rule, then the automatic detectors, then testable. The strongest is the main reason; the others that also applied are shown as `extraReasons`.
+
+**In the reports,** a path marked by a rule, an override or a comment is followed by a tag that names the source, e.g. `[cannot-be-tested: loop-minimum · manual · rule "polls-at-least-once"]` (or `config override`, or `//pathkit:untestable`). The HTML page shows the same tag.
+
+**Two safety checks, both warnings on stderr (exit code unchanged):**
+- **Conflict.** If a test ran a path that something marked untestable, the path **stays testable** and PathKit says so: `... was classified cannot-be-tested (Marked untestable in the config (manual): ...), but a test ran it; counting it as testable`. A real run proves a path is possible.
+- **Stale.** An entry whose `stable_id` matches no path of the current code, or a rule none of whose paths takes all its decisions, is reported: `classification: stale entry: billing.SubscriptionWorkflow s1:... (reason) matches no path of the current code`. Usually the code changed (a changed condition changes the `stableId`), or the id was mistyped. Entries for a workflow you excluded, or did not pick with `--function`, are not checked. **The path cap:** PathKit lists at most 2000 paths per workflow. For a workflow with more, an entry that matches none of the listed ones is reported as `beyond the path cap` instead of stale, because it may simply not be listed.
+
+**What you see.** The classification block lists the reasons under each bucket with how many were decided automatically and by a person, and where the markings came from:
+
+```
+Classification:
+  Total paths:         38
+  Testable:            36
+  Cannot be tested:    2
+    manual: 2 [auto 0 | manual 2]
+  Needs special test:  0
+  Needs review:        0
+  Config overrides: 2 paths marked untestable, 0 paths marked testable
+Testable coverage:     20 / 36 = 55.6%  (testable paths only)
+Special-test coverage: 0 / 0
+Overall coverage:      20 / 38 = 52.6%  (all paths)
+Coverage basis used:   testable
+```
+
+**Other keys of the section.** `custom_labels` (`[{"name": "my-label", "definition": "...", "bucket": "cannot-be-tested"}]`) defines your own label for overrides and rules; its name may not be a built-in one. `unclassified_policy` is `count_as_testable` (default: paths PathKit is unsure about count in testable coverage) or `exclude`.
+
+**If you set entries but not `"enabled": true`,** they are ignored, and PathKit says so on stderr. `--all` ignores the whole config file, the classification section too.
+
+### Automatic detectors (path classification)
+
+With `"classification": {"enabled": true}` PathKit also marks some paths by itself, where the code makes the answer clear. These show as `source: auto` and say why. A person's override, comment or rule always wins; the detector's finding is then listed as an extra reason. A path a test ran is never marked: it stays testable and PathKit warns.
+
+| Detector | What it marks | Bucket |
+| --- | --- | --- |
+| `closed-signal-channel` | The "channel closed" side (`more == false`) of a receive on a channel from `workflow.GetSignalChannel`. The Temporal SDK and server do not close signal channels (checked in the SDK source). Only code can: a type assertion that turns the channel into one that can be closed (PathKit looks for this and then makes no claim), or a custom worker interceptor that hands the workflow a closed channel (PathKit does not look for this). It is an assessment, not a proof. | cannot-be-tested |
+| `constant-condition` | The side of an `if` that can never run because the compiler knows the condition (`if false`, `if debug` with a `const`). A package-level `var` is not a constant. A value that depends on the machine (`runtime.GOOS`, `strconv.IntSize`, `math.MaxInt`, shifts and `^`), a constant from another package, and a constant declared in a file with a build constraint are not trusted: those paths stay testable. | cannot-be-tested |
+| `version-gate-old-branch` | The old side of a `workflow.GetVersion` check (`v == workflow.DefaultVersion`, `v < N`, `v >= N`, a `switch v` case older than the newest version). Normal runs get the newest version. Reach it with `env.OnGetVersion(changeID, min, max).Return(workflow.DefaultVersion)`. | needs-special-test |
+| `history-limit` | The side taken when `GetInfo(ctx).GetContinueAsNewSuggested()` is true. Reach it with `env.SetContinueAsNewSuggested(true)`. A comparison of `GetCurrentHistoryLength()` or `GetCurrentHistorySize()` with a number is only a hint and goes to needs-review (fake it with `SetCurrentHistoryLength` / `SetCurrentHistorySize`). A `for` loop condition is not read. | needs-special-test |
+| `contradictory` | Two plain `if` decisions that test the **same value**, unchanged in between, where the path takes opposite answers (`if valid {…}` … `if !valid {…}`; `if len(in.Items) > 3 {…}` twice). The value must be a constant, a parameter, a field of a parameter nobody writes, or a value computed once; two calls of the same function are two values. Decisions inside a loop are not paired. A result filled in by `Get(ctx, &res)` is handled by `contradictory-get-result`. | cannot-be-tested |
+| `same-list-loops` | One range loop is skipped (empty list) and another range loop over the **same list** runs, or the other way round. The list must be a slice, array or string that is the same value in both (`range in.Items` twice, `items := in.Items` then two loops). A map, a re-assigned or appended list, and a re-sliced list are not claimed. | cannot-be-tested |
+| `list-built-from-list` | A loop that appends one element per trip to a local list (`var futures []workflow.Future` … `futures = append(futures, f)`), and a later loop over that list: one is skipped and the other runs. The list must start empty, have this one append as its only write, nothing before the append in the loop body may `break`, `continue`, `return` or jump, and neither loop may be inside another loop or a closure. | cannot-be-tested |
+| `loop-exit-before-first-trip` | A `for cond { … }` loop (no init, no post) with `cond` or `!cond` on a local plain `bool` that is a constant when the loop starts and makes the condition true (`done := false; for !done { … }`), left without running its body. Not claimed when the variable is written, has its address taken or is used in a closure before the loop. | cannot-be-tested |
+| `contradictory-get-result` | A value Temporal fills in once with `fut.Get(ctx, &res)` (a local struct or pointer-to-struct variable, `var res T`), read by two decisions after the Get, that together need one bool field to be both true and false. Reads inside `&&` (when true) and `\|\|` (when false) count: `if res.Approved` false and `if res.Approved && other` true is impossible. Refused when anything else could write the result: a second Get, another `&`, an assignment, `++`, a method call on it (pointer receivers take the address themselves), a copy of the pointer, a closure, a `defer` or loop around the Get. | cannot-be-tested |
+
+Reading the `more` result: `Receive` (its only result), `ReceiveWithTimeout` and `ReceiveAsyncWithMoreFlag` (their second result) and the `more` parameter of an `AddReceive` callback, tested as `!more`, `more == false`, `more != true` (either order), or as the `else` side of `if more`. Anything compound (`!more && x > 0`) is not read.
+
+Where the channel came from is followed only in the simple, certain cases: a local variable set once with `:=` or `var x = ...`, or declared with no value and assigned once (`var ch workflow.ReceiveChannel` then `ch = workflow.GetSignalChannel(...)`, in the same block, before any use, never in a closure), from `GetSignalChannel` / `GetSignalChannelWithOptions` (signal) or `NewChannel` / `NewBufferedChannel` (the workflow's own). A channel the workflow makes itself can be closed by the workflow, so its closed side stays **testable**. A channel passed in as a parameter, kept in a struct field or a slice, returned by a helper, assigned more than once, or made outside the callback that uses it, turned into another type (`ch.(workflow.Channel)`), passed to another function, or a named result read before it is assigned, is **unknown**, and an unknown origin goes to **needs-review**, never to cannot-be-tested.
+
+**Turning a detector off.** Each one needs a reason, and every report then says the detector is off:
+
+```json
+{ "classification": { "enabled": true,
+  "detectors": { "disable": [ { "name": "closed-signal-channel", "reason": "our tests close signal channels with a fake" } ] } } }
+```
+
+A misspelled detector name is an error that lists the real names.
+
+### Two workflows with the same name in different folders
+
+If two folders each have a package called `dup` with a workflow `Work`, PathKit calls them `a/dup.Work` and `b/dup.Work` (the shortest unique end of the import path) everywhere: reports, JSON, traces, `include`, `exclude`, `--function` and classification overrides. A short name that fits both (`dup.Work`, `Work`) is an error that lists both. A workflow that is alone with its name keeps the plain name.
+
+### The HTML report's glossary and detector audit (path classification)
+
+When the classification block is shown (`--coverage-basis`, or `"classification": {"enabled": true}`), `report --html` adds, at the bottom of the page and linked from the top ("Definitions", "Detector audit"):
+
+- **A label is a link.** Every label next to a path jumps to its definition. Next to the label stand the **bucket**, the **source** (`auto` or `manual`) and who decided: `detector <name>`, `rule "<id>"`, `config override`, or `//pathkit:untestable`. Hover for the one-line meaning; the path's tag hover shows PathKit's reason. Everything is plain text as well as colour, and links are keyboard focusable.
+- **Definitions.** For each label used in the run: what it means, why, an example (and a real example from this run), whether it is possible in production, who decides and how sure, what to do, how many paths have it, and links to those paths (the first 10). Labels not used in this run are in a collapsed group. A label PathKit never sets by itself is marked **"Not detected yet"** (the list is in LIMITATIONS.md; a test keeps the two in step). Custom labels from the config are listed too; the built-in text never changes. The footer shows the **definitions version**, a short hash of the wording, so a saved report says which wording it used.
+- **Detector audit.** A table of every path that a **detector** (not a rule and not a person) marked **cannot-be-tested**, with its label, detector, confidence and one-line reason, so you can spot-check the automatic decisions against the code. Paths a detector sent to needs-review or needs-special-test are counted below the table.
+
+The page still has no script, loads nothing and uses only links inside the page. With classification off the page is exactly what it was before.
+
+**`--fail-under` and the basis.** Until classification is switched on, `--fail-under` checks overall coverage, exactly as before. With `--coverage-basis`, or with classification enabled in the config (then the default basis is `testable`), it checks the basis you chose, and the report and the exit-code message say which: `coverage 66.7% is below --fail-under 70% (basis: testable)`. The JSON always says (`coverageBasis`, `failUnder.basis`).
+
+**A trace that fits no path.** When a test run takes a road that PathKit's map of that workflow does not have (the stderr line says `fits no path`), the map is known to be incomplete, so PathKit does not trust a "cannot be tested" claim made by a detector or a config rule in **that workflow**: those paths are shown as `needs-review` (label `model-limit`), which counts as testable, so the number cannot go up. Your own decisions (`mark_untestable` entries and `//pathkit:untestable` comments) are kept, with a warning. To make the claims count again: fix the map (for example `//pathkit:branch` on the `if`), re-record, or accept the trace in the config. The report prints the trace's *steps id* (`t1:` and 12 hex digits):
+
+```json
+"classification": {
+  "enabled": true,
+  "explained_traces": [
+    { "workflow": "helpererr.Flow", "steps_id": "t1:32285e72cef2",
+      "reason": "the run returns early when parse fails; the error comes from a helper" }
+  ]
+}
+```
+
+A `reason` is required. The report keeps listing the trace, marked *acknowledged* with the reason (`unexplainedTraces` in `--json`, a line in the classification block and in the HTML). An entry that matches no unmatched trace in the current run is reported as stale. The steps id changes if the workflow's decisions are renumbered, so an acknowledgement belongs to one recording of one version of the code.
+
+**`stableId`.** Each path has an `id` (unchanged: it is built from the junction numbers J1, J2, …, so it changes when a junction is added or removed) and a new `stableId` such as `s1:3fa94c0d17ab`. The `stableId` is built from the *words* of each decision and the exit taken, not from numbers, so adding or removing an unrelated junction does not change it. It is only unique inside one workflow, so always keep the workflow name next to it. Two junctions with exactly the same text are told apart by `#2`, `#3`. The `s1:` prefix is the version of the recipe. Editing the text of a condition does change the `stableId` of the paths through it.
+
+### The CI check: baseline file and testable floor (path classification)
+
+Only with `"classification": {"enabled": true}`. Without it nothing below happens, `--baseline` and `--write-baseline` are refused, and `--fail-under` works exactly as before.
+
+**The idea.** A project starts with gaps it already knows about. The CI check should not fail on those every day; it should fail when something **new** needs attention. So you record the current state once in a **baseline file**, commit it, and every later CI run compares itself with it.
+
+```json
+"classification": {
+  "enabled": true,
+  "ci": { "baseline": "pathkit-baseline.json", "fail_under_testable": 80 }
+}
+```
+
+- `baseline` is the file, relative to the folder of `.pathkitrc.json`. `--baseline <file>` names another one for one run.
+- `fail_under_testable` (0 to 100) is a floor for **testable coverage**. It is checked on its own, next to `--fail-under` (which keeps its own meaning).
+
+**Write the baseline** (and again whenever you have looked at the new paths and accept them):
+
+```bash
+pathkit report --write-baseline          # prints: wrote the baseline pathkit-baseline.json: 38 paths in 8 workflows
+```
+
+It holds every listed path's `stableId`, bucket and whether a test ran it, sorted, so a re-written file only changes where something really changed. It must hold every workflow in the config's scope, so `--write-baseline` exists only on `pathkit report`, run with **no folder** (it then uses every entry of the config's `packages`), and is refused together with a folder, `--include`, `--exclude` or `--all`. Do not put `--all` in a CI script: it ignores the config, and with it the CI check. Likewise a one-off `--exclude` or `--include` on the check run leaves those workflows out of the comparison (they are listed as excluded); exclude workflows in the config, with a reason, instead.
+
+**Check against it** (what CI runs): a plain `pathkit report` (or `coverage`, which checks only the workflows it measures). It exits **2**, after printing the whole report, when:
+
+1. a **testable path with no test** is not in the baseline as testable: a new path, a new workflow, or a path that was cannot-be-tested before;
+2. a **needs-review path** is not in the baseline as needs-review (for example a detector or rule claim that is no longer trusted because a trace fits no path);
+3. a path that **had a test** when the baseline was written has **no test now** (a test was deleted, or changed so it takes another road): it fails even if coverage is still above the floor. Pass `--allow-lost-tests` to let it pass; it is then printed as a warning. Each line says the path's bucket now (`now testable`, `now cannot-be-tested`, ...), so a path that was marked impossible after its test was removed, or that also appears in the needs-review list, is easy to tell apart. `--allow-lost-tests` is refused when there is no baseline to compare with. A path that no longer exists (its stable id is gone, because the code changed) is not "lost";
+4. testable coverage is below `fail_under_testable`.
+
+Each problem is printed on stderr with the paths it is about (the path and id below only illustrate the shape; on the sample project that path is covered):
+
+```
+pathkit report: 1 testable path with no test not in the baseline pathkit-baseline.json:
+  orders.OrderWorkflow path 3 (s1:5179b1c99bbb, new): Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
+```
+
+`--json` adds a `ci` object (`baseline`, `baselineMode`, `floor`, `newUntested`, `newNeedsReview`, `lostTests`, `lostTestsAllowed`, `passed`); it is absent when the check is off. A missing or damaged baseline file is exit 1.
+
+**Exit code 2 has two causes:** coverage below `--fail-under` (or `failUnder`), **or** the CI check above failed (baseline or floor). Both print the report first and then say on stderr which one it was; several reasons are all printed. Exit 1 is always a real error (PathKit could not do its job), never a coverage problem.
+
+**Numbered rule entries (`#2`).** A rule entry like `if more #2 --false` names "the second decision with this text". If someone later adds or removes an identical decision above it, `#2` quietly points at another one: the text cannot show it, because identical decisions have identical text. So the baseline file also records, for every numbered entry (`#1`, `#2`, `#2/3`; not `any:`), where its decision sits on the map: what comes right before it (`before`), where each of its exits leads (`after`), and how many decisions have that text (`count`). A later check prints a **warning** when that changed:
+
+```
+pathkit report: warning: rule "second-needs-first" (orders.W) entry "if a || b #2 --true": since the baseline was written, the decision it names changed place (it came right after ..., now after ...). An identical decision may have been added, removed or moved, so the number may point at a different decision now; check the rule, then write the baseline again
+```
+
+It is a warning only (the exit code does not change), and it needs a baseline: without `classification.ci.baseline` (or `--baseline`) there is nothing to compare with. A baseline written before this existed has no anchors and gives no warning until it is written again. Adding or removing **any** decision with the same text warns (even one below it, which does not change what `#2` means), and so does an unrelated edit right next to the decision (a new `if` just above it, or a renamed activity it leads to): the warning can fire when `#2` is still right; check, then write the baseline again.
+
+### Why does a path have its label? `pathkit explain` (path classification)
+
+```bash
+pathkit explain s1:5179b1c99bbb            # every package of the config, else ./...
+pathkit explain s1:5179b1c99bbb ./orders   # one folder
+```
+
+Take the stable id from `report --json` / `coverage --json` (`stableId`), from the CI check's message, or from the HTML report. It prints, in plain words (this example is illustrative: it shows a path with a rule on it, which the sample project does not have):
+
+```
+s1:5179b1c99bbb is path 3 of orders.OrderWorkflow (orders/orders.go)
+  Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
+
+Tested:      no; no recorded run took this path
+Bucket:      cannot-be-tested: ...
+Label:       contradictory: ...
+Decided by:  a person: config rule "never-charged" in /path/.pathkitrc.json
+Why:         Rule "never-charged": ...
+What to do:  ...
+```
+
+"Decided by" is one of: a `detector <name>` (automatic, with how sure it is), a config rule, a config override (`mark_untestable` / `mark_testable`), a `//pathkit:untestable` comment, PathKit itself (a claim it does not trust because the workflow has a trace that fits no path), or nobody (testable by default). `Also:` lists other rules or detectors that say the same thing. When a test ran the path, it always counts as testable, and a `Note:` names the rule or detector whose claim is therefore wrong. With classification off, a `Note:` says so. Trace files are optional (without them `Tested:` says it does not know). A stable id is only unique inside one workflow; if it fits paths of several, each is explained (`--function` picks one).
+
+### "How to cover it" hints: `--hints` (path classification)
+
+`pathkit report --hints` and `pathkit coverage --hints` add, under every **testable** path no test ran, what a test must make happen, one line per decision on the path, then how the run ends:
+
+```
+  3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed): missed
+       how to cover it:
+         - make `in.AmountCents <= 0` false
+         - let activity ChargeCard succeed (mock it with env.OnActivity, passing the same activity the workflow starts (ChargeCard), with .Return(...); or let it run)
+         - expect the workflow to complete
+```
+
+The hints name the Temporal test tools for each kind of decision: `env.OnActivity(...).Return(...)` with a non-retryable error for an activity that must fail, `env.OnWorkflow` for a child workflow, `env.RegisterDelayedCallback` + `env.SignalWorkflow` for a signal that must win a select or an await, `.After(...)` for an activity that must lose to a timer, and so on. They say *what the code must see* (for example "make `o.AmountCents > 100_000` true"), not how to build your input. Loops read "skip the loop entirely", "go into it", "let that trip end normally", "then leave it". PathKit keeps only the **last** trip of a run through a loop, so what a hint says about decisions inside the loop must happen on the last trip; one trip is enough. A hint names an activity or child workflow as the workflow code does (`Ship` for `a.Ship`): pass the same value to `env.OnActivity` / `env.OnWorkflow`. Paths that are needs-special-test or needs-review get no hint; for those, `pathkit explain` shows the label's "What to do". `--json --hints` adds `howToCover` (a list of lines) to those paths. `pathkit explain` shows the same hint for an untested testable path. Without `--hints` nothing changes. `--summary` lists no paths, so it drops the hints (with a note). Hints are not in the HTML page yet (`--html` ignores `--hints`).
+
+### Traces that fit no path: `--unmatched`
+
+Normally such a trace is one warning line on stderr. `pathkit report --unmatched` (or `coverage --unmatched`) adds a section that explains each one, grouped by workflow and recorded steps (classification does not need to be on). The example below is the fixture `testdata/fixtures/helpererr`, recorded with `pathkit test`:
+
+```
+Traces that fit no path: 1 group, 1 trace file
+
+  helpererr.Flow, steps id t1:32285e72cef2, 1 trace file, not acknowledged
+    recorded steps:    J1.false
+    followed the map:  Start -> if len(in) > 10 --false-->
+    then:              the trace stops at J2 (Sleep (timer)) before reaching an end
+    the map expected:  Sleep (timer) --failure (J2.failure)
+                       Sleep (timer) --success (J2.success)
+    likely: the run ended (returned or failed) earlier than the map allows; PathKit assumes an `if err != nil` on an error from a helper ... put //pathkit:branch on it (for a //pathkit:ignore, remove the comment) ...
+```
+
+- **followed the map** is the part of a path the run did take; **then** is the exact step where it left the map; **the map expected** lists what the map allows at that point.
+- **likely** is PathKit's best guess, and says so. The most common cause is an error check on an error from your own helper function: PathKit assumes it never fails (see "Only error checks right after a Temporal call are junctions" in LIMITATIONS.md), so a run that does fail there takes a road the map does not draw. `//pathkit:branch` on that `if` makes the map draw it.
+- With classification on, a group accepted in `classification.explained_traces` says `acknowledged: <reason>` (with classification off, acceptances are not read, so every group says `not acknowledged`).
+- When the run went round a loop several times, "followed the map" shows only the last trip (the loop rule) and says `(repeated loop trips folded: only the last one is kept)`; the step number in "then" counts the steps as recorded.
+- A trace that fits a path beyond the 2000-path cap is counted as unmatched on the `Traces:` line but is not listed here (it fits a real path); a line under the heading says how many.
+- With no such trace, the section says `Traces that fit no path: none`. `--json --unmatched` adds `unmatchedTraces` (a list, empty when none) with the same fields. Without `--unmatched` nothing changes.
 
 **Cleaning up.** `pathkit test` clears old traces at the start of each run (unless `--keep-traces`). To delete them yourself:
 
@@ -292,9 +595,9 @@ go test -overlay=/your/project/.pathkit/overlay/overlay.json -count=1 ./...
 
 Only that command records traces; a plain `go test` records nothing. Run `prepare` again after you change a workflow, because the copies are made from the code as it was when you ran it.
 
-## 5b. The whole project at a glance (`report`)
+## 6. The whole project at a glance (`report`)
 
-`coverage` is the close-up of each workflow. `report` is the **term report for the whole project**: one block per workflow, a priority label saying where tests are most needed, the project total, the workflows left out and why, and what happened to every trace file. Its numbers are exactly `coverage`'s: both commands use the same code to count, and a test checks they agree field by field.
+`coverage` is the close-up of each workflow. `report` is the **whole-project view**: one block per workflow, a priority label saying where tests are most needed, the project total, the workflows left out and why, and what happened to every trace file. Its numbers are exactly `coverage`'s: both commands use the same code to count, and a test checks they agree field by field.
 
 ```bash
 cd testdata/pilot
@@ -360,7 +663,7 @@ It names what excluded them: `.pathkitrc.json`, `--include`, `--exclude`, or `(n
 
 **`report` stops with exit code 1** rather than print a number that leaves something out:
 - when a package doesn't compile: every broken package is named, each with its first error. Fix them, or leave them out of the folder pattern or `"packages"`.
-- when a workflow in scope can't be analyzed: fix it, or exclude it with a reason (section 6).
+- when a workflow in scope can't be analyzed: fix it, or exclude it with a reason (section 8).
 
 | Flag | Effect |
 | --- | --- |
@@ -369,19 +672,19 @@ It names what excluded them: `.pathkitrc.json`, `--include`, `--exclude`, or `(n
 | `--out <file>` | Also write the report to a file, **always plain text** (no colour codes). Config: `"out"`, relative to the config file. |
 | `--no-color` | No colour. Colour (`covered` green, `missed` red; High red, Medium yellow, Low green) appears only on a real terminal, never when piped or redirected, and never with `--no-color`, config `"noColor": true`, or the `NO_COLOR` environment variable set to anything. The words are always there; colour is decoration only. |
 | `--traces`, `--fail-under`, `--allow-stale`, `--clean` | As for `coverage` (section 5). `--fail-under` checks the project's path coverage. |
-| `--config`, `--include`, `--exclude`, `--all` | Scope, as in section 6. `--all` ignores the scope and shows every workflow. |
+| `--config`, `--include`, `--exclude`, `--all` | Scope, as in section 8. `--all` ignores the scope and shows every workflow. |
 
 A flag always beats the config file, including `--json=false`. The exit codes are the same as for `coverage`: `0` fine, `1` a real error, `2` below `--fail-under` (the report is printed first).
 
 **`report --json`** has exactly `coverage --json`'s shape (section 5), with three additions:
-- each workflow also has `file` (where it's declared, always with forward slashes, `orders/orders.go`, even on Windows, so the JSON is the same on every system; the text report uses your system's own separator) and `priority` (`"High"`, `"Medium"`, `"Low"`, or `null` when it has no paths);
+- each workflow also has `file` (where it's declared, always with forward slashes, `orders/orders.go`, even on Windows, so the JSON is the same on every system; `pathkit explain` also shows it with forward slashes, while the text `report` uses your system's own separator) and `priority` (`"High"`, `"Medium"`, `"Low"`, or `null` when it has no paths);
 - at the top, `excludedBy` lists what excluded workflows (`[".pathkitrc.json", "--exclude"]`, or `[]`).
 
 Everything else (`workflows`, `excluded`, `total`, `branches`, `traces`, `failUnder`) means exactly the same as in `coverage --json`.
 
-## 5c. A shareable web page (`--html`)
+## 7. A shareable web page (`--html`)
 
-`report --html` also writes the report as **one web page**, which you can open in any browser, attach to a ticket, or send to someone without Go:
+`report --html` also writes the report as **one web page**, which you can open in any browser, attach to an issue or an email, or send to someone without Go:
 
 ```bash
 cd testdata/pilot
@@ -445,22 +748,22 @@ Upload the page as a CI **artifact** to download and open it after the run. The 
 | Flag or key | Effect |
 | --- | --- |
 | `--html` | Write the page to the default file (`.pathkit/report.html`, or `.pathkit/analysis.html` for `analyze`). |
-| `--html=<file>` | Write it there; the trend file goes next to it. Write it **with `=`**: `--html report.html` (with a space) would read `report.html` as the folder, and PathKit stops with `write --html=report.html (with =)`. |
+| `--html=<file>` | Write it there; the trend file goes next to it. Write it **with `=`**: `--html report.html` (with a space) would read `report.html` as the folder. With no folder given, PathKit stops with `write --html=report.html (with =)`; with a folder given, it says it expected at most one folder. |
 | `--html=false` | No page, even if the config says so. |
 | config `"html"` | `report` only: `true`, a file path (relative to the config file), or `false`. |
 
 The page's "Generated" time is in UTC. File paths on the page use forward slashes on every system.
 
-## 6. Choose which workflows count (`.pathkitrc.json`)
+## 8. Choose which workflows count (`.pathkitrc.json`)
 
-Some workflows can't be tested yet (say, they need a real bank sandbox). Counting them would drag your coverage down and make the number mean less. A `.pathkitrc.json` file says which workflows count. Think of a report card where some subjects aren't graded this term: they're listed as "not graded, because …", and the average is taken over the rest.
+Some workflows can't be tested yet (say, they need an external test system). Counting them would drag your coverage down and make the number mean less. A `.pathkitrc.json` file says which workflows count. Think of a school report where some subjects are marked "not graded, because …": they are listed with the reason, and the average is taken over the rest.
 
 ```json
 {
   "packages": ["./internal/workflows/..."],
   "workflows": {
     "exclude": [
-      { "name": "LegacyBillingWorkflow", "reason": "needs real bank sandbox" }
+      { "name": "LegacyPaymentsWorkflow", "reason": "needs an external test system" }
     ]
   }
 }
@@ -498,51 +801,57 @@ Workflow: scope.lowerFlow (added by config)
 
 **Scope changes what is counted, never what is tested.** `pathkit test` still runs every test; it records only the workflows in scope.
 
-**Example with the sample project:** excluding `ShipmentWorkflow` changes the project from 38 paths with 20 covered (52.6%) to 29 paths with 17 covered (58.6%). The number went up only because something was taken out. That's why every exclusion shows its reason, and why `report` always prints how many workflows were excluded (section 5b).
+**Example with the sample project:** excluding `ShipmentWorkflow` changes the project from 38 paths with 20 covered (52.6%) to 29 paths with 17 covered (58.6%). The number went up only because something was taken out. That's why every exclusion shows its reason, and why `report` always prints how many workflows were excluded (section 6).
 
 **A workflow in scope that PathKit can't analyze** (for example one using `goto`) is always printed as `in scope but not analyzable: … (fix it, or exclude it in .pathkitrc.json with a reason)`. `coverage` and `report` refuse to run while one is in scope (exit 1), so the percentage always covers exactly what's in scope.
 
 **All keys:**
 
-| Key | Meaning | Works |
-| --- | --- | --- |
-| `packages` | Where your workflows are (default `./...` from the file's folder). Names are checked against these. It is also the folder `pathkit test`/`traces` use when you give none (only when it lists one). | now |
-| `traces` | Trace folder (default `.pathkit/traces`). | now |
-| `workflows.include` / `workflows.exclude` | See above. | now |
-| `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). | now (`coverage` and `report`) |
-| `out`, `json`, `noColor` | `report` output: write to a file (relative to the config file), print JSON, no colour (section 5b). A flag always wins. | now (`report`) |
-| `html` | `report` only: `true` writes `.pathkit/report.html` (from the current folder), a path writes there (relative to the config file), `false` writes none (section 5c). `--html` always wins, including `--html=false`. | now (`report`) |
+| Key | Meaning |
+| --- | --- |
+| `packages` | Where your workflows are (default `./...` from the file's folder). Names are checked against these. It is also the folder `pathkit test`/`traces` use when you give none (only when it lists one). |
+| `traces` | Trace folder (default `.pathkit/traces`). |
+| `workflows.include` / `workflows.exclude` | See above. |
+| `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). |
+| `out`, `json`, `noColor` | `report` output: write to a file (relative to the config file), print JSON, no colour (section 6). A flag always wins. |
+| `classification` | Marking paths yourself, and switching on the testable/overall block (`enabled`). See "Marking paths as untestable" in section 5. The section's `ci` key is described in "The CI check" in section 5. |
+| `html` | `report` only: `true` writes `.pathkit/report.html` (from the current folder), a path writes there (relative to the config file), `false` writes none (section 7). `--html` always wins, including `--html=false`. |
 
-Every key is used now, and each one is covered by a test. (`out`, `json`, `noColor` and `html` in the config are for `report` only; `coverage` and `analyze` use only their own flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
+Every key is used and covered by a test. (`out`, `json`, `noColor` and `html` in the config are for `report` only; `coverage` and `analyze` use only their own flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
 
-## 7. Errors and exit codes
+## 9. Errors and exit codes
 
-Every error is one line on stderr, in the form `pathkit <command>: <message>`.
+Every error starts with `pathkit <command>:` on stderr; a few (a list of paths, a warning block) continue on the lines after it.
 
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Success. |
 | `1` | A real error (bad argument, missing file, ...). The message says what. |
-| `2` | The report was produced, but coverage is below `--fail-under`. Lets CI tell "coverage too low" apart from "PathKit failed". |
+| `2` | The report was produced, but **either** coverage is below `--fail-under` (or the config's `failUnder`), **or** (with classification enabled) the CI baseline check failed: a new untested testable path, a new needs-review path, a path that lost its test, or testable coverage below `classification.ci.fail_under_testable` (see "The CI check" in section 5). The stderr lines say which. Lets CI tell "coverage too low" apart from "PathKit failed". |
 
 | Message | Cause | Fix |
 | --- | --- | --- |
-| `missing <file> argument` / `missing <dir> argument` | No path given. | Pass the file or folder. |
+| `missing <file> argument; give a .go file, a folder, or folder/... (for example: pathkit analyze ./...)` | No path given. | Pass the file or folder. |
+| `no go.mod found in . or any folder above it; ...` | PathKit reads a Go module and found no `go.mod`. | Run it from inside your project (the folder that holds `go.mod`), or name a folder inside it. |
 | `unknown flag: --xyz` | Misspelled or unsupported flag. | Check the spelling (`pathkit <command> --help` lists flags). |
-| `pathkit: unknown command "xyz"` | Misspelled command. | Use `analyze`, `test`, `traces`, `coverage` or `report`. |
-| `no trace files found in <dir>; coverage is recorded only by "pathkit test" ...` | No runs were recorded, usually because the tests ran with plain `go test`. | Run `pathkit test`. |
-| `go test failed (exit status 1)` | One of your tests failed under `pathkit test`. | Fix the test; traces from passing tests are still kept. |
+| `pathkit: unknown command "xyz"` | Misspelled command. | Run `pathkit --help` for the list of commands. |
+| `no trace files found in <dir>; coverage is recorded only by "pathkit test" ...` | No runs were recorded, usually because the tests ran with plain `go test`, or you run this command from another folder than `pathkit test`. | Run `pathkit test ./...` first, from the folder that holds `go.mod`, then run this command from the same folder (or give `--traces`). |
+| `go test failed (exit status 1); traces recorded so far are kept. ...` | One of your tests failed under `pathkit test`. | Fix the failing test and run `pathkit test` again. |
 | `expected a package folder or folder/..., not a file` | `pathkit test` runs packages, not single files. | Pass the folder. |
 | `expected a folder or folder/..., not a file: ... (report covers a whole project; ...)` | `report` is for whole projects. | Pass the folder, or use `pathkit coverage <file>`. |
 | `cannot record <workflow>: ... a name pathkit needs` | Your code already uses one of pathkit's generated names. | Rename yours (see LIMITATIONS.md). |
 | `Workflow file not found: ...` / `Directory not found: ...` | Wrong path. | Check the path and your working directory. |
-| `package does not compile: <package>: <file>:<line>:<col>: <error>` | PathKit needs code that builds. The message names the package and its first real compile error. | Fix that error (`go build ./...` shows them all). |
+| `package does not compile: <package>: <file>:<line>:<col>: <error>; fix the build error ...` | PathKit needs code that builds. The message names the package and its first real compile error. | Fix that error (`go build ./...` shows them all). |
 | `3 packages do not compile: <package>: <error>; <package>: <error>; ...` | Several packages under a `folder/...` don't build. PathKit stops rather than skip them, so no workflow drops out of the numbers unnoticed. Each broken package is named once, with its first error. A package that only *imports* a broken one is not listed. | Fix them, or leave those folders out of the pattern you pass. |
-| `... has no exported workflow functions to analyze` | Nothing in that file matches the workflow rule above. | Check the function is exported, takes `workflow.Context` first and returns `error` last. |
-| `no workflows could be analyzed` | Every workflow found was skipped (see the `skipping ...` lines). | Rewrite the construct named in the `skipping` line (see "Never supported" above), or analyze another file. |
-| `skipping <workflow>: goto at ... is not supported: ...` | The workflow uses `goto` or Go's `select`, which PathKit never maps. | Rewrite with `break`/`continue`/`return`, or `workflow.Selector`; other workflows are still analyzed. |
+| `... has no exported workflow functions to analyze; ...` | Nothing in that file matches the workflow rule above. | Check the function is exported, takes `workflow.Context` first and returns `error` last. |
+| `no workflows in scope to measure: ...` | `report`, `coverage` or `pathkit test` found no workflow, or the scope leaves none. | Same check as above, then look at `include`/`exclude` in `.pathkitrc.json`. |
+| `WARNING: PathKit found no decision points to measure in N workflow(s), which have no paths: ...` (top of the `report` and `coverage` text, and on stderr of `analyze`, `coverage` and `report`) | A workflow has no path at all, for example a loop with no `break` and no `return`. Its 0 of 0 is not a measurement and it is not counted in the totals. Not an error; exit code unchanged; the JSON is unchanged. | Give the loop a `break` or a `return` (a continue-as-new counts), or leave the workflow out in `.pathkitrc.json` with a reason. |
+| `WARNING: N workflow(s) have more than 2000 paths ...` (top of the report) | A workflow reached the path cap, so its path list is incomplete. Not an error; exit code unchanged. | Split the workflow into smaller ones; read its numbers as a lower bound. |
+| `no workflows could be analyzed` | Every workflow found uses something PathKit cannot map (see the `in scope but not analyzable` lines). | Rewrite the construct named in that line (see "Never supported" above), exclude the workflow in `.pathkitrc.json` with a reason, or analyze another file. |
+| `in scope but not analyzable: <workflow>: goto at ... is not supported: ...` | The workflow uses `goto` or Go's `select`, which PathKit never maps. | Rewrite with `break`/`continue`/`return`, or `workflow.Selector`; or exclude the workflow in `.pathkitrc.json` with a reason. |
 | `<path>/.pathkitrc.json: invalid JSON at line 3, column 32: ...` | The config file isn't valid JSON. | Fix the file at that line (a missing comma, say). |
-| `<path>/.pathkitrc.json: unknown key "workflow"` | A misspelled key. | Check the spelling against section 6. |
+| `<path>/.pathkitrc.json: the file is saved as UTF-16; save it again as UTF-8 ...` | The file was saved in UTF-16 with a byte order mark, which is what Windows PowerShell's `>` writes. PathKit reads UTF-8 (with or without a byte order mark). | Open the file in an editor and save it as UTF-8. |
+| `<path>/.pathkitrc.json: unknown key "workflow"; check its spelling ...` | A misspelled key. | Check the spelling against section 8. |
 | `<path>/.pathkitrc.json: workflows.include is empty: ...` | `"include": []` would be ambiguous. | Remove it, or list the workflows that count. |
 | `<path>/.pathkitrc.json: exclude "X" needs a "reason"` | Every exclusion must say why. | Add `"reason": "..."`. |
 | `... include "X" matches no function ...` / `... exclude "X" matches no workflow ...` | A misspelled or missing name. | Fix the name; `pathkit analyze --all` lists every workflow. |
@@ -551,6 +860,14 @@ Every error is one line on stderr, in the form `pathkit <command>: <message>`.
 | `in scope but not analyzable: <workflow>: ...` | The workflow uses something PathKit never maps. | Fix it, or exclude it with a reason. |
 | `no workflows in scope to analyze (every workflow is excluded)` | The scope left nothing to show. | Check `include`/`exclude`, or use `--all`. |
 | `coverage 52.6% is below --fail-under 80%` (exit 2) | Path coverage is under your threshold. | Write tests for the untested paths listed above it. |
+| `N paths had a test in the baseline <file> and have none now:` (exit 2) | A test that used to run these paths no longer does (CI check). | Restore the test, or, if that is intended, pass `--allow-lost-tests` once and write the baseline again. |
+| `N testable paths with no test not in the baseline <file>:` (exit 2) | New paths nobody tests yet (CI check). | Write tests for them, or look at them and run `pathkit report --write-baseline`. |
+| `N needs-review paths not in the baseline <file>:` (exit 2) | PathKit is not sure about these paths (CI check). | Look at each one (`pathkit explain`), then fix the cause or re-write the baseline. |
+| `testable coverage 62.5% is below classification.ci.fail_under_testable 80% (in <config>)` (exit 2) | Testable coverage under the floor. | Write tests for the untested testable paths. |
+| `baseline file <file> not found; write it with --write-baseline` | The CI check has no baseline yet. | Run `pathkit report --write-baseline` once and commit the file. |
+| `baseline file <file> is saved as UTF-16; save it again as UTF-8 ...` | The baseline file was saved in UTF-16 with a byte order mark (Windows PowerShell's `>` does this). A UTF-8 file with a byte order mark in front is read normally. | Save it again as UTF-8, or run `pathkit report --write-baseline`. |
+| `no listed path has the stable id s1:... in N measured workflows` | `pathkit explain` found no such path: a typo, or the code changed (the id is built from the decisions' text). | Take the id from a fresh `pathkit report --json`. |
+| `--baseline and --write-baseline need path classification ...` | The baseline only means something with classification on. | Set `"enabled": true` under `"classification"`. |
 | `invalid --fail-under value: ...` | `--fail-under` needs a number from 0 to 100. | e.g. `--fail-under 80`. |
 | `invalid --older-than value: ...` | `pathkit clean --older-than` needs an age. | e.g. `7d`, `12h`, `30m`. |
 | `... matches no workflow ...; did you mean "ShipmentWorkflow"?` | A typo in a workflow name (config, `--include`/`--exclude`, `--function`). | Use the suggested name. |

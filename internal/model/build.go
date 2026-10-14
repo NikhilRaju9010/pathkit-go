@@ -64,7 +64,12 @@ func Build(wf discover.Workflow) (*Graph, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
-	return b.finish(start), nil
+	g := b.finish(start)
+	if err := b.attachMarks(g); err != nil {
+		return nil, err
+	}
+	b.attachFacts(g)
+	return g, nil
 }
 
 func newBuilder(wf discover.Workflow) *builder {
@@ -104,6 +109,7 @@ func (b *builder) finish(start Target) *Graph {
 			g.byID[e.ID.s] = e
 		}
 	}
+	g.assignStable()
 	return g
 }
 
@@ -146,7 +152,7 @@ func (b *builder) roadFrom(blk *cfg.Block, i int) Target {
 func (b *builder) computeRoad(blk *cfg.Block) Target { return b.computeRoadFrom(blk, 0) }
 
 // computeRoadFrom is where execution goes from before node from of blk.
-// A road that passes a saga compensation defer carries the note (CLAUDE.md
+// A road that passes a saga compensation defer carries the note (docs/DESIGN.md
 // D3: noted, never a branch).
 func (b *builder) computeRoadFrom(blk *cfg.Block, from int) Target {
 	t, passed := b.roadThrough(blk, from)
@@ -199,7 +205,7 @@ func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool) 
 }
 
 // decide turns one if statement into a junction, or walks straight
-// through it when it is transparent or ignored (CLAUDE.md D2).
+// through it when it is transparent or ignored (docs/DESIGN.md D2).
 func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
 	pragma := b.ifPragma(ifs)
 	if obj, neq, isErrForm := b.errForm(ifs.Cond); isErrForm {

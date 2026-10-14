@@ -33,7 +33,7 @@ type Rules struct {
 // Resolve checks every include and exclude name against fns (every
 // function in the packages the names are checked against, see
 // discover.All) and resolves them. where names those packages in errors.
-// The rules (CLAUDE.md D8):
+// The rules (docs/DESIGN.md D8):
 //
 //   - include narrows the scope to the workflows it lists: only they
 //     count. Every automatically found workflow it leaves out is excluded
@@ -157,8 +157,20 @@ func normalize(name string) string {
 
 // nameMatches: full is "pkg.Func" or "pkg.Type.Method"; want is any
 // accepted form of a name (already normalized).
+//
+// A name that PathKit had to qualify with folders ("a/dup.Work", because
+// b/dup.Work exists too) is also matched by its plain form ("dup.Work"),
+// so that the plain form is reported as ambiguous, with both names, not as
+// "matches no workflow".
 func nameMatches(full, want string) bool {
-	return full == want || strings.HasSuffix(full, "."+want)
+	if full == want || strings.HasSuffix(full, "."+want) {
+		return true
+	}
+	if i := strings.LastIndex(full, "/"); i >= 0 && !strings.Contains(want, "/") {
+		plain := full[i+1:]
+		return plain == want || strings.HasSuffix(plain, "."+want)
+	}
+	return false
 }
 
 // MatchName picks the one name in known (full workflow names) that name

@@ -25,7 +25,7 @@ const (
 	fixtures = "../../testdata/fixtures"
 )
 
-// targets loads arg and returns every workflow M2 can map, with its graph.
+// targets loads arg and returns every workflow PathKit can map, with its graph.
 func targets(t *testing.T, arg string) []instrument.Target {
 	t.Helper()
 	res, err := load.Load(arg)
@@ -51,7 +51,7 @@ func targets(t *testing.T, arg string) []instrument.Target {
 func allTargets(t *testing.T) []instrument.Target {
 	t.Helper()
 	var out []instrument.Target
-	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", fixtures + "/loops", fixtures + "/waits", fixtures + "/saga", pilot + "/..."} {
+	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", fixtures + "/loops", fixtures + "/waits", fixtures + "/saga", fixtures + "/unnamedctx", pilot + "/..."} {
 		out = append(out, targets(t, arg)...)
 	}
 	return out
@@ -76,6 +76,7 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 		{fixtures, fixtures + "/loops"},
 		{fixtures, fixtures + "/waits"},
 		{fixtures, fixtures + "/saga"},
+		{fixtures, fixtures + "/unnamedctx"},
 		{pilot, pilot + "/..."},
 	}
 	for _, c := range cases {
@@ -186,13 +187,66 @@ func TestEveryExitRecordedOnce(t *testing.T) {
 
 func TestNameClashes(t *testing.T) {
 	for arg, want := range map[string]string{
-		fixtures + "/clash":    `the package already declares "pathkitStart"`,
-		fixtures + "/clashvar": `it already uses the name "pathkitRec"`,
+		fixtures + "/clash":       `the package already declares "pathkitStart"`,
+		fixtures + "/clashvar":    `it already uses the name "pathkitRec"`,
+		fixtures + "/clashctx":    `it already uses the name "pathkitRec" or "pathkitCtx"`,
+		fixtures + "/clashctxpkg": `the package already declares "pathkitCtx"`,
 	} {
 		_, err := instrument.Instrument(targets(t, arg), "/tmp/x")
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want it to mention %s", arg, err, want)
 		}
+	}
+}
+
+// A loop condition of a named bool type ("type Flag bool; for !v") would
+// not compile once wrapped in pathkitRec.loop, which takes a plain bool.
+// PathKit says so in its own words, with the fix, before go test runs.
+func TestNamedBoolLoopCondition(t *testing.T) {
+	_, err := instrument.Instrument(targets(t, fixtures+"/loopfirstnamed"), "/tmp/x")
+	if err == nil {
+		t.Fatal("no error for a loop condition of a named bool type")
+	}
+	for _, want := range []string{
+		"cannot record loopfirstnamed.",
+		"the loop condition `!v` at ",
+		"loopfirstnamed.go:",
+		"has the type Flag, not the plain type bool",
+		"pathkit can record a loop condition only of the plain type bool",
+		"write `for bool(!v)` instead",
+		"or exclude the workflow in .pathkitrc.json with a reason",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q\ndoes not contain %q", err, want)
+		}
+	}
+
+	// The two shapes that already have the plain type bool still record.
+	if _, err := instrument.Instrument(targets(t, fixtures+"/loops"), "/tmp/x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The message quotes the condition as written (a func literal included)
+// and does not call a type parameter a named type.
+func TestNamedBoolLoopConditionWording(t *testing.T) {
+	want := map[string]string{
+		"namedboolloop.FuncLit":   "write `for bool(func() Flag { return i < n }())` instead",
+		"namedboolloop.TypeParam": "the loop condition `!v` at ",
+	}
+	for _, tg := range targets(t, fixtures+"/namedboolloop") {
+		_, err := instrument.Instrument([]instrument.Target{tg}, "/tmp/x")
+		w, ok := want[tg.Workflow.Name]
+		if !ok {
+			t.Fatalf("unexpected workflow %s", tg.Workflow.Name)
+		}
+		delete(want, tg.Workflow.Name)
+		if err == nil || !strings.Contains(err.Error(), w) || !strings.Contains(err.Error(), "not the plain type bool") || strings.Contains(err.Error(), "a named true/false type") {
+			t.Errorf("%s: err = %v, want it to contain %q and \"not the plain type bool\", and not \"a named true/false type\"", tg.Workflow.Name, err, w)
+		}
+	}
+	if len(want) > 0 {
+		t.Errorf("workflows not found: %v", want)
 	}
 }
 
@@ -266,7 +320,7 @@ func countReturns(fn *ast.FuncDecl) int {
 
 // WriteOverlay deletes only what an earlier run generated (overlay.json
 // and the NNN_<name>.go copies), never another file in the folder, such
-// as a report-history.json (owner's requirement, M8).
+// as a report-history.json .
 func TestOverlayKeepsOtherFiles(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "overlay")
 	res := instrumentAll(t, targets(t, pilot+"/orders"))
@@ -296,5 +350,44 @@ func TestOverlayKeepsOtherFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "overlay.json")); err != nil {
 		t.Errorf("overlay.json missing: %v", err)
+	}
+}
+
+// A context parameter written as "_" is named in the marked-up copy, on the
+// same line, and only there: the user's own file is untouched.
+func TestUnnamedContextParameterIsNamed(t *testing.T) {
+	ts := targets(t, fixtures+"/unnamedctx")
+	if len(ts) != 2 {
+		t.Fatalf("want 2 workflows, got %d", len(ts))
+	}
+	res := instrumentAll(t, ts)
+	var src string
+	for path, b := range res.Files {
+		if strings.HasSuffix(path, "unnamedctx.go") {
+			src = string(b)
+		}
+	}
+	if src == "" {
+		t.Fatal("no marked-up copy of unnamedctx.go")
+	}
+	for _, want := range []string{
+		"func Sign(pathkitCtx workflow.Context, n int) (string, error) { pathkitRec := pathkitStart(pathkitCtx,",
+		"func Strict(pathkitCtx workflow.Context, name string, _ int) error { pathkitRec := pathkitStart(pathkitCtx,",
+	} {
+		if !strings.Contains(src, want) {
+			t.Errorf("copy lacks %q\n%s", want, src)
+		}
+	}
+	orig, err := os.ReadFile(filepath.Join(fixtures, "unnamedctx", "unnamedctx.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(orig, []byte("pathkitCtx")) {
+		t.Error("the original file was changed")
+	}
+	// Parameters that have no name at all cannot be named safely.
+	_, err = instrument.Instrument(targets(t, fixtures+"/unnamedparams"), "/tmp/x")
+	if err == nil || !strings.Contains(err.Error(), "its parameters have no names") {
+		t.Errorf("fully unnamed parameters: err = %v", err)
 	}
 }

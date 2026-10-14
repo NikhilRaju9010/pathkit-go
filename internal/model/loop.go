@@ -21,7 +21,7 @@ type loopInfo struct {
 	done    *cfg.Block // after the loop: where "exit" and break lead
 	hasExit bool       // false for "for {}": it only leaves by break or return
 
-	// Why it is a junction (CLAUDE.md D3, as amended on 2026-09-28): a
+	// Why it is a junction (docs/DESIGN.md D3): a
 	// Temporal call in it, or a junction in it. Neither: transparent.
 	temporal, inner bool
 }
@@ -109,7 +109,7 @@ func (b *builder) loopReasons(s ast.Stmt) (temporal, inner bool) {
 // code after the loop), and a retry edge: reaching the head again from
 // inside the body (its end, or continue) is "retry, then back to the
 // head". Paths use each of the three at most once (the analyzer half of
-// the loop rule, CLAUDE.md D3).
+// the loop rule, docs/DESIGN.md D3).
 //
 // A transparent loop (no Temporal call, no junction) is walked once: into
 // the body, and from its end on to the code after the loop.

@@ -6,7 +6,7 @@ import (
 	"go.temporal.io/sdk/workflow"
 )
 
-// Loops (CLAUDE.md D3, amended 2026-09-28): a loop is a junction when it
+// Loops (docs/DESIGN.md D3): a loop is a junction when it
 // contains a Temporal call or any junction; otherwise it is transparent
 // and walked once. A loop junction has exits iterate / exit and a retry
 // edge, each used at most once per path.
@@ -65,7 +65,7 @@ func LoopWithActivity(ctx workflow.Context, n int) (string, error) {
 }
 
 // No Temporal call, but a junction inside: a loop junction under the
-// amended rule, so repeated trips can be folded.
+// loop rule (docs/DESIGN.md D3), so repeated trips can be folded.
 func LoopWithOnlyIf(ctx workflow.Context, xs []int) (int, error) {
 	big := 0
 	for _, x := range xs {

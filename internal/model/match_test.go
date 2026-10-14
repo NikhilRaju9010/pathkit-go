@@ -103,7 +103,7 @@ func concat(parts ...[]string) []string {
 	return out
 }
 
-// The matcher half of the loop rule (CLAUDE.md D3): a trace that goes
+// The matcher half of the loop rule (docs/DESIGN.md D3): a trace that goes
 // round a loop several times is folded by keeping only the last trip.
 func TestMatchFoldsLoopTrips(t *testing.T) {
 	pending := []string{"J1.iterate", "J2.success", "J3.default", "J1.retry"}
@@ -265,5 +265,28 @@ func TestFunctionHashIsTheSameOnEverySystem(t *testing.T) {
 		if h != pinned {
 			t.Errorf("%s: hash %s, want %s", how, h, pinned)
 		}
+	}
+}
+
+// The mismatch says how far the walk got (after folding) and where it
+// stood, for the unmatched-trace report; Bad is the exit the failing step
+// names.
+func TestMismatchDetail(t *testing.T) {
+	g := pilotGraph(t, "orders.OrderWorkflow")
+	_, mm := g.Match([]string{"J1.false"})
+	if mm == nil || len(mm.Followed) != 1 || mm.Followed[0].Exit.ID.String() != "J1.false" || mm.At.Junction == nil || mm.At.Junction.ID != "J2" || mm.Bad != nil || mm.Step != 0 {
+		t.Fatalf("stops early: %+v", mm)
+	}
+	_, mm = g.Match([]string{"J2.success"})
+	if mm == nil || len(mm.Followed) != 0 || mm.At.Junction.ID != "J1" || mm.Bad == nil || mm.Bad.ID.String() != "J2.success" || mm.Step != 1 {
+		t.Fatalf("skips a decision: %+v", mm)
+	}
+	_, mm = g.Match([]string{"J1.true", "J2.success"})
+	if mm == nil || !mm.At.IsEnd() || mm.Bad.ID.String() != "J2.success" {
+		t.Fatalf("after the end: %+v", mm)
+	}
+	_, mm = g.Match([]string{"J9.true"})
+	if mm == nil || mm.Bad != nil || mm.Step != 1 {
+		t.Fatalf("not on the map: %+v", mm)
 	}
 }

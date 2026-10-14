@@ -33,7 +33,7 @@ func switchBody(n ast.Node) *ast.BlockStmt {
 	return nil
 }
 
-// switchJunction turns a whole switch into one junction (CLAUDE.md D3):
+// switchJunction turns a whole switch into one junction (docs/DESIGN.md D3):
 // one exit per case in source order, plus "default", written or not.
 //
 // go/cfg lowers a switch into a chain of tests: each test block branches

@@ -1,4 +1,4 @@
-// Package replay answers an open question from M1: does Temporal's test
+// Package replay answers a question: does Temporal's test
 // environment ever replay workflow code (run the workflow function again
 // from the start)? The workflow below has several "workflow tasks" (an
 // activity, a timer, a signal wait), the moments a replay could happen. It

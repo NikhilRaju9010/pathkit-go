@@ -1,0 +1,1359 @@
+{
+  "schemaVersion": 1,
+  "tool": "pathkit-go",
+  "workflows": [
+    {
+      "name": "approval.ApprovalWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 4,
+        "covered": 2,
+        "percent": 50
+      },
+      "branches": {
+        "total": 6,
+        "covered": 4,
+        "percent": 66.7
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "57d689abe1",
+          "text": "Start -> AwaitWithTimeout (wait) --failure--> End (failed)",
+          "steps": [
+            "J1.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:5dc94b3c6dcc",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "25cd0d80e5",
+          "text": "Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == \"approved\" --true--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.signaled",
+            "J3.true"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:8815fc415487",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "62dae19ef3",
+          "text": "Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == \"approved\" --false--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.signaled",
+            "J3.false"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:4bea6520db0d",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 4,
+          "id": "5d9469de15",
+          "text": "Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --timeout--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.timeout"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:a5784a0f45c2",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 4,
+            "covered": 2
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 4,
+          "covered": 2,
+          "percent": 50
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 4,
+          "covered": 2,
+          "percent": 50
+        }
+      },
+      "file": "approval/approval.go",
+      "priority": "Medium"
+    },
+    {
+      "name": "billing.SubscriptionWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 3,
+        "covered": 2,
+        "percent": 66.7
+      },
+      "branches": {
+        "total": 5,
+        "covered": 5,
+        "percent": 100
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "a8fdd4074b",
+          "text": "Start -> for i < s.CyclesPerRun --iterate--> ChargeMonthly (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.iterate",
+            "J2.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:3144d3995b0d",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "03858754db",
+          "text": "Start -> for i < s.CyclesPerRun --iterate--> ChargeMonthly (activity) --success--> retry --> for i < s.CyclesPerRun --exit--> End (continued-as-new)",
+          "steps": [
+            "J1.iterate",
+            "J2.success",
+            "J1.retry",
+            "J1.exit"
+          ],
+          "end": "continued-as-new",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:0573b933c044",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "f8367d467b",
+          "text": "Start -> for i < s.CyclesPerRun --exit--> End (continued-as-new)",
+          "steps": [
+            "J1.exit"
+          ],
+          "end": "continued-as-new",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:59aa014811bd",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 3,
+            "covered": 2
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 3,
+          "covered": 2,
+          "percent": 66.7
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 3,
+          "covered": 2,
+          "percent": 66.7
+        }
+      },
+      "file": "billing/subscription.go",
+      "priority": "Medium"
+    },
+    {
+      "name": "fulfillment.OrderFulfillmentWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 4,
+        "covered": 2,
+        "percent": 50
+      },
+      "branches": {
+        "total": 6,
+        "covered": 4,
+        "percent": 66.7
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "57d689abe1",
+          "text": "Start -> ReserveInventory (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:ddb69628c827",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "781eb43fd1",
+          "text": "Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --failure--> End (failed) [compensation (defer)]",
+          "steps": [
+            "J1.success",
+            "J2.failure"
+          ],
+          "end": "failed",
+          "compensation": true,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:8425181fd489",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "70516e55c2",
+          "text": "Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --success--> ShipOrder (activity) --failure--> End (failed) [compensation (defer)]",
+          "steps": [
+            "J1.success",
+            "J2.success",
+            "J3.failure"
+          ],
+          "end": "failed",
+          "compensation": true,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:538ba8e9beba",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 4,
+          "id": "95ae2260f8",
+          "text": "Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --success--> ShipOrder (activity) --success--> End (completed) [compensation (defer)]",
+          "steps": [
+            "J1.success",
+            "J2.success",
+            "J3.success"
+          ],
+          "end": "completed",
+          "compensation": true,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:e4d33040eaa6",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 4,
+            "covered": 2
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 4,
+          "covered": 2,
+          "percent": 50
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 4,
+          "covered": 2,
+          "percent": 50
+        }
+      },
+      "file": "fulfillment/fulfillment.go",
+      "priority": "Medium"
+    },
+    {
+      "name": "fulfillment.PaymentWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 4,
+        "covered": 2,
+        "percent": 50
+      },
+      "branches": {
+        "total": 6,
+        "covered": 4,
+        "percent": 66.7
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "57d689abe1",
+          "text": "Start -> AuthorizeCard (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:b156b204b8ae",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "76cc998faf",
+          "text": "Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --true--> FraudReview (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.success",
+            "J2.true",
+            "J3.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:5f18a6731c7f",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "74c1fdc3e1",
+          "text": "Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --true--> FraudReview (activity) --success--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.true",
+            "J3.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:1943ae7197b9",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 4,
+          "id": "42b277ae86",
+          "text": "Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --false--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.false"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:86b24570289f",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 4,
+            "covered": 2
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 4,
+          "covered": 2,
+          "percent": 50
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 4,
+          "covered": 2,
+          "percent": 50
+        }
+      },
+      "file": "fulfillment/payment.go",
+      "priority": "Medium"
+    },
+    {
+      "name": "orders.OrderWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 3,
+        "covered": 3,
+        "percent": 100
+      },
+      "branches": {
+        "total": 4,
+        "covered": 4,
+        "percent": 100
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "40dbc77a36",
+          "text": "Start -> if in.AmountCents <= 0 --true--> End (completed)",
+          "steps": [
+            "J1.true"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:743d711a77b4",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "b64b1d5b2f",
+          "text": "Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.false",
+            "J2.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:050e8acab1b0",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "8b4a38cb9f",
+          "text": "Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)",
+          "steps": [
+            "J1.false",
+            "J2.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:5179b1c99bbb",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 3,
+            "covered": 3
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 3,
+          "covered": 3,
+          "percent": 100
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 3,
+          "covered": 3,
+          "percent": 100
+        }
+      },
+      "file": "orders/orders.go",
+      "priority": "Low"
+    },
+    {
+      "name": "polling.ReportPollingWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 5,
+        "covered": 3,
+        "percent": 60
+      },
+      "branches": {
+        "total": 8,
+        "covered": 7,
+        "percent": 87.5
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "a8fdd4074b",
+          "text": "Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.iterate",
+            "J2.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:7eab30ceab1e",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "f399c898b9",
+          "text": "Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --case \"complete\"--> End (completed)",
+          "steps": [
+            "J1.iterate",
+            "J2.success",
+            "J3.case \"complete\""
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 2,
+          "staleTrace": false,
+          "stableId": "s1:f9c238e16d94",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "235e0af53c",
+          "text": "Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --case \"failed\"--> End (completed)",
+          "steps": [
+            "J1.iterate",
+            "J2.success",
+            "J3.case \"failed\""
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:211be55ebb7c",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 4,
+          "id": "4b582a0164",
+          "text": "Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --default--> retry --> for attempt <= in.MaxPolls --exit--> End (completed)",
+          "steps": [
+            "J1.iterate",
+            "J2.success",
+            "J3.default",
+            "J1.retry",
+            "J1.exit"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:d263ddf3ce14",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 5,
+          "id": "a4493657d4",
+          "text": "Start -> for attempt <= in.MaxPolls --exit--> End (completed)",
+          "steps": [
+            "J1.exit"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:c048fc889a4c",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 5,
+            "covered": 3
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 5,
+          "covered": 3,
+          "percent": 60
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 5,
+          "covered": 3,
+          "percent": 60
+        }
+      },
+      "file": "polling/polling.go",
+      "priority": "Medium"
+    },
+    {
+      "name": "reports.DailyReportWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 6,
+        "covered": 3,
+        "percent": 50
+      },
+      "branches": {
+        "total": 6,
+        "covered": 5,
+        "percent": 83.3
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "be3309a608",
+          "text": "Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.true",
+            "J2.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:d15c95f1c368",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "a0a936919c",
+          "text": "Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --success--> EmailReport (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.true",
+            "J2.success",
+            "J3.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:2f05042e1b99",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "5cf66b07a8",
+          "text": "Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --success--> EmailReport (activity) --success--> End (completed)",
+          "steps": [
+            "J1.true",
+            "J2.success",
+            "J3.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:838f1f27492b",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 4,
+          "id": "b64b1d5b2f",
+          "text": "Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.false",
+            "J2.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:52c190ced7d4",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 5,
+          "id": "ae7f66829f",
+          "text": "Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.false",
+            "J2.success",
+            "J3.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:e4ab02e9b7d2",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 6,
+          "id": "ac60471fcd",
+          "text": "Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --success--> End (completed)",
+          "steps": [
+            "J1.false",
+            "J2.success",
+            "J3.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:a01e47d795d6",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 6,
+            "covered": 3
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 6,
+          "covered": 3,
+          "percent": 50
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 6,
+          "covered": 3,
+          "percent": 50
+        }
+      },
+      "file": "reports/dailyreport.go",
+      "priority": "Medium"
+    },
+    {
+      "name": "shipment.ShipmentWorkflow",
+      "addedByConfig": false,
+      "paths": {
+        "total": 9,
+        "covered": 3,
+        "percent": 33.3
+      },
+      "branches": {
+        "total": 9,
+        "covered": 6,
+        "percent": 66.7
+      },
+      "truncated": false,
+      "pathList": [
+        {
+          "number": 1,
+          "id": "57d689abe1",
+          "text": "Start -> CreateLabel (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:c944ccf20a0f",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 2,
+          "id": "1ff4ee340b",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --signal \"delivery-update\"--> switch u.Status --case \"delivered\"--> NotifyCustomer (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.success",
+            "J2.signal \"delivery-update\"",
+            "J3.case \"delivered\"",
+            "J4.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:f745082d391f",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 3,
+          "id": "c5e79ce8ca",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --signal \"delivery-update\"--> switch u.Status --case \"delivered\"--> NotifyCustomer (activity) --success--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.signal \"delivery-update\"",
+            "J3.case \"delivered\"",
+            "J4.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:c3a1cef39079",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 4,
+          "id": "7ecb6eb000",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --signal \"delivery-update\"--> switch u.Status --case \"returned\"--> NotifyCustomer (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.success",
+            "J2.signal \"delivery-update\"",
+            "J3.case \"returned\"",
+            "J4.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:63078901b802",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 5,
+          "id": "d33f30c060",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --signal \"delivery-update\"--> switch u.Status --case \"returned\"--> NotifyCustomer (activity) --success--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.signal \"delivery-update\"",
+            "J3.case \"returned\"",
+            "J4.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:852e986ad505",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 6,
+          "id": "3ae2efe9eb",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --signal \"delivery-update\"--> switch u.Status --default--> NotifyCustomer (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.success",
+            "J2.signal \"delivery-update\"",
+            "J3.default",
+            "J4.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:fb6a62de1d3b",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 7,
+          "id": "da65182835",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --signal \"delivery-update\"--> switch u.Status --default--> NotifyCustomer (activity) --success--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.signal \"delivery-update\"",
+            "J3.default",
+            "J4.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:cab39cf8233e",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 8,
+          "id": "b8af0fd566",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --timeout--> NotifyCustomer (activity) --failure--> End (failed)",
+          "steps": [
+            "J1.success",
+            "J2.timeout",
+            "J4.failure"
+          ],
+          "end": "failed",
+          "compensation": false,
+          "covered": false,
+          "traces": 0,
+          "staleTrace": false,
+          "stableId": "s1:280857e2cb2e",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        },
+        {
+          "number": 9,
+          "id": "c8cbfe8713",
+          "text": "Start -> CreateLabel (activity) --success--> select (Selector) --timeout--> NotifyCustomer (activity) --success--> End (completed)",
+          "steps": [
+            "J1.success",
+            "J2.timeout",
+            "J4.success"
+          ],
+          "end": "completed",
+          "compensation": false,
+          "covered": true,
+          "traces": 1,
+          "staleTrace": false,
+          "stableId": "s1:cc0d9c45d79c",
+          "bucket": "testable",
+          "label": null,
+          "source": "auto",
+          "confidence": "certain",
+          "possibleInProduction": true,
+          "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
+          "ruleId": null
+        }
+      ],
+      "classification": {
+        "buckets": {
+          "testable": {
+            "paths": 9,
+            "covered": 3
+          },
+          "cannotBeTested": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsSpecialTest": {
+            "paths": 0,
+            "covered": 0
+          },
+          "needsReview": {
+            "paths": 0,
+            "covered": 0
+          }
+        },
+        "testableCoverage": {
+          "total": 9,
+          "covered": 3,
+          "percent": 33.3
+        },
+        "specialTestCoverage": {
+          "total": 0,
+          "covered": 0,
+          "percent": 0
+        },
+        "overallCoverage": {
+          "total": 9,
+          "covered": 3,
+          "percent": 33.3
+        }
+      },
+      "file": "shipment/shipment.go",
+      "priority": "High"
+    }
+  ],
+  "excluded": [],
+  "excludedBy": [],
+  "total": {
+    "total": 38,
+    "covered": 20,
+    "percent": 52.6
+  },
+  "branches": {
+    "total": 50,
+    "covered": 39,
+    "percent": 78
+  },
+  "traces": {
+    "read": 21,
+    "counted": 21,
+    "unmatched": 0,
+    "stale": 0,
+    "incomplete": 0,
+    "excluded": 0,
+    "unknownWorkflow": 0,
+    "unreadable": 0,
+    "otherWorkflows": 0
+  },
+  "failUnder": null,
+  "classification": {
+    "buckets": {
+      "testable": {
+        "paths": 38,
+        "covered": 20
+      },
+      "cannotBeTested": {
+        "paths": 0,
+        "covered": 0
+      },
+      "needsSpecialTest": {
+        "paths": 0,
+        "covered": 0
+      },
+      "needsReview": {
+        "paths": 0,
+        "covered": 0
+      }
+    },
+    "testableCoverage": {
+      "total": 38,
+      "covered": 20,
+      "percent": 52.6
+    },
+    "specialTestCoverage": {
+      "total": 0,
+      "covered": 0,
+      "percent": 0
+    },
+    "overallCoverage": {
+      "total": 38,
+      "covered": 20,
+      "percent": 52.6
+    }
+  },
+  "coverageBasis": "testable",
+  "classificationShown": true
+}

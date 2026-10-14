@@ -1,7 +1,7 @@
-// Package model is PathKit's single source of truth for paths (CLAUDE.md
+// Package model is PathKit's single source of truth for paths (docs/DESIGN.md
 // D5). It decides which statements are junctions, gives every junction and
 // exit its ID, and lists the paths. Every other part of PathKit (the
-// printer, and from M3 the recorder and the trace matcher) gets IDs from
+// printer, the recorder and the trace matcher) gets IDs from
 // here and never makes its own.
 package model
 
@@ -33,7 +33,7 @@ const (
 	// it: exits "iterate" (go into the body) and "exit" (the condition is
 	// false, or the range ran out; a "for {}" has none), plus its Retry
 	// edge (the body finished and the loop goes round again). See the
-	// loop rule in CLAUDE.md D3.
+	// loop rule in docs/DESIGN.md D3.
 	Loop
 	// Selector is a workflow.Selector's Select call: one exit per Add…
 	// call ("signal \"name\"", "timeout", "activity Name", "default", ...).
@@ -61,6 +61,14 @@ type Junction struct {
 	// Stmt's position, except for a Selector, which starts at its first
 	// Add… call (so it comes before any junction inside its callbacks).
 	order token.Pos
+
+	// Facts are notes the extractor stuck on this junction (see facts.go).
+	// They never change the junction, its exits, or any ID.
+	Facts []Fact
+
+	// stable is the junction's description for stable path IDs (see
+	// assignStable): its label, made unique within the workflow.
+	stable string
 }
 
 // Exit is one way out of a junction.
@@ -80,6 +88,7 @@ type Exit struct {
 // EndKind is how a path finishes.
 type EndKind string
 
+// The ways a path can end.
 const (
 	EndCompleted      EndKind = "completed"
 	EndFailed         EndKind = "failed"
@@ -121,6 +130,8 @@ type Graph struct {
 	Workflow  string
 	Junctions []*Junction // in ID order (J1, J2, ...)
 	Start     Target
+	// Marks are the //pathkit:untestable comments in the function.
+	Marks []Mark
 
 	byStmt map[ast.Node]*Junction
 	byID   map[string]*Exit

@@ -32,13 +32,16 @@ func Load(arg string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if file == "" && !insideModule(dir) {
+		return nil, fmt.Errorf("no go.mod found in %s or any folder above it; PathKit reads a Go module, so run it from inside your project (the folder that holds go.mod), or name a folder inside it", DisplayPath(dir))
+	}
 	cfg := &packages.Config{Mode: mode, Dir: dir}
 	pkgs, err := packages.Load(cfg, pattern)
 	if err != nil {
 		return nil, fmt.Errorf("could not load %s: %v", arg, err)
 	}
 	if len(pkgs) == 0 {
-		return nil, fmt.Errorf("no Go packages found in %s", arg)
+		return nil, fmt.Errorf("no Go packages found in %s; name a folder that holds .go files, or a pattern such as ./... (every package below the current folder)", arg)
 	}
 	if err := compileErrors(pkgs); err != nil {
 		return nil, err
@@ -47,7 +50,7 @@ func Load(arg string) (*Result, error) {
 }
 
 // compileErrors names every package that doesn't compile, each with its
-// first real error, all on one line (owner's decision, M7: stop, but list
+// first real error, all on one line (stop, but list
 // them all). A package that only imports a broken one has no errors of
 // its own, so it is not listed.
 func compileErrors(pkgs []*packages.Package) error {
@@ -62,9 +65,9 @@ func compileErrors(pkgs []*packages.Package) error {
 	case 0:
 		return nil
 	case 1:
-		return fmt.Errorf("package does not compile: %s", broken[0])
+		return fmt.Errorf("package does not compile: %s; fix the build error in your project first (\"go build ./...\" shows all of them), because PathKit needs code that compiles", broken[0])
 	}
-	return fmt.Errorf("%d packages do not compile: %s", len(broken), strings.Join(broken, "; "))
+	return fmt.Errorf("%d packages do not compile: %s; fix the build errors in your project first (\"go build ./...\" shows all of them), because PathKit needs code that compiles", len(broken), strings.Join(broken, "; "))
 }
 
 // firstError picks the error worth showing. go list's own error for a
@@ -189,4 +192,23 @@ func SameFile(a, b string) bool {
 	ia, errA := os.Stat(a)
 	ib, errB := os.Stat(b)
 	return errA == nil && errB == nil && os.SameFile(ia, ib)
+}
+
+// insideModule reports whether dir, or a folder above it, holds a go.mod or
+// a go.work file.
+func insideModule(dir string) bool {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return true // let go list report whatever is wrong
+	}
+	for d := abs; ; d = filepath.Dir(d) {
+		for _, f := range []string{"go.mod", "go.work"} {
+			if info, err := os.Stat(filepath.Join(d, f)); err == nil && !info.IsDir() {
+				return true
+			}
+		}
+		if filepath.Dir(d) == d {
+			return false
+		}
+	}
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 )
 
-// The HTML files (CLAUDE.md D12): report and analyze write separate files,
+// The HTML files (docs/DESIGN.md D12): report and analyze write separate files,
 // each complete from its own run, so neither overwrites the other.
 const (
 	defaultReportHTML   = ".pathkit/report.html"
@@ -102,7 +102,7 @@ func reportHTML(cmd *cobra.Command, m *measured, path string) func() error {
 		runs = htmlreport.AddRun(runs, htmlreport.Run{Time: t.UTC(), Paths: m.res.Paths, Covered: m.res.Covered,
 			InScope: len(inScope), Excluded: len(excluded), Scope: htmlreport.Fingerprint(inScope, excluded)})
 		page, err := htmlreport.Report(htmlreport.ReportInput{
-			Header: header(t, m.sc), Result: m.res, Threshold: m.threshold, ExcludedBy: m.excludedBy, Trend: runs,
+			Header: header(t, m.sc), Result: m.res, Threshold: m.threshold, ExcludedBy: m.excludedBy, Trend: runs, Classification: m.classView(), CustomLabels: m.customLabels,
 		})
 		if err != nil {
 			return err

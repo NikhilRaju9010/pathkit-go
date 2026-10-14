@@ -23,6 +23,9 @@ const (
 type exitError struct {
 	code int
 	msg  string
+	// detail lines are printed under the one error line, as they are (the
+	// CI check's list of paths); most errors have none.
+	detail []string
 }
 
 func (e *exitError) Error() string { return e.msg }
@@ -57,10 +60,17 @@ func exitCodeFor(err error) int {
 // subcommand is involved.
 func formatError(command string, err error) string {
 	msg := cleanMessage(err.Error())
+	line := "pathkit " + command + ": " + msg + "\n"
 	if command == "" {
-		return "pathkit: " + msg + "\n"
+		line = "pathkit: " + msg + "\n"
 	}
-	return "pathkit " + command + ": " + msg + "\n"
+	var ee *exitError
+	if errors.As(err, &ee) {
+		for _, d := range ee.detail {
+			line += d + "\n"
+		}
+	}
+	return line
 }
 
 // cleanMessage keeps PathKit errors to one line. Cobra's "unknown command"

@@ -11,10 +11,10 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
 
-// The answer key, testdata/pilot/EXPECTED.md, was written by hand in M1
+// The answer key, testdata/pilot/EXPECTED.md, was written by hand
 // before PathKit could analyze anything. This test reads it as-is.
 // RULE: never edit EXPECTED.md to make this test pass. If the analyzer and
-// the key disagree and the key looks wrong, stop and ask the project owner.
+// the key disagree and the key looks wrong, stop and ask.
 
 const expectedFile = "../../testdata/pilot/EXPECTED.md"
 
@@ -91,7 +91,7 @@ func TestPilotMatchesExpected(t *testing.T) {
 	}
 }
 
-// The child workflow step is labelled with the child's name (M4d: child
+// The child workflow step is labelled with the child's name (child
 // label end to end; the match above checks its exits).
 func TestPilotChildWorkflowLabel(t *testing.T) {
 	g := pilotGraph(t, "fulfillment.OrderFulfillmentWorkflow")

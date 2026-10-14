@@ -1,4 +1,18 @@
-<!DOCTYPE html>
+{{define "def"}}
+<dl>
+<dt>What it means</dt><dd>{{.Meaning}}</dd>
+<dt>Why</dt><dd>{{.Why}}</dd>
+<dt>Example</dt><dd>{{.Example}}{{if .ExampleWhere}}<br>From this run: <code>{{.ExampleWhere}}</code>: <code class="path">{{.ExampleText}}</code>{{end}}</dd>
+<dt>Possible in production?</dt><dd>{{.PossibleInProduction}}</dd>
+<dt>Bucket</dt><dd>{{if .Bucket}}{{.Bucket}}{{else}}(not set){{end}}</dd>
+<dt>Decided by</dt><dd>{{.DecidedBy}}{{if .Confidence}}, confidence {{.Confidence}}{{end}}{{if .Custom}} (a custom label from the config){{end}}</dd>
+{{- if .NotDetectedYet}}
+<dt>Detection</dt><dd><strong>Not detected yet.</strong> PathKit never sets this label by itself (see LIMITATIONS.md).{{if .PersonCanSet}} A person can use it with a mark or a rule in the config.{{else}} A person cannot set it either: marks and rules may only use cannot-be-tested labels. Deal with such a path by marking it testable or untestable by its stable id, as under "What to do".{{end}}</dd>
+{{- end}}
+<dt>What to do</dt><dd>{{.WhatToDo}}</dd>
+<dt>Paths in this run</dt><dd>{{.Count}}{{if .Uses}}: {{range $i, $u := .Uses}}{{if $i}}, {{end}}<a href="#{{$u.Anchor}}">{{$u.Text}}</a>{{end}}{{if .MoreUses}} and {{.MoreUses}} more{{end}}{{end}}</dd>
+</dl>
+{{- end}}<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -9,11 +23,22 @@
 <style>
 /*STYLE*/
 </style>
+{{- with .Glossary}}
+<style>
+/*GLOSSARYSTYLE*/
+</style>
+{{- end}}
 </head>
 <body>
 <main>
 <h1>{{.Title}}</h1>
 <p class="meta">Generated {{.Generated}} · {{.Folder}} · {{.ConfigNote}}</p>
+{{- with .CapHeadline}}
+<div class="cap-warning" role="alert" style="border:2px solid var(--high);border-radius:6px;padding:10px 14px;margin:0 0 16px;background:var(--card)"><strong>{{.}}</strong>{{range $.CapAdvice}}<br>{{.}}{{end}}</div>
+{{- end}}
+{{- with .Glossary}}
+<nav class="jump" aria-label="Jump to"><a href="#definitions">Definitions</a> · <a href="#audit">Detector audit ({{len .Audit}})</a></nav>
+{{- end}}
 
 <div class="tabs">
 <input type="radio" name="tab" id="tab-coverage"{{if .CoverageFirst}} checked{{end}}>
@@ -25,6 +50,10 @@
 {{- if .Measured}}
 <p class="total" data-total-paths="{{.TotalPaths}}" data-total-covered="{{.TotalCovered}}">{{.TotalLine}}</p>
 <p class="branches">{{.BranchesLine}}</p>
+{{- with .ClassLines}}
+<pre class="classification">{{range .}}{{.}}
+{{end}}</pre>
+{{- end}}
 {{- with .FailUnder}}
 <p class="fail-under" data-fail-under-passed="{{.Passed}}">{{.Text}}</p>
 {{- end}}
@@ -34,7 +63,7 @@
 <p class="stats">{{.Stats}}{{if .Truncated}} <span class="truncated">truncated</span>{{end}}</p>
 <ol class="paths">
 {{- range .Paths}}
-<li data-number="{{.Number}}" data-covered="{{.Covered}}"><span class="num">{{.Number}}.</span><code class="path">{{.Text}}</code>{{if .Covered}}<span class="mark covered">covered{{if .Stale}} (stale trace){{end}}</span>{{else}}<span class="mark missed">missed</span>{{end}}</li>
+<li{{with .Anchor}} id="{{.}}"{{end}} data-number="{{.Number}}" data-covered="{{.Covered}}"><span class="num">{{.Number}}.</span><code class="path">{{.Text}}</code>{{if .Covered}}<span class="mark covered">covered{{if .Stale}} (stale trace){{end}}</span>{{else}}<span class="mark missed">missed</span>{{end}}{{with .Tag}} <span class="tag" title="{{.Explanation}}">[<span class="bucket">{{.Bucket}}</span>: {{if .Link}}<a class="label" href="#def-{{.Label}}" title="{{.Meaning}}">{{.Label}}</a>{{else}}{{.Label}}{{end}} · {{.Source}}{{with .By}} · {{.}}{{end}}]</span>{{if .Explanation}} <details class="why"><summary>why</summary>{{.Explanation}}</details>{{end}}{{end}}</li>
 {{- end}}
 </ol>
 </article>
@@ -83,6 +112,64 @@
 </ul>
 {{- end}}
 </section>
+{{- with .Glossary}}
+
+<section class="audit" id="audit" data-audit="{{len .Audit}}">
+<h2>Detector audit</h2>
+<p class="note">Path links open on the Coverage tab.</p>
+<p>Every path a <strong>detector</strong> (not a rule and not a person) marked cannot-be-tested in this run, with the label and the reason. Spot-check these against the code: a wrong "impossible" hides a real gap.</p>
+{{- if .Audit}}
+<table class="audit-table">
+<thead><tr><th scope="col">Workflow</th><th scope="col">Path</th><th scope="col">Label</th><th scope="col">Detector</th><th scope="col">Confidence</th><th scope="col">Reason</th></tr></thead>
+<tbody>
+{{- range .Audit}}
+<tr data-audit-workflow="{{.Workflow}}" data-audit-path="{{.Number}}"><td>{{.Workflow}}</td><td><a href="#{{.Anchor}}">{{.Number}}</a></td><td><a class="label" href="#def-{{.Label}}">{{.Label}}</a></td><td>{{.Detector}}</td><td>{{.Confidence}}</td><td>{{.Reason}}<br><code class="path">{{.Path}}</code></td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p class="note">No path was marked cannot-be-tested by a detector in this run.</p>
+{{- end}}
+{{- if .AuditOther}}
+<p class="note">{{.AuditOther}} more {{if eq .AuditOther 1}}path was{{else}}paths were{{end}} sent by a detector to needs-review or needs-special-test (not counted above).</p>
+{{- end}}
+</section>
+
+<section class="definitions" id="definitions" data-definitions-version="{{.Version}}">
+<h2>Definitions</h2>
+{{- if .Summary}}
+<table class="summary-table">
+<caption>Labels used in this run</caption>
+<thead><tr><th scope="col">Label</th><th scope="col">Bucket</th><th scope="col">Paths</th><th scope="col">Automatic</th><th scope="col">Manual</th><th scope="col">Decided by</th></tr></thead>
+<tbody>
+{{- range .Summary}}
+<tr><td><a class="label" href="#def-{{.Label}}">{{.Label}}</a></td><td>{{.Bucket}}</td><td>{{.Count}}</td><td>{{.Auto}}</td><td>{{.Manual}}</td><td>{{.DecidedBy}}{{if .NotDetectedYet}} (not detected yet){{end}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- else}}
+<p class="note">No path in this run has a label.</p>
+{{- end}}
+{{- range .Used}}
+<article class="def" id="def-{{.Name}}" data-label="{{.Name}}" data-count="{{.Count}}">
+<h3>{{.Name}}</h3>
+{{template "def" .}}
+</article>
+{{- end}}
+{{- if .Unused}}
+<details class="unused">
+<summary>Labels not used in this run ({{len .Unused}})</summary>
+{{- range .Unused}}
+<article class="def" id="def-{{.Name}}" data-label="{{.Name}}" data-count="0">
+<h3>{{.Name}}</h3>
+{{template "def" .}}
+</article>
+{{- end}}
+</details>
+{{- end}}
+<p class="footer">Definitions version {{.Version}}</p>
+</section>
+{{- end}}
 </main>
 </body>
 </html>

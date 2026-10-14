@@ -1,6 +1,6 @@
 // Package scope reads .pathkitrc.json and decides which workflows count
-// (CLAUDE.md D8). Every command that needs a scope (analyze, pathkit test,
-// pathkit traces; coverage and report later) gets it from here, so they
+// (docs/DESIGN.md D8). Every command that needs a scope (analyze, pathkit test,
+// pathkit traces, coverage, report) gets it from here, so they
 // can never disagree about what is in scope.
 package scope
 
@@ -35,14 +35,20 @@ type Config struct {
 	HasInclude bool
 	Exclude    []Exclude
 
-	// Read and checked now, but used only when M6–M8 build their
-	// features. No command applies them yet, and none claims to.
+	// Used by coverage and report (failUnder, allowStale) and by report
+	// alone (out, json, noColor, html); analyze ignores them.
 	FailUnder  *float64
 	HTML       any // true/false, or a file path
 	Out        string
 	JSON       bool
 	NoColor    bool
 	AllowStale bool
+
+	// Classification is the "classification" section. Enabled turns on the
+	// path classification output (testable and overall coverage, the
+	// coverage basis); it is off by default, and without it PathKit prints
+	// exactly what it printed before.
+	Classification Classification
 }
 
 // Abs resolves a path written in the file against the file's folder.
@@ -116,6 +122,8 @@ type file struct {
 	JSON       *bool          `json:"json"`
 	NoColor    *bool          `json:"noColor"`
 	AllowStale *bool          `json:"allowStale"`
+
+	Classification *classificationPart `json:"classification"`
 }
 
 type workflowsPart struct {
@@ -141,6 +149,13 @@ func Read(path string) (*Config, error) {
 	}
 	fail := func(format string, args ...any) error {
 		return fmt.Errorf("%s: %s", abs, fmt.Sprintf(format, args...))
+	}
+	// Some Windows editors and PowerShell save a UTF-8 file with a
+	// three-byte "byte order mark" in front. It is not JSON, so skip it.
+	// A UTF-16 file (what PowerShell 5's ">" writes) cannot be read: say so.
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	if bytes.HasPrefix(data, []byte{0xff, 0xfe}) || bytes.HasPrefix(data, []byte{0xfe, 0xff}) {
+		return nil, fail("the file is saved as UTF-16; save it again as UTF-8 (in an editor, choose the \"UTF-8\" encoding)")
 	}
 
 	var f file
@@ -219,6 +234,13 @@ func Read(path string) (*Config, error) {
 	c.JSON = f.JSON != nil && *f.JSON
 	c.NoColor = f.NoColor != nil && *f.NoColor
 	c.AllowStale = f.AllowStale != nil && *f.AllowStale
+	if f.Classification != nil {
+		cl, err := readClassification(f.Classification, fail)
+		if err != nil {
+			return nil, err
+		}
+		c.Classification = cl
+	}
 	return c, nil
 }
 
@@ -241,7 +263,7 @@ func jsonProblem(data []byte, err error) string {
 		return "invalid JSON: the file ends too early (a missing } or ]?)"
 	}
 	if k, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-		return "unknown key " + k
+		return "unknown key " + k + "; check its spelling against section 8 of SETUP-GUIDE.md"
 	}
 	return err.Error()
 }

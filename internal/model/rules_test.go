@@ -73,8 +73,8 @@ func TestRules(t *testing.T) {
 		{"SleepAwaitErr", []string{"J1.failure|failed", "J1.success J2.failure|failed", "J1.success J2.success|completed"}},
 		{"FutureVariable", []string{"J1.failure|failed", "J1.success|completed"}},
 		{"TransparentPlainErr", []string{"|completed"}},
-		{"TransparentEqNil", []string{"J1.true|completed", "J1.false|completed"}}, // M1 finding 2
-		{"QueryHandlerErr", []string{"|completed"}},                               // M1 finding 1
+		{"TransparentEqNil", []string{"J1.true|completed", "J1.false|completed"}}, // no-error side is the true side
+		{"QueryHandlerErr", []string{"|completed"}},                               // a Temporal-package call not in the list
 		{"NearestAssignment", []string{"J1.failure|failed", "J1.success|completed"}},
 
 		{"IgnoredErrCheck", []string{"|completed"}},
@@ -259,7 +259,7 @@ func TestUnsupported(t *testing.T) {
 		{"UsesGoSelect", "select statement", "is not supported: Temporal workflows must use workflow.Selector instead of Go's select"},
 		{"UsesLabel", "goto", "is not supported: PathKit maps break, continue and return, but not goto"},
 
-		// Selector shapes PathKit can't map safely (M4c)
+		// Selector shapes PathKit can't map safely
 		{"SelectorFromParam", "workflow.Selector", "is not supported: the selector sel must be created in this function, with workflow.NewSelector or NewNamedSelector"},
 		{"SelectorFromHelper", "workflow.Selector", "is not supported: the selector sel must be created in this function, with workflow.NewSelector or NewNamedSelector"},
 		{"SelectorCreatedTwice", "workflow.Selector", "is not supported: the selector sel must be created exactly once, with workflow.NewSelector or NewNamedSelector"},

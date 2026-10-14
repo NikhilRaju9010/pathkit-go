@@ -50,6 +50,15 @@ func FunctionHash(fset *token.FileSet, fn *ast.FuncDecl) string {
 type Mismatch struct {
 	Step   int // 1-based step number, or 0 when the problem is at the end
 	Reason string
+	// Followed are the steps that did fit, in order (after loop folding),
+	// and At is where on the map the walk stood when the trace left it:
+	// what the unmatched-trace report shows ("followed the map ...; the
+	// map expected ..."). They come from this one walk, never a second.
+	Followed []Step
+	At       Target
+	// Bad is the exit the step that did not fit names (nil when the step
+	// is not an exit of this workflow, or the trace simply stopped).
+	Bad *Exit
 }
 
 func (m *Mismatch) Error() string { return m.Reason }
@@ -58,7 +67,7 @@ func (m *Mismatch) Error() string { return m.Reason }
 // matcher never compares two lists). It returns the path the trace took,
 // or a Mismatch naming the exact step that left the graph.
 //
-// It also applies the matcher half of the loop rule (CLAUDE.md D3): when
+// It also applies the matcher half of the loop rule (docs/DESIGN.md D3): when
 // the trace goes into a loop's body again (another "iterate" of a loop it
 // is already in), every step since that loop's previous "iterate" is
 // dropped, including the steps of loops nested inside it, and the walk
@@ -68,21 +77,30 @@ func (g *Graph) Match(steps []string) (Path, *Mismatch) {
 	at := g.Start
 	var path Path
 	iterateAt := map[*Junction]int{} // loop -> index of its kept "iterate" step
+	fail := func(n int, reason string) (Path, *Mismatch) {
+		mm := &Mismatch{Step: n, Reason: reason, Followed: append([]Step(nil), path.Steps...), At: at}
+		if n > 0 {
+			if e, ok := g.LookupEdge(steps[n-1]); ok {
+				mm.Bad = e
+			}
+		}
+		return Path{}, mm
+	}
 	for i, s := range steps {
 		n := i + 1
 		if at.Dead() {
-			return Path{}, &Mismatch{n, fmt.Sprintf("step %d %q comes after the path already went into a panic", n, s)}
+			return fail(n, fmt.Sprintf("step %d %q comes after the path already went into a panic", n, s))
 		}
 		if at.IsEnd() {
-			return Path{}, &Mismatch{n, fmt.Sprintf("step %d %q comes after the path already ended at %s", n, s, at.End)}
+			return fail(n, fmt.Sprintf("step %d %q comes after the path already ended at %s", n, s, at.End))
 		}
 		exit, ok := g.LookupEdge(s)
 		if !ok {
-			return Path{}, &Mismatch{n, fmt.Sprintf("step %d %q is not a junction exit in %s", n, s, g.Workflow)}
+			return fail(n, fmt.Sprintf("step %d %q is not a junction exit in %s", n, s, g.Workflow))
 		}
 		if r := at.Retry; r != nil {
 			if exit != r {
-				return Path{}, &Mismatch{n, fmt.Sprintf("step %d %q does not fit: the path goes round loop %s (%s) next, so %s comes first", n, s, r.Junction.ID, r.Junction.Label, r.ID)}
+				return fail(n, fmt.Sprintf("step %d %q does not fit: the path goes round loop %s (%s) next, so %s comes first", n, s, r.Junction.ID, r.Junction.Label, r.ID))
 			}
 			path.Steps = append(path.Steps, Step{Junction: r.Junction, Exit: r})
 			at = r.To
@@ -91,7 +109,7 @@ func (g *Graph) Match(steps []string) (Path, *Mismatch) {
 		// A retry is never chosen at a junction: only the end of a loop's
 		// body leads to it (handled above).
 		if exit.Junction != at.Junction || exit == exit.Junction.Retry {
-			return Path{}, &Mismatch{n, fmt.Sprintf("step %d %q does not fit: the path is at %s (%s)", n, s, at.Junction.ID, at.Junction.Label)}
+			return fail(n, fmt.Sprintf("step %d %q does not fit: the path is at %s (%s)", n, s, at.Junction.ID, at.Junction.Label))
 		}
 		if j := exit.Junction; j.Kind == Loop && exit.Label == "iterate" {
 			if k, again := iterateAt[j]; again {
@@ -109,11 +127,11 @@ func (g *Graph) Match(steps []string) (Path, *Mismatch) {
 	}
 	switch {
 	case at.Dead():
-		return Path{}, &Mismatch{0, "the trace ends in a panic, not at an end"}
+		return fail(0, "the trace ends in a panic, not at an end")
 	case at.Retry != nil:
-		return Path{}, &Mismatch{0, fmt.Sprintf("the trace stops before %s (going round loop %s) and never reaches an end", at.Retry.ID, at.Retry.Junction.ID)}
+		return fail(0, fmt.Sprintf("the trace stops before %s (going round loop %s) and never reaches an end", at.Retry.ID, at.Retry.Junction.ID))
 	case at.Junction != nil:
-		return Path{}, &Mismatch{0, fmt.Sprintf("the trace stops at %s (%s) before reaching an end", at.Junction.ID, at.Junction.Label)}
+		return fail(0, fmt.Sprintf("the trace stops at %s (%s) before reaching an end", at.Junction.ID, at.Junction.Label))
 	}
 	path.End = at.End
 	path.Compensation = g.compensationOn(path.Steps)

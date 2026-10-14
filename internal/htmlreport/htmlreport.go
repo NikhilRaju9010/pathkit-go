@@ -1,4 +1,4 @@
-// Package htmlreport writes PathKit's shareable HTML report (CLAUDE.md
+// Package htmlreport writes PathKit's shareable HTML report (docs/DESIGN.md
 // D12): one self-contained file with a Coverage tab and an Analysis tab.
 //
 // Rules:
@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/classify"
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"github.com/NikhilRaju9010/pathkit-go/internal/render"
@@ -34,8 +35,10 @@ var (
 	pageTemplate string
 	//go:embed style.css
 	style string
+	//go:embed glossary.css
+	glossaryStyle string
 
-	page = template.Must(template.New("page").Parse(strings.Replace(pageTemplate, "/*STYLE*/", style, 1)))
+	page = template.Must(template.New("page").Parse(strings.Replace(strings.Replace(pageTemplate, "/*STYLE*/", style, 1), "/*GLOSSARYSTYLE*/", glossaryStyle, 1)))
 )
 
 // Header is what the top of the page says about the run.
@@ -53,6 +56,22 @@ type ReportInput struct {
 	Threshold  *float64 // --fail-under or the config's failUnder; nil for none
 	ExcludedBy []string // render.ExcludedLine's sources
 	Trend      []Run    // oldest first, this run last
+	// Classification, when not nil, adds the classification block (the same
+	// lines the text report prints) and makes --fail-under use its basis.
+	Classification *render.ClassificationView
+	// CustomLabels are the config's custom label definitions, shown in the
+	// glossary next to the built-in ones.
+	CustomLabels []classify.Definition
+}
+
+// overallThreshold is the threshold for the overall figures: none when
+// the testable basis is the one --fail-under checks (see cli's
+// measured.overallThreshold).
+func overallThreshold(in ReportInput) *float64 {
+	if in.Classification != nil && in.Classification.Basis == coverage.BasisTestable {
+		return nil
+	}
+	return in.Threshold
 }
 
 // AnalysisWorkflow is one workflow as analyze lists it.
@@ -76,15 +95,19 @@ type AnalysisInput struct {
 type (
 	view struct {
 		Title, Generated, Folder, ConfigNote string
+		CapHeadline                          string   // set when a workflow reached the path cap
+		CapAdvice                            []string // what that means and what to do
 		CoverageFirst, Measured              bool
 		TotalPaths, TotalCovered             int
 		TotalLine, BranchesLine, TracesLine  string
+		ClassLines                           []string
 		FailUnder                            *failUnderView
 		Workflows                            []workflowView
 		ExcludedLine                         string
 		Excluded                             []scope.Excluded
 		Traces                               *coverage.Counts
 		Trend                                []trendView
+		Glossary                             *glossaryView
 	}
 	workflowView struct {
 		Name, File, Stats, TotalPathsLine, Priority string
@@ -95,6 +118,8 @@ type (
 	pathView struct {
 		Number         int
 		Text           string
+		Anchor         string
+		Tag            *tagView // how it was classified; nil for none
 		Covered, Stale bool
 	}
 	failUnderView struct {
@@ -114,7 +139,7 @@ func Report(in ReportInput) ([]byte, error) {
 	v := view{
 		Title: "PathKit report", CoverageFirst: true, Measured: true,
 		TotalPaths: res.Paths, TotalCovered: res.Covered,
-		TotalLine:    render.ProjectTotalLine(res, in.Threshold),
+		TotalLine:    render.ProjectTotalLine(res, overallThreshold(in)),
 		BranchesLine: render.BranchesLine(res),
 		TracesLine:   strings.TrimSuffix(render.TracesLine(res.Counts), "\n"),
 		ExcludedLine: strings.TrimSuffix(render.ExcludedLine(len(res.Excluded), in.ExcludedBy), ":"),
@@ -122,17 +147,34 @@ func Report(in ReportInput) ([]byte, error) {
 		Traces:       &res.Counts,
 	}
 	v.setHeader(in.Header)
+	if names := render.CapNames(res); len(names) > 0 {
+		v.CapHeadline, v.CapAdvice = render.CapHeadline(names), render.CapAdvice()
+	}
+	basis := coverage.BasisOverall
+	if in.Classification != nil {
+		basis = in.Classification.Basis
+		v.ClassLines = render.ClassificationLines(res, *in.Classification)
+	}
 	if in.Threshold != nil {
-		pct := coverage.Percent(res.Covered, res.Paths)
+		c := res.Breakdown.For(basis)
+		pct := coverage.Percent(c.Covered, c.Paths)
 		f := &failUnderView{Passed: pct >= *in.Threshold}
 		if f.Passed {
 			f.Text = "--fail-under " + render.Threshold(*in.Threshold) + ": passed (" + render.Pct(pct, in.Threshold) + ")"
 		} else {
 			f.Text = "--fail-under " + render.Threshold(*in.Threshold) + ": coverage " + render.Pct(pct, in.Threshold) + " is below it (exit code 2)"
 		}
+		if in.Classification != nil {
+			f.Text += " (basis: " + string(basis) + ")"
+		}
 		v.FailUnder = f
 	}
-	for _, w := range res.Workflows {
+	var defs map[string]classify.Definition
+	if in.Classification != nil {
+		v.Glossary = buildGlossary(res, in.CustomLabels)
+		_, defs = definitionsByName(in.CustomLabels)
+	}
+	for wi, w := range res.Workflows {
 		wv := workflowView{
 			Name: w.Name, File: filepath.ToSlash(w.File), AddedByConfig: w.AddedByConfig, Truncated: w.Truncated,
 			Stats: render.WorkflowStats(w), Covered: w.Covered, Total: len(w.Paths),
@@ -140,7 +182,12 @@ func Report(in ReportInput) ([]byte, error) {
 		}
 		wv.Priority, _ = coverage.Priority(w.Covered, len(w.Paths))
 		for _, p := range w.Paths {
-			wv.Paths = append(wv.Paths, pathView{Number: p.Number, Text: render.PathText(p.Path), Covered: p.Covered, Stale: p.StaleTrace})
+			pv := pathView{Number: p.Number, Text: render.PathText(p.Path), Covered: p.Covered, Stale: p.StaleTrace}
+			if in.Classification != nil {
+				pv.Anchor = useAnchor(wi, p.Number)
+				pv.Tag = tagFor(p.Class, defs)
+			}
+			wv.Paths = append(wv.Paths, pv)
 		}
 		v.Workflows = append(v.Workflows, wv)
 	}
@@ -163,6 +210,15 @@ func Analysis(in AnalysisInput) ([]byte, error) {
 		v.ExcludedLine = "No workflows excluded"
 	}
 	v.setHeader(in.Header)
+	var capped []string
+	for _, w := range in.Workflows {
+		if w.Paths.Truncated {
+			capped = append(capped, w.Name)
+		}
+	}
+	if len(capped) > 0 {
+		v.CapHeadline, v.CapAdvice = render.CapHeadline(capped), render.CapAdvice()
+	}
 	for _, w := range in.Workflows {
 		wv := workflowView{Name: w.Name, File: filepath.ToSlash(w.File), AddedByConfig: w.AddedByConfig, Truncated: w.Paths.Truncated,
 			Total: len(w.Paths.List), TotalPathsLine: render.TotalLine(w.Paths, model.DefaultMaxPaths)}
