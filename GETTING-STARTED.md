@@ -143,7 +143,7 @@ For the whole project at once, with a High/Medium/Low priority per workflow tell
 pathkit report ./...
 ```
 
-Add `--fail-under 80` to either command to make PathKit exit with code `2` when coverage is below that percentage — handy for CI. And add `--html` to `report` to get one shareable web page (`.pathkit/report.html`) you can open in a browser or send to a teammate — no server, no internet needed.
+Add `--fail-under 80` to either command to make PathKit exit with code `2` when coverage is below that percentage — handy for CI. And add `--html` to `report` to get one shareable web page (`.pathkit/report.html`) you can open in a browser or send to a teammate — a light, searchable page with a summary and one paginated table of paths per workflow, with no server and no internet needed.
 
 If you ever see `no trace files found ...`, it means the "run your tests" step (section 6) was skipped, or you ran plain `go test` instead of `pathkit test` — go back and re-run your tests through PathKit.
 

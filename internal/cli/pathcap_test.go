@@ -74,7 +74,7 @@ func TestNoPathCapWarningUnderTheCap(t *testing.T) {
 	}
 	page := filepath.Join(t.TempDir(), "r.html")
 	run(t, "report", pilot+"/orders", "--traces", traces, "--html="+page)
-	if strings.Contains(readFile(t, page), "cap-warning") {
+	if strings.Contains(readFile(t, page), `class="cap-warning"`) {
 		t.Errorf("HTML page has a cap warning under the cap")
 	}
 }

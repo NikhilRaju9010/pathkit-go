@@ -16,94 +16,154 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-PKSCRIPTHASH'; img-src data:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
 <meta name="generator" content="pathkit-go">
 <title>{{.Title}}</title>
 <style>
 /*STYLE*/
 </style>
-{{- with .Glossary}}
-<style>
-/*GLOSSARYSTYLE*/
-</style>
-{{- end}}
 </head>
 <body>
-<main>
+<a class="skip" href="#main">Skip to the content</a>
+<header class="top">
 <h1>{{.Title}}</h1>
-<p class="meta">Generated {{.Generated}} · {{.Folder}} · {{.ConfigNote}}</p>
+<p class="meta" data-meta>Generated {{.Generated}} · {{.Folder}} · {{.ConfigNote}} · PathKit {{.Version}}</p>
+</header>
+<div class="bar">
+<div class="barin">
+<nav aria-label="Sections">
+<a href="#summary">Summary</a>
+<a href="#workflows">Workflows</a>
+<a href="#paths">Paths</a>
+{{- if .Glossary}}
+<a href="#definitions">Glossary</a>
+<a href="#audit">Detector audit ({{len .Glossary.Audit}})</a>
+{{- end}}
+</nav>
+<div class="search" hidden>
+<label class="sr" for="q">Search paths by id or text</label>
+<input id="q" type="search" placeholder="Search paths (id or text)" autocomplete="off">
+</div>
+</div>
+</div>
+<main id="main">
 {{- with .CapHeadline}}
-<div class="cap-warning" role="alert" style="border:2px solid var(--high);border-radius:6px;padding:10px 14px;margin:0 0 16px;background:var(--card)"><strong>{{.}}</strong>{{range $.CapAdvice}}<br>{{.}}{{end}}</div>
-{{- end}}
-{{- with .Glossary}}
-<nav class="jump" aria-label="Jump to"><a href="#definitions">Definitions</a> · <a href="#audit">Detector audit ({{len .Audit}})</a></nav>
+<div class="cap-warning" role="alert"><strong>{{.}}</strong>{{range $.CapAdvice}}<br>{{.}}{{end}}</div>
 {{- end}}
 
-<div class="tabs">
-<input type="radio" name="tab" id="tab-coverage"{{if .CoverageFirst}} checked{{end}}>
-<label for="tab-coverage">Coverage</label>
-<input type="radio" name="tab" id="tab-analysis"{{if not .CoverageFirst}} checked{{end}}>
-<label for="tab-analysis">Analysis</label>
-
-<section class="panel" id="panel-coverage">
+<section id="summary" aria-labelledby="h-summary">
+<h2 id="h-summary">Summary</h2>
 {{- if .Measured}}
 <p class="total" data-total-paths="{{.TotalPaths}}" data-total-covered="{{.TotalCovered}}">{{.TotalLine}}</p>
 <p class="branches">{{.BranchesLine}}</p>
+{{- end}}
+<div class="cards">
+{{- range .Cards}}
+<div class="stat" data-card="{{.Key}}" data-covered="{{.Covered}}" data-total="{{.Total}}">
+<div class="k">{{.Title}}</div>
+<div class="v">{{.Value}}</div>
+<div class="s">{{.Sub}}</div>
+</div>
+{{- end}}
+</div>
+<p class="explain">{{.Explain}}</p>
+{{- if .Buckets}}
+<h3>Paths by bucket</h3>
+<div class="stack" role="img" aria-label="Paths by bucket">
+{{- range .Buckets}}{{if .Paths}}<span class="bk-{{.Key}}" style="width:{{printf "%.3f" .Width}}%"></span>{{end}}{{end}}
+</div>
+<ul class="legend">
+{{- range .Buckets}}
+<li data-bucket="{{.Key}}" data-paths="{{.Paths}}" data-covered="{{.Covered}}"><span class="sw b-{{.Key}}"></span>{{.Name}}: <strong>{{.Paths}}</strong></li>
+{{- end}}
+</ul>
+{{- end}}
 {{- with .ClassLines}}
+<details class="plain"><summary>Classification details (the same lines as the text report)</summary>
 <pre class="classification">{{range .}}{{.}}
 {{end}}</pre>
+</details>
 {{- end}}
 {{- with .FailUnder}}
 <p class="fail-under" data-fail-under-passed="{{.Passed}}">{{.Text}}</p>
 {{- end}}
-{{- range .Workflows}}
-<article class="card" data-workflow="{{.Name}}" data-covered="{{.Covered}}" data-paths="{{.Total}}" data-priority="{{.Priority}}" data-truncated="{{.Truncated}}">
-<header><h3>{{.Name}}</h3>{{if .AddedByConfig}}<span class="added">added by config</span>{{end}}<span class="file">{{.File}}</span>{{if .Priority}}<span class="badge prio-{{.Priority}}">{{.Priority}}</span>{{end}}</header>
-<p class="stats">{{.Stats}}{{if .Truncated}} <span class="truncated">truncated</span>{{end}}</p>
-<ol class="paths">
-{{- range .Paths}}
-<li{{with .Anchor}} id="{{.}}"{{end}} data-number="{{.Number}}" data-covered="{{.Covered}}"><span class="num">{{.Number}}.</span><code class="path">{{.Text}}</code>{{if .Covered}}<span class="mark covered">covered{{if .Stale}} (stale trace){{end}}</span>{{else}}<span class="mark missed">missed</span>{{end}}{{with .Tag}} <span class="tag" title="{{.Explanation}}">[<span class="bucket">{{.Bucket}}</span>: {{if .Link}}<a class="label" href="#def-{{.Label}}" title="{{.Meaning}}">{{.Label}}</a>{{else}}{{.Label}}{{end}} · {{.Source}}{{with .By}} · {{.}}{{end}}]</span>{{if .Explanation}} <details class="why"><summary>why</summary>{{.Explanation}}</details>{{end}}{{end}}</li>
+</section>
+
+<section id="workflows" aria-labelledby="h-workflows">
+<h2 id="h-workflows">Workflows</h2>
+{{- if .Workflows}}
+<div class="tablebox">
+<table class="over">
+<thead><tr><th scope="col">Workflow</th><th scope="col">File</th>{{if .Measured}}<th scope="col">Priority</th><th scope="col">Coverage</th><th scope="col">Missed</th>{{end}}<th scope="col">Paths</th></tr></thead>
+<tbody>
+{{- range $i, $w := .Workflows}}
+<tr data-overview="{{$w.Name}}">
+<td data-label="Workflow"><a href="#wf-{{$i}}">{{$w.Name}}</a>{{if $w.AddedByConfig}} <span class="added">added by config</span>{{end}}</td>
+<td data-label="File" class="file">{{$w.File}}</td>
+{{- if $.Measured}}
+<td data-label="Priority">{{if $w.Priority}}<span class="badge prio-{{$w.Priority}}">{{$w.Priority}}</span>{{else}}no paths{{end}}</td>
+<td data-label="Coverage"><span class="bar-mini" aria-hidden="true"><i style="width:{{printf "%.1f" $w.Width}}%"></i></span> {{$w.Covered}} of {{$w.Total}} · {{$w.Pct}}</td>
+<td data-label="Missed">{{$w.Missed}}</td>
 {{- end}}
-</ol>
-</article>
+<td data-label="Paths">{{$w.Total}}{{if $w.Truncated}}+ <span class="truncated">truncated</span>{{end}}</td>
+</tr>
 {{- end}}
+</tbody>
+</table>
+</div>
 {{- else}}
+<p class="note">No workflows in scope.</p>
+{{- end}}
+</section>
+
+<section id="paths" aria-labelledby="h-paths">
+<h2 id="h-paths">Paths</h2>
+{{- if not .Measured}}
 <p class="note">Not measured. This page comes from <code>pathkit analyze</code>, which maps the paths but doesn't read test runs. Run <code>pathkit test</code>, then <code>pathkit report --html</code>, for coverage.</p>
 {{- end}}
+<p class="jsnote" role="note">The path tables need JavaScript. The summary, the workflow overview and the glossary on this page work without it.</p>
+{{- range $i, $w := .Workflows}}
+<details class="wf" id="wf-{{$i}}"{{if $w.Open}} open{{end}} data-workflow="{{$w.Name}}" data-covered="{{$w.Covered}}" data-paths="{{$w.Total}}" data-priority="{{$w.Priority}}" data-truncated="{{$w.Truncated}}">
+<summary><h3>{{$w.Name}}</h3>{{if $w.AddedByConfig}}<span class="added">added by config</span>{{end}}{{if $w.Priority}}<span class="badge prio-{{$w.Priority}}">{{$w.Priority}}</span>{{end}}{{if $.Measured}}<span class="bar-mini" aria-hidden="true"><i style="width:{{printf "%.1f" $w.Width}}%"></i></span><span>{{$w.Covered}} of {{$w.Total}} covered</span>{{else}}<span>{{$w.Total}} paths</span>{{end}}<span class="match" id="match-{{$i}}"></span></summary>
+<div class="wbody">
+<p class="file">{{$w.File}}</p>
+<p class="stats">{{if $.Measured}}{{$w.Stats}}{{else}}{{$w.TotalPathsLine}}{{end}}{{if $w.Truncated}} <span class="truncated">truncated</span>{{end}}</p>
+<div class="pt" data-pt="{{$i}}"></div>
+</div>
+</details>
+{{- end}}
+</section>
 
+{{- if .Measured}}
+<section class="run" aria-labelledby="h-run">
+<h2 id="h-run">Run details</h2>
 {{- with .Traces}}
 <p class="traces" data-read="{{.Read}}" data-counted="{{.Counted}}" data-unmatched="{{.Unmatched}}" data-stale="{{.Stale}}" data-incomplete="{{.Incomplete}}" data-excluded-traces="{{.Excluded}}" data-unknown="{{.Unknown}}" data-unreadable="{{.Unreadable}}" data-other="{{.Other}}">{{$.TracesLine}}</p>
 {{- end}}
-{{- if .Measured}}
-<section class="trend">
-<h2>Trend (last {{len .Trend}} report {{if eq (len .Trend) 1}}run{{else}}runs{{end}})</h2>
+<div class="excluded" data-excluded="{{len .Excluded}}">
+<h3>{{.ExcludedLine}}</h3>
+{{- if .Excluded}}
+<ul>
+{{- range .Excluded}}
+<li data-excluded-workflow="{{.Name}}"><code>{{.Name}}</code>: <span class="reason">{{.Reason}}</span></li>
+{{- end}}
+</ul>
+{{- end}}
+</div>
+<div class="trend">
+<h3>Trend (last {{len .Trend}} report {{if eq (len .Trend) 1}}run{{else}}runs{{end}})</h3>
 <ol>
 {{- range .Trend}}
 <li data-trend-covered="{{.Covered}}" data-trend-paths="{{.Paths}}">{{.Time}} · {{.Covered}}/{{.Paths}} · {{.Pct}} <meter min="0" max="100" value="{{.Percent}}">{{.Pct}}</meter>{{with .ScopeChanged}} <span class="scope-changed">{{.}}</span>{{end}}</li>
 {{- end}}
 </ol>
-</section>
-{{- end}}
-</section>
-
-<section class="panel" id="panel-analysis">
-{{- range .Workflows}}
-<article class="card" data-analysis-workflow="{{.Name}}">
-<header><h3>{{.Name}}</h3>{{if .AddedByConfig}}<span class="added">added by config</span>{{end}}<span class="file">{{.File}}</span></header>
-<p class="stats">{{.TotalPathsLine}}{{if .Truncated}} <span class="truncated">truncated</span>{{end}}</p>
-<ol class="paths">
-{{- range .Paths}}
-<li data-number="{{.Number}}"><span class="num">{{.Number}}.</span><code class="path">{{.Text}}</code></li>
-{{- end}}
-</ol>
-</article>
-{{- end}}
-</section>
 </div>
-
-<section class="excluded" data-excluded="{{len .Excluded}}">
-<h2>{{.ExcludedLine}}</h2>
+</section>
+{{- else}}
+<section class="excluded" data-excluded="{{len .Excluded}}" aria-labelledby="h-excl">
+<h2 id="h-excl">{{.ExcludedLine}}</h2>
 {{- if .Excluded}}
 <ul>
 {{- range .Excluded}}
@@ -112,32 +172,15 @@
 </ul>
 {{- end}}
 </section>
+{{- end}}
+
 {{- with .Glossary}}
 
-<section class="audit" id="audit" data-audit="{{len .Audit}}">
-<h2>Detector audit</h2>
-<p class="note">Path links open on the Coverage tab.</p>
-<p>Every path a <strong>detector</strong> (not a rule and not a person) marked cannot-be-tested in this run, with the label and the reason. Spot-check these against the code: a wrong "impossible" hides a real gap.</p>
-{{- if .Audit}}
-<table class="audit-table">
-<thead><tr><th scope="col">Workflow</th><th scope="col">Path</th><th scope="col">Label</th><th scope="col">Detector</th><th scope="col">Confidence</th><th scope="col">Reason</th></tr></thead>
-<tbody>
-{{- range .Audit}}
-<tr data-audit-workflow="{{.Workflow}}" data-audit-path="{{.Number}}"><td>{{.Workflow}}</td><td><a href="#{{.Anchor}}">{{.Number}}</a></td><td><a class="label" href="#def-{{.Label}}">{{.Label}}</a></td><td>{{.Detector}}</td><td>{{.Confidence}}</td><td>{{.Reason}}<br><code class="path">{{.Path}}</code></td></tr>
-{{- end}}
-</tbody>
-</table>
-{{- else}}
-<p class="note">No path was marked cannot-be-tested by a detector in this run.</p>
-{{- end}}
-{{- if .AuditOther}}
-<p class="note">{{.AuditOther}} more {{if eq .AuditOther 1}}path was{{else}}paths were{{end}} sent by a detector to needs-review or needs-special-test (not counted above).</p>
-{{- end}}
-</section>
-
-<section class="definitions" id="definitions" data-definitions-version="{{.Version}}">
-<h2>Definitions</h2>
+<section class="definitions" id="definitions" data-definitions-version="{{.Version}}" aria-labelledby="h-def">
+<h2 id="h-def">Glossary</h2>
+<p class="note">Click a label anywhere on this page to jump to its definition.</p>
 {{- if .Summary}}
+<div class="tablebox">
 <table class="summary-table">
 <caption>Labels used in this run</caption>
 <thead><tr><th scope="col">Label</th><th scope="col">Bucket</th><th scope="col">Paths</th><th scope="col">Automatic</th><th scope="col">Manual</th><th scope="col">Decided by</th></tr></thead>
@@ -147,6 +190,7 @@
 {{- end}}
 </tbody>
 </table>
+</div>
 {{- else}}
 <p class="note">No path in this run has a label.</p>
 {{- end}}
@@ -169,7 +213,25 @@
 {{- end}}
 <p class="footer">Definitions version {{.Version}}</p>
 </section>
+
+<section class="audit" id="audit" data-audit="{{len .Audit}}" aria-labelledby="h-audit">
+<h2 id="h-audit">Detector audit</h2>
+<p>Every path a <strong>detector</strong> (not a rule and not a person) marked cannot-be-tested in this run, with the label and the reason. Spot-check these against the code: a wrong "impossible" hides a real gap. The path number opens the path in its workflow.</p>
+{{- if .Audit}}
+<div id="audit-root"></div>
+<p class="jsnote" role="note">The detector audit table needs JavaScript. It lists {{len .Audit}} paths.</p>
+{{- else}}
+<p class="note">No path was marked cannot-be-tested by a detector in this run.</p>
+{{- end}}
+{{- if .AuditOther}}
+<p class="note">{{.AuditOther}} more {{if eq .AuditOther 1}}path was{{else}}paths were{{end}} sent by a detector to needs-review or needs-special-test (not counted above).</p>
+{{- end}}
+</section>
 {{- end}}
 </main>
+<script id="pk-data" type="application/json">{{.Data}}</script>
+<script id="pk-code">
+/*SCRIPT*/
+</script>
 </body>
 </html>

@@ -289,11 +289,20 @@ func TestClassificationOnPilot(t *testing.T) {
 			t.Fatalf("html: %d %s", code, stderr)
 		}
 		page, _ := os.ReadFile(htmlFile)
-		// The label is a link to its definition, with the source and the
-		// rule id next to it.
+		// The path's row (in the page's data) carries the label, the source
+		// and the rule id; the label has a definition in the page.
+		var found pageRow
+		for _, w := range pageWorkflows(t, string(page)) {
+			for _, r := range w.Rows {
+				if r.Label == "loop-minimum" {
+					found = r
+				}
+			}
+		}
+		if found.Bucket != "cannot-be-tested" || found.By != `manual · rule "polling-no-poll"` {
+			t.Errorf("the page's row for the rule's path: %+v", found)
+		}
 		for _, want := range []string{
-			`[<span class="bucket">cannot-be-tested</span>: <a class="label" href="#def-loop-minimum"`,
-			`>loop-minimum</a> · manual · rule &#34;polling-no-poll&#34;]</span>`,
 			`<section class="definitions" id="definitions"`,
 			`<article class="def" id="def-loop-minimum"`,
 		} {
