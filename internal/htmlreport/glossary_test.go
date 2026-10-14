@@ -1,6 +1,7 @@
 package htmlreport
 
 import (
+	"fmt"
 	"html"
 	"regexp"
 	"strings"
@@ -53,12 +54,12 @@ func ids(page string) map[string]int {
 	return out
 }
 
-// The classified page is still one self-contained file: no scripts, no
-// outside addresses; the only links are inside the page.
+// The classified page is still one self-contained file: no outside
+// addresses; the only links are inside the page.
 func TestGlossaryPageIsSelfContained(t *testing.T) {
 	page := mustReport(t, classified())
 	lower := strings.ToLower(page)
-	for _, bad := range []string{"<script", "<link", "@import", "http:", "https:", "<iframe", "<img", "<object", "<embed", " src="} {
+	for _, bad := range []string{"<link", "@import", "http:", "https:", "<iframe", "<img", "<object", "<embed", " src="} {
 		if strings.Contains(lower, bad) {
 			t.Errorf("page contains %q", bad)
 		}
@@ -73,7 +74,9 @@ func TestGlossaryPageIsSelfContained(t *testing.T) {
 	}
 }
 
-// Every link in the page lands on something, and no id is used twice.
+// Every link in the page lands on something, and no id is used twice. A
+// link to a path ("#use-<workflow>-<path>") lands on the path's row, which
+// the script draws: it must name a workflow and a path number in the data.
 func TestEveryLinkHasATarget(t *testing.T) {
 	page := mustReport(t, classified())
 	have := ids(page)
@@ -82,64 +85,70 @@ func TestEveryLinkHasATarget(t *testing.T) {
 			t.Errorf("id %q is used %d times", id, n)
 		}
 	}
+	d := decodeData(t, page)
 	links := regexp.MustCompile(`href="#([^"]*)"`).FindAllStringSubmatch(page, -1)
 	if len(links) < 10 {
 		t.Fatalf("only %d links; the page is missing its glossary", len(links))
 	}
 	for _, l := range links {
-		if have[html.UnescapeString(l[1])] == 0 {
-			t.Errorf("link #%s has no target", l[1])
+		id := html.UnescapeString(l[1])
+		if have[id] > 0 {
+			continue
 		}
+		var wi, num int
+		if n, _ := fmt.Sscanf(id, "use-%d-%d", &wi, &num); n == 2 && wi >= 1 && wi <= len(d.W) && num >= 1 && num <= len(d.W[wi-1].R) {
+			continue
+		}
+		t.Errorf("link #%s has no target", l[1])
 	}
 }
 
-// Rule id, source and detector name stand next to each label.
+// Rule id, source and detector name stand with each path: in the data the
+// page draws from.
 func TestTagsShowSourceRuleAndDetector(t *testing.T) {
-	page := mustReport(t, classified())
-	li := func(n string) string {
-		m := regexp.MustCompile(`(?s)<li id="use-1-` + n + `".*?</li>`).FindString(page)
-		if m == "" {
-			t.Fatalf("path %s not found", n)
-		}
-		return html.UnescapeString(m)
+	d := decodeData(t, mustReport(t, classified()))
+	row := func(n int) (bucket, label, by string) {
+		r := d.W[0].R[n-1]
+		return d.str(r[3]), d.str(r[4]), d.str(r[5])
 	}
-	for n, wants := range map[string][]string{
-		"2": {`href="#def-closed-signal-channel"`, "cannot-be-tested", "auto", "detector closed-signal-channel"},
-		"3": {`href="#def-loop-minimum"`, "manual", `rule "r1"`},
-		"4": {`href="#def-history-limit"`, "needs-special-test", "detector history-limit"},
-		"5": {`href="#def-my-label"`, "manual", "config override"},
-		"6": {`href="#def-needs-review"`, "needs-review", "detector closed-signal-channel"},
+	for n, want := range map[int][3]string{
+		1: {"testable", "", ""},
+		2: {"cannot-be-tested", "closed-signal-channel", "auto · detector closed-signal-channel"},
+		3: {"cannot-be-tested", "loop-minimum", `manual · rule "r1"`},
+		4: {"needs-special-test", "history-limit", "auto · detector history-limit"},
+		5: {"cannot-be-tested", "my-label", "manual · config override"},
+		6: {"needs-review", "needs-review", "auto · detector closed-signal-channel"},
 	} {
-		got := li(n)
-		for _, w := range wants {
-			if !strings.Contains(got, w) {
-				t.Errorf("path %s lacks %q:\n%s", n, w, got)
-			}
+		b, l, by := row(n)
+		if b != want[0] || l != want[1] || by != want[2] {
+			t.Errorf("path %d: bucket %q label %q by %q, want %q", n, b, l, by, want)
 		}
-	}
-	if strings.Contains(li("1"), `class="tag"`) {
-		t.Error("a plain testable path must not have a tag")
 	}
 }
 
 // The audit lists only paths a detector marked cannot-be-tested.
 func TestDetectorAudit(t *testing.T) {
 	page := mustReport(t, classified())
-	rows := regexp.MustCompile(`data-audit-path="(\d+)"`).FindAllStringSubmatch(page, -1)
-	if len(rows) != 1 || rows[0][1] != "2" {
-		t.Fatalf("audit rows = %v, want only path 2 (not the rule's, not needs-review)", rows)
+	d := decodeData(t, page)
+	if len(d.A) != 1 || int(d.A[0][1].(float64)) != 2 {
+		t.Fatalf("audit rows = %v, want only path 2 (not the rule's, not needs-review)", d.A)
+	}
+	if got := d.str(d.A[0][2]); got != "closed-signal-channel" {
+		t.Errorf("audit label = %q", got)
 	}
 	if !strings.Contains(page, `data-audit="1"`) {
 		t.Error("audit count missing")
 	}
-	section := page[strings.Index(page, `id="audit"`):strings.Index(page, `id="definitions"`)]
-	for _, want := range []string{"closed-signal-channel", "certain", "takes the closed side"} {
-		if !strings.Contains(section, want) {
-			t.Errorf("audit lacks %q", want)
-		}
-	}
+	section := page[strings.Index(page, `id="audit"`):]
+	section = section[:strings.Index(section, "</section>")]
 	if !strings.Contains(section, "2 more paths were sent by a detector to needs-review or needs-special-test") {
 		t.Errorf("the other detector decisions are not counted: %s", section)
+	}
+	if got := d.str(d.A[0][4]); got != "certain" {
+		t.Errorf("audit confidence = %q", got)
+	}
+	if got := d.str(d.A[0][5]); !strings.Contains(got, "takes the closed side") {
+		t.Errorf("audit reason = %q", got)
 	}
 }
 
@@ -217,7 +226,7 @@ func TestFooterVersionAndExample(t *testing.T) {
 // With classification off the page has no glossary, audit or extra styles.
 func TestNoGlossaryWithoutClassification(t *testing.T) {
 	page := mustReport(t, sample("p.W", "p/w.go", "why"))
-	for _, s := range []string{`id="definitions"`, `id="audit"`, "Definitions version", `class="jump"`, "def-"} {
+	for _, s := range []string{`id="definitions"`, `id="audit"`, "Definitions version", `class="jump"`, `id="def-`} {
 		if strings.Contains(page, s) {
 			t.Errorf("page has %q with classification off", s)
 		}

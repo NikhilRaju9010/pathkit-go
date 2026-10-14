@@ -441,13 +441,13 @@ If two folders each have a package called `dup` with a workflow `Work`, PathKit 
 
 ### The HTML report's glossary and detector audit (path classification)
 
-When the classification block is shown (`--coverage-basis`, or `"classification": {"enabled": true}`), `report --html` adds, at the bottom of the page and linked from the top ("Definitions", "Detector audit"):
+When the classification block is shown (`--coverage-basis`, or `"classification": {"enabled": true}`), `report --html` adds, below the paths and linked from the bar at the top ("Glossary", "Detector audit"):
 
-- **A label is a link.** Every label next to a path jumps to its definition. Next to the label stand the **bucket**, the **source** (`auto` or `manual`) and who decided: `detector <name>`, `rule "<id>"`, `config override`, or `//pathkit:untestable`. Hover for the one-line meaning; the path's tag hover shows PathKit's reason. Everything is plain text as well as colour, and links are keyboard focusable.
+- **A label is a link.** Every label in the summary table, the audit and the definitions jumps to its definition. In a path's details row stand the **bucket**, the **label**, who decided (`auto` or `manual`, then `detector <name>`, `rule "<id>"`, `config override`, or `//pathkit:untestable`) and PathKit's reason. Everything is plain text as well as colour, and links and buttons are keyboard focusable.
 - **Definitions.** For each label used in the run: what it means, why, an example (and a real example from this run), whether it is possible in production, who decides and how sure, what to do, how many paths have it, and links to those paths (the first 10). Labels not used in this run are in a collapsed group. A label PathKit never sets by itself is marked **"Not detected yet"** (the list is in LIMITATIONS.md; a test keeps the two in step). Custom labels from the config are listed too; the built-in text never changes. The footer shows the **definitions version**, a short hash of the wording, so a saved report says which wording it used.
-- **Detector audit.** A table of every path that a **detector** (not a rule and not a person) marked **cannot-be-tested**, with its label, detector, confidence and one-line reason, so you can spot-check the automatic decisions against the code. Paths a detector sent to needs-review or needs-special-test are counted below the table.
+- **Detector audit.** A paginated table of every path that a **detector** (not a rule and not a person) marked **cannot-be-tested**, with its label, detector, confidence and one-line reason, so you can spot-check the automatic decisions against the code. The path number opens the path in its workflow. Paths a detector sent to needs-review or needs-special-test are counted below the table.
 
-The page still has no script, loads nothing and uses only links inside the page. With classification off the page is exactly what it was before.
+The page loads nothing and uses only links inside the page. With classification off there is no glossary, no audit, and no bucket or label columns.
 
 **`--fail-under` and the basis.** Until classification is switched on, `--fail-under` checks overall coverage, exactly as before. With `--coverage-basis`, or with classification enabled in the config (then the default basis is `testable`), it checks the basis you chose, and the report and the exit-code message say which: `coverage 66.7% is below --fail-under 70% (basis: testable)`. The JSON always says (`coverageBasis`, `failUnder.basis`).
 
@@ -695,20 +695,20 @@ pathkit analyze ./... --html         # writes .pathkit/analysis.html (the map on
 
 Open the file in your browser: double-click it, or run `xdg-open .pathkit/report.html` (Linux), `open .pathkit/report.html` (macOS), or `start .pathkit\report.html` (Windows).
 
-**What's on it.** Two tabs:
-- **Coverage** (shown first):
-  - the project total and branch coverage, worded exactly like the terminal;
-  - for each workflow: its file, its **High/Medium/Low label** (the word and a colour), the stats line, and every numbered path marked `covered` or `missed`, with `truncated` when the list was cut at 2000 paths;
-  - the `--fail-under` result, if you set one;
-  - the `Traces:` counts;
-  - the **trend**.
-- **Analysis:** the same workflows and paths, with the same numbers `pathkit analyze` prints, and no coverage marks.
+**What's on it,** top to bottom:
+- **Header:** the folder, the time, the config used and the PathKit version.
+- **A bar** with links to *Summary*, *Workflows*, *Paths*, *Glossary* and *Detector audit*, and a **search box** that looks in every path table (by path id, label, reason or the text of the path).
+- **Summary:** the project total and branch coverage, worded exactly like the terminal; five cards (**testable coverage**, **overall coverage**, **paths**, **covered**, **missed**) with one plain sentence saying what testable and overall mean; and, with classification on, one bar and a count for each of the four buckets.
+- **Workflows:** one row per workflow with its file, its **High/Medium/Low label** (the word as well as the colour), its coverage and how many paths it has (`truncated` when the list was cut at 2000 paths).
+- **Paths:** one collapsible block per workflow with a table of its paths: number, path id (with a **Copy** button), **Covered** or **Missed** (a mark and a word), bucket, reason label, a short explanation, and a **Show** button for the details and the path step by step. Filters for status, bucket and label; click a column heading to sort; **25, 50 or 100 rows per page**, with Prev, Next and page numbers. Filters, search and paging work together.
+- **Run details:** the `--fail-under` result if you set one, the `Traces:` counts, the excluded workflows with their reasons and the **trend**.
+- **Glossary** and **Detector audit** (see the classification section).
 
-The excluded workflows and their reasons are listed below the tabs. `report --html` fills both tabs from one run, so path 3 on the Coverage tab is always path 3 on the Analysis tab.
+The page is light only, fits a phone, a tablet or a desktop, and prints. It is drawn by a small script from the data in the file, so a project with thousands of paths still opens at once and the file stays small. Without JavaScript the summary, the workflow list, the run details and the glossary still show, and a note says the path tables need JavaScript.
 
-**Safe to send, works offline.** The page is a single file with everything inside it. It has no JavaScript, and no fonts, images or stylesheets from the internet. It also tells the browser to refuse any network request. Everything that comes from your code or config (workflow names, conditions such as `if decision == "approved"`, file paths, exclusion reasons) is escaped, so it's shown exactly as written and can never act as HTML.
+**Safe to send, works offline.** The page is a single file with everything inside it. It loads no fonts, images, stylesheets or scripts from the internet, and it tells the browser to refuse any network request and to run only its own script. Everything that comes from your code or config (workflow names, conditions such as `if decision == "approved"`, file paths, exclusion reasons) is escaped, so it's shown exactly as written and can never act as HTML or script.
 
-**`analyze --html` and `report --html` write separate files** (`analysis.html` and `report.html`), each complete from its own run, so neither overwrites the other. The `analyze` page says "Not measured" on its Coverage tab.
+**`analyze --html` and `report --html` write separate files** (`analysis.html` and `report.html`), each complete from its own run, so neither overwrites the other. The `analyze` page lists the paths and says "Not measured".
 
 **The trend.** Each `report --html` run adds a line to a small file, `report-history.json`, **next to the HTML file**, and the page shows the last 5 runs: time, covered/total, and a bar. If the set of counted workflows changed since the run before (for example you excluded one), that line says `scope changed: 7 in scope, 1 excluded`, so a jump in % that only comes from excluding something is visible.
 - A run that fails (exit code 1) adds nothing. A run below `--fail-under` (exit code 2) still writes the page and adds its line.

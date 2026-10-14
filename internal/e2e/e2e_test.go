@@ -810,7 +810,7 @@ func TestCoverageMatchesKey(t *testing.T) {
 		}
 	})
 
-	// D5: the Analysis tab numbers every path exactly as analyze
+	// D5: the page numbers every path exactly as analyze
 	// does (report.html's and analysis.html's alike).
 	t.Run("same path numbers as analyze", func(t *testing.T) {
 		text, _, code := pathkit(t, "analyze", pilot+"/...")
@@ -826,9 +826,9 @@ func TestCoverageMatchesKey(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := analysisTab(string(page))
+			got := analysisTab(t, string(page))
 			if len(got) != 8 || !reflect.DeepEqual(got, want) {
-				t.Errorf("%s: the Analysis tab differs from analyze\n got %v\nwant %v", filepath.Base(file), got, want)
+				t.Errorf("%s: the page differs from analyze\n got %v\nwant %v", filepath.Base(file), got, want)
 			}
 		}
 	})
@@ -850,19 +850,81 @@ func analyzeListing(text string) map[string][]string {
 }
 
 var (
-	analysisCardRe = regexp.MustCompile(`(?s)<article class="card" data-analysis-workflow="([^"]*)">(.*?)</article>`)
-	coverageCardRe = regexp.MustCompile(`(?s)<article class="card" data-workflow="([^"]*)" data-covered="(\d+)" data-paths="(\d+)" data-priority="([^"]*)" data-truncated="(true|false)">(.*?)</article>`)
-	pathLineRe     = regexp.MustCompile(`<li data-number="(\d+)"(?: data-covered="(true|false)")?><span class="num">(\d+)\.</span><code class="path">(.*?)</code>`)
-	attrRe         = func(name string) *regexp.Regexp { return regexp.MustCompile(` ` + name + `="([^"]*)"`) }
+	// A workflow's block in the page: the numbers the page puts on it.
+	workflowBlockRe = regexp.MustCompile(`<details class="wf" id="wf-\d+"(?: open)? data-workflow="([^"]*)" data-covered="(\d+)" data-paths="(\d+)" data-priority="([^"]*)" data-truncated="(true|false)">`)
+	dataBlockRe     = regexp.MustCompile(`(?s)<script id="pk-data" type="application/json">(.*?)</script>`)
+	attrRe          = func(name string) *regexp.Regexp { return regexp.MustCompile(` ` + name + `="([^"]*)"`) }
 )
 
-// analysisTab reads a page's Analysis tab: workflow -> "N. <path>" lines.
-func analysisTab(page string) map[string][]string {
+// pageRow is one path as the page's data block has it.
+type pageRow struct {
+	Number  int
+	ID      string
+	Covered bool
+	Bucket  string
+	Label   string
+	By      string
+	Text    string
+}
+
+type pageWorkflow struct {
+	Name, File string
+	Covered    int
+	Total      int
+	Rows       []pageRow
+}
+
+// pageWorkflows reads the page's data block (the paths are not written as
+// HTML) into plain values.
+func pageWorkflows(t *testing.T, page string) []pageWorkflow {
+	t.Helper()
+	m := dataBlockRe.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("the page has no data block")
+	}
+	var d struct {
+		S []string `json:"s"`
+		W []struct {
+			N string  `json:"n"`
+			F string  `json:"f"`
+			C int     `json:"c"`
+			T int     `json:"t"`
+			R [][]any `json:"r"`
+		} `json:"w"`
+	}
+	if err := json.Unmarshal([]byte(m[1]), &d); err != nil {
+		t.Fatal(err)
+	}
+	str := func(v any) string {
+		i := int(v.(float64))
+		if i < 0 {
+			return ""
+		}
+		return d.S[i]
+	}
+	var out []pageWorkflow
+	for _, w := range d.W {
+		pw := pageWorkflow{Name: w.N, File: w.F, Covered: w.C, Total: w.T}
+		for _, r := range w.R {
+			var parts []string
+			for _, v := range r[7].([]any) {
+				parts = append(parts, str(v))
+			}
+			pw.Rows = append(pw.Rows, pageRow{Number: int(r[0].(float64)), ID: r[1].(string), Covered: r[2].(float64) != 0,
+				Bucket: str(r[3]), Label: str(r[4]), By: str(r[5]), Text: strings.Join(parts, "--> ")})
+		}
+		out = append(out, pw)
+	}
+	return out
+}
+
+// analysisTab reads a page's paths: workflow -> "N. <path>" lines.
+func analysisTab(t *testing.T, page string) map[string][]string {
+	t.Helper()
 	out := map[string][]string{}
-	for _, card := range analysisCardRe.FindAllStringSubmatch(page, -1) {
-		name := html.UnescapeString(card[1])
-		for _, li := range pathLineRe.FindAllStringSubmatch(card[2], -1) {
-			out[name] = append(out[name], li[3]+". "+html.UnescapeString(li[4]))
+	for _, w := range pageWorkflows(t, page) {
+		for _, r := range w.Rows {
+			out[w.Name] = append(out[w.Name], strconv.Itoa(r.Number)+". "+r.Text)
 		}
 	}
 	return out
@@ -907,9 +969,10 @@ func htmlMatchesReport(t *testing.T, page, reportJSON, wantTotal string) {
 		t.Errorf("the visible total line is not %q", wantTotal)
 	}
 
-	cards := coverageCardRe.FindAllStringSubmatch(page, -1)
-	if len(cards) != len(rep.Workflows) {
-		t.Fatalf("%d workflows in the page, %d in the JSON", len(cards), len(rep.Workflows))
+	cards := workflowBlockRe.FindAllStringSubmatch(page, -1)
+	data := pageWorkflows(t, page)
+	if len(cards) != len(rep.Workflows) || len(data) != len(rep.Workflows) {
+		t.Fatalf("%d workflow blocks and %d in the data, %d in the JSON", len(cards), len(data), len(rep.Workflows))
 	}
 	for i, c := range cards {
 		w := rep.Workflows[i]
@@ -920,17 +983,20 @@ func htmlMatchesReport(t *testing.T, page, reportJSON, wantTotal string) {
 		if html.UnescapeString(c[1]) != w.Name || num(c[2]) != w.Paths.Covered || num(c[3]) != w.Paths.Total || c[4] != prio {
 			t.Errorf("workflow %d: html %s %s/%s %s; json %s %d/%d %s", i, c[1], c[2], c[3], c[4], w.Name, w.Paths.Covered, w.Paths.Total, prio)
 		}
-		if !strings.Contains(c[6], `<span class="file">`+w.File+`</span>`) {
+		d := data[i]
+		if d.Name != w.Name || d.File != w.File || d.Covered != w.Paths.Covered || d.Total != w.Paths.Total {
+			t.Errorf("%s: data block %s %s %d/%d; json %s %d/%d", w.Name, d.Name, d.File, d.Covered, d.Total, w.File, w.Paths.Covered, w.Paths.Total)
+		}
+		if !strings.Contains(page, `<p class="file">`+w.File+`</p>`) {
 			t.Errorf("%s: file %s not shown", w.Name, w.File)
 		}
-		lis := pathLineRe.FindAllStringSubmatch(c[6], -1)
-		if len(lis) != len(w.PathList) {
-			t.Fatalf("%s: %d paths in the page, %d in the JSON", w.Name, len(lis), len(w.PathList))
+		if len(d.Rows) != len(w.PathList) {
+			t.Fatalf("%s: %d paths in the page, %d in the JSON", w.Name, len(d.Rows), len(w.PathList))
 		}
-		for j, li := range lis {
+		for j, r := range d.Rows {
 			p := w.PathList[j]
-			if num(li[1]) != p.Number || (li[2] == "true") != p.Covered || html.UnescapeString(li[4]) != p.Text {
-				t.Errorf("%s path %d: html %s covered=%s %q; json %d covered=%v %q", w.Name, j+1, li[1], li[2], html.UnescapeString(li[4]), p.Number, p.Covered, p.Text)
+			if r.Number != p.Number || r.Covered != p.Covered || r.Text != p.Text {
+				t.Errorf("%s path %d: html %d covered=%v %q; json %d covered=%v %q", w.Name, j+1, r.Number, r.Covered, r.Text, p.Number, p.Covered, p.Text)
 			}
 		}
 	}

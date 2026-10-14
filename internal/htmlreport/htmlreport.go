@@ -1,25 +1,37 @@
 // Package htmlreport writes PathKit's shareable HTML report (docs/DESIGN.md
-// D12): one self-contained file with a Coverage tab and an Analysis tab.
+// D12): one self-contained file with a summary, a workflow overview, the
+// paths of every workflow in paginated tables, the glossary and the
+// detector audit.
 //
 // Rules:
 //   - It only lays out numbers and sentences computed elsewhere: coverage
 //     results come from the shared measure (coverage.Compute) and every
 //     sentence from package render, exactly as the terminal prints it.
 //   - It uses html/template, which escapes every inserted value for where
-//     it appears. No value is ever marked "safe" (template.HTML and its
+//     it appears, including the data block (a Go value, encoded as JSON for
+//     a script). No value is ever marked "safe" (template.HTML and its
 //     relatives are never used; a test scans the code for them). The
-//     stylesheet is part of the template text itself, not a value.
-//   - It loads nothing: no scripts at all, no fonts, stylesheets or images
-//     from anywhere, and a Content-Security-Policy that makes the browser
-//     refuse any network request the page might attempt.
+//     stylesheet and the script are part of the template text itself.
+//   - It loads nothing from anywhere: no fonts, stylesheets, images or
+//     scripts from a network. The one script is inline and small, and the
+//     Content-Security-Policy allows exactly that script by its hash and
+//     makes the browser refuse any network request.
+//   - The paths are not written as HTML. They are embedded once as compact
+//     JSON and the script draws only the page being looked at, with
+//     textContent only. Without JavaScript the summary, the workflow
+//     overview, the glossary and the numbers are still there, and the page
+//     says that the path tables need JavaScript.
 package htmlreport
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
+	"encoding/base64"
 	"html/template"
 	"math"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +40,7 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"github.com/NikhilRaju9010/pathkit-go/internal/render"
 	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
+	"github.com/NikhilRaju9010/pathkit-go/internal/version"
 )
 
 var (
@@ -35,10 +48,10 @@ var (
 	pageTemplate string
 	//go:embed style.css
 	style string
-	//go:embed glossary.css
-	glossaryStyle string
+	//go:embed app.js
+	script string
 
-	page = template.Must(template.New("page").Parse(strings.Replace(strings.Replace(pageTemplate, "/*STYLE*/", style, 1), "/*GLOSSARYSTYLE*/", glossaryStyle, 1)))
+	page = template.Must(template.New("page").Parse(strings.Replace(strings.Replace(pageTemplate, "/*STYLE*/", style, 1), "/*SCRIPT*/", script, 1)))
 )
 
 // Header is what the top of the page says about the run.
@@ -94,33 +107,42 @@ type AnalysisInput struct {
 // escapes it.
 type (
 	view struct {
-		Title, Generated, Folder, ConfigNote string
-		CapHeadline                          string   // set when a workflow reached the path cap
-		CapAdvice                            []string // what that means and what to do
-		CoverageFirst, Measured              bool
-		TotalPaths, TotalCovered             int
-		TotalLine, BranchesLine, TracesLine  string
-		ClassLines                           []string
-		FailUnder                            *failUnderView
-		Workflows                            []workflowView
-		ExcludedLine                         string
-		Excluded                             []scope.Excluded
-		Traces                               *coverage.Counts
-		Trend                                []trendView
-		Glossary                             *glossaryView
+		Title, Generated, Folder, ConfigNote, Version string
+		CapHeadline                                   string   // set when a workflow reached the path cap
+		CapAdvice                                     []string // what that means and what to do
+		Measured                                      bool
+		TotalPaths, TotalCovered                      int
+		TotalLine, BranchesLine, TracesLine           string
+		Explain                                       string // what "testable" and "overall" mean
+		Cards                                         []cardView
+		Buckets                                       []bucketView
+		ClassLines                                    []string
+		FailUnder                                     *failUnderView
+		Workflows                                     []workflowView
+		ExcludedLine                                  string
+		Excluded                                      []scope.Excluded
+		Traces                                        *coverage.Counts
+		Trend                                         []trendView
+		Glossary                                      *glossaryView
+		Data                                          *pageData
+		ScriptHash                                    string
+	}
+	cardView struct {
+		Key, Title, Value, Sub string
+		Covered, Total         int
+	}
+	bucketView struct {
+		Key, Name        string
+		Paths, Covered   int
+		Width            float64 // percent of all paths
+		TestableCoverage bool
 	}
 	workflowView struct {
-		Name, File, Stats, TotalPathsLine, Priority string
-		AddedByConfig, Truncated                    bool
-		Covered, Total                              int
-		Paths                                       []pathView
-	}
-	pathView struct {
-		Number         int
-		Text           string
-		Anchor         string
-		Tag            *tagView // how it was classified; nil for none
-		Covered, Stale bool
+		Name, File, Stats, TotalPathsLine, Priority, Pct string
+		AddedByConfig, Truncated                         bool
+		Covered, Total, Missed                           int
+		Width                                            float64 // covered, percent of the workflow's paths
+		Open                                             bool
 	}
 	failUnderView struct {
 		Passed bool
@@ -133,11 +155,11 @@ type (
 	}
 )
 
-// Report renders a report run's page: Coverage tab first.
+// Report renders a report run's page.
 func Report(in ReportInput) ([]byte, error) {
 	res := in.Result
 	v := view{
-		Title: "PathKit report", CoverageFirst: true, Measured: true,
+		Title: "PathKit report", Measured: true,
 		TotalPaths: res.Paths, TotalCovered: res.Covered,
 		TotalLine:    render.ProjectTotalLine(res, overallThreshold(in)),
 		BranchesLine: render.BranchesLine(res),
@@ -169,28 +191,29 @@ func Report(in ReportInput) ([]byte, error) {
 		}
 		v.FailUnder = f
 	}
-	var defs map[string]classify.Definition
+	v.buildCards(res, in.Classification != nil)
+
 	if in.Classification != nil {
 		v.Glossary = buildGlossary(res, in.CustomLabels)
-		_, defs = definitionsByName(in.CustomLabels)
 	}
+	data := newPageData(true, in.Classification != nil)
 	for wi, w := range res.Workflows {
 		wv := workflowView{
 			Name: w.Name, File: filepath.ToSlash(w.File), AddedByConfig: w.AddedByConfig, Truncated: w.Truncated,
-			Stats: render.WorkflowStats(w), Covered: w.Covered, Total: len(w.Paths),
+			Stats: render.WorkflowStats(w), Covered: w.Covered, Total: len(w.Paths), Missed: len(w.Paths) - w.Covered,
 			TotalPathsLine: render.TotalLine(model.PathList{List: make([]model.Path, len(w.Paths)), Truncated: w.Truncated}, model.DefaultMaxPaths),
+			Open:           wi == 0,
 		}
 		wv.Priority, _ = coverage.Priority(w.Covered, len(w.Paths))
-		for _, p := range w.Paths {
-			pv := pathView{Number: p.Number, Text: render.PathText(p.Path), Covered: p.Covered, Stale: p.StaleTrace}
-			if in.Classification != nil {
-				pv.Anchor = useAnchor(wi, p.Number)
-				pv.Tag = tagFor(p.Class, defs)
-			}
-			wv.Paths = append(wv.Paths, pv)
-		}
+		wv.Pct = render.Pct(coverage.Percent(w.Covered, len(w.Paths)), nil)
+		wv.Width = coverage.Percent(w.Covered, len(w.Paths))
 		v.Workflows = append(v.Workflows, wv)
+		data.addWorkflow(w, in.Classification != nil)
 	}
+	if v.Glossary != nil {
+		data.addAudit(v.Glossary.Audit)
+	}
+	v.Data = data.finish()
 	for i, r := range in.Trend {
 		t := trendView{Time: r.Time.UTC().Format("2006-01-02 15:04 UTC"), Covered: r.Covered, Paths: r.Paths,
 			Percent: math.Round(coverage.Percent(r.Covered, r.Paths)*10) / 10, Pct: render.Pct(coverage.Percent(r.Covered, r.Paths), nil)}
@@ -202,8 +225,48 @@ func Report(in ReportInput) ([]byte, error) {
 	return v.render()
 }
 
-// Analysis renders an analyze run's page: Analysis tab first, and a
-// Coverage tab that says it wasn't measured.
+// buildCards fills the five summary cards and the bucket bar from the
+// numbers coverage.Compute made; nothing is recomputed here.
+func (v *view) buildCards(res coverage.Result, classified bool) {
+	b := res.Breakdown
+	pct := func(c, p int) string { return render.Pct(coverage.Percent(c, p), nil) }
+	if classified {
+		t := b.TestableCoverage()
+		v.Cards = append(v.Cards, cardView{Key: "testable-coverage", Title: "Testable coverage", Value: pct(t.Covered, t.Paths),
+			Sub: plural(t.Covered, "of", t.Paths, "testable path"), Covered: t.Covered, Total: t.Paths})
+	}
+	o := b.Overall()
+	v.Cards = append(v.Cards,
+		cardView{Key: "overall-coverage", Title: "Overall coverage", Value: pct(o.Covered, o.Paths), Sub: plural(o.Covered, "of", o.Paths, "path"), Covered: o.Covered, Total: o.Paths},
+		cardView{Key: "paths", Title: "Paths", Value: itoa(res.Paths), Sub: "all listed paths", Total: res.Paths},
+		cardView{Key: "covered", Title: "Covered", Value: itoa(res.Covered), Sub: "a test ran them", Covered: res.Covered, Total: res.Paths},
+		cardView{Key: "missed", Title: "Missed", Value: itoa(res.Paths - res.Covered), Sub: "no test ran them", Total: res.Paths},
+	)
+	if classified {
+		v.Explain = "Testable coverage counts only the paths a test can run. Overall coverage counts every path, including those that can never happen, so it is always the lower number."
+		total := float64(res.Paths)
+		for _, bk := range []struct {
+			key, name string
+			c         coverage.BucketCount
+		}{
+			{"testable", "Testable", b.Testable},
+			{"cannot-be-tested", "Cannot be tested", b.CannotBeTested},
+			{"needs-special-test", "Needs special test", b.NeedsSpecialTest},
+			{"needs-review", "Needs review", b.NeedsReview},
+		} {
+			w := 0.0
+			if total > 0 {
+				w = float64(bk.c.Paths) / total * 100
+			}
+			v.Buckets = append(v.Buckets, bucketView{Key: bk.key, Name: bk.name, Paths: bk.c.Paths, Covered: bk.c.Covered, Width: w})
+		}
+	} else {
+		v.Explain = "Coverage here is overall: covered paths out of every listed path. Switch classification on in .pathkitrc.json to also see which missed paths can never run."
+	}
+}
+
+// Analysis renders an analyze run's page: the paths, and a note that
+// nothing was measured.
 func Analysis(in AnalysisInput) ([]byte, error) {
 	v := view{Title: "PathKit analysis", ExcludedLine: strings.TrimSuffix(in.ExcludedHeading, ":"), Excluded: in.Excluded}
 	if len(in.Excluded) == 0 {
@@ -219,14 +282,21 @@ func Analysis(in AnalysisInput) ([]byte, error) {
 	if len(capped) > 0 {
 		v.CapHeadline, v.CapAdvice = render.CapHeadline(capped), render.CapAdvice()
 	}
-	for _, w := range in.Workflows {
+	data := newPageData(false, false)
+	total := 0
+	for wi, w := range in.Workflows {
 		wv := workflowView{Name: w.Name, File: filepath.ToSlash(w.File), AddedByConfig: w.AddedByConfig, Truncated: w.Paths.Truncated,
-			Total: len(w.Paths.List), TotalPathsLine: render.TotalLine(w.Paths, model.DefaultMaxPaths)}
-		for i, p := range w.Paths.List {
-			wv.Paths = append(wv.Paths, pathView{Number: i + 1, Text: render.PathText(p)})
-		}
+			Total: len(w.Paths.List), TotalPathsLine: render.TotalLine(w.Paths, model.DefaultMaxPaths), Open: wi == 0}
+		total += len(w.Paths.List)
 		v.Workflows = append(v.Workflows, wv)
+		data.addAnalysisWorkflow(w)
 	}
+	v.TotalPaths = total
+	v.Cards = []cardView{
+		{Key: "workflows", Title: "Workflows", Value: itoa(len(in.Workflows)), Sub: "in scope"},
+		{Key: "paths", Title: "Paths", Value: itoa(total), Sub: "listed"},
+	}
+	v.Data = data.finish()
 	return v.render()
 }
 
@@ -237,12 +307,25 @@ func (v *view) setHeader(h Header) {
 	if h.Config != "" {
 		v.ConfigNote = "config " + filepath.ToSlash(h.Config)
 	}
+	v.Version = version.String()
 }
+
+// The script's own text is allowed by the Content-Security-Policy through
+// its hash, so the hash is computed from what the page really contains.
+var (
+	scriptBody      = regexp.MustCompile(`(?s)<script id="pk-code">(.*?)</script>`)
+	hashPlaceholder = []byte("PKSCRIPTHASH")
+)
 
 func (v view) render() ([]byte, error) {
 	var b bytes.Buffer
 	if err := page.Execute(&b, v); err != nil {
 		return nil, err
 	}
-	return b.Bytes(), nil
+	out := b.Bytes()
+	if m := scriptBody.FindSubmatch(out); m != nil {
+		sum := sha256.Sum256(m[1])
+		out = bytes.Replace(out, hashPlaceholder, []byte(base64.StdEncoding.EncodeToString(sum[:])), 1)
+	}
+	return out, nil
 }

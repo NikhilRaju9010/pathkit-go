@@ -31,6 +31,12 @@ Some paths can never run (a loop the code always enters, the same value tested t
 - `pathkit explain` shows the workflow's file with forward slashes on every system.
 - The `report --unmatched` text explains in plain words that an error check on a helper's error is assumed never to fail.
 
+### Changed: the HTML report
+
+- `report --html` and `analyze --html` have a new page: light theme only, a summary with five cards and a bucket bar, a workflow overview, one collapsible block per workflow with a path table (filters, search, sorting, a details row, a Copy button for the path id), **pagination** (25, 50 or 100 rows), a bar with section links, and a print stylesheet. It fits a phone, a tablet and a desktop.
+- The paths are embedded once as compact data and drawn by one small inline script, so a large project's file is a fraction of its former size. The page still loads nothing from the network, and its Content-Security-Policy allows only its own script by hash. Without JavaScript the summary, the workflow list and the glossary still show.
+- Not changed: the numbers, the text and `--json` output.
+
 ### Fixed
 
 - `pathkit test` recorded no traces when the project folder was reached through a symbolic link (macOS temporary folders are one). It now records them. The command printed by `pathkit prepare` still needs the real folder; see [LIMITATIONS.md](LIMITATIONS.md).

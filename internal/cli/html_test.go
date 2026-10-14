@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"html"
 	"os"
 	"path/filepath"
@@ -10,7 +11,39 @@ import (
 	"time"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/htmlreport"
+	"github.com/NikhilRaju9010/pathkit-go/internal/version"
 )
+
+// htmlPathTexts are the paths of every workflow in a page, as text, read
+// from the data block the page draws from (the paths are not written as
+// HTML).
+func htmlPathTexts(t *testing.T, page string) []string {
+	t.Helper()
+	m := regexp.MustCompile(`(?s)<script id="pk-data" type="application/json">(.*?)</script>`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("the page has no data block")
+	}
+	var d struct {
+		S []string `json:"s"`
+		W []struct {
+			R [][]any `json:"r"`
+		} `json:"w"`
+	}
+	if err := json.Unmarshal([]byte(m[1]), &d); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, w := range d.W {
+		for _, r := range w.R {
+			var parts []string
+			for _, v := range r[7].([]any) {
+				parts = append(parts, d.S[int(v.(float64))])
+			}
+			out = append(out, strings.Join(parts, "--> "))
+		}
+	}
+	return out
+}
 
 // fixedClock makes the page's "Generated" time and the trend repeatable.
 func fixedClock(t *testing.T) {
@@ -37,6 +70,9 @@ func exists(path string) bool {
 // The whole orders page, pinned (fixed clock, first run of its trend).
 func TestReportHTMLGolden(t *testing.T) {
 	fixedClock(t)
+	oldVersion := version.Version
+	version.Version = "v0.0.0-test"
+	t.Cleanup(func() { version.Version = oldVersion })
 	traces := ordersTraces(t)
 	golden := absPath(t, "testdata/report_orders.html")
 	out := filepath.Join(t.TempDir(), "report.html")
@@ -49,6 +85,11 @@ func TestReportHTMLGolden(t *testing.T) {
 	wantErr := "pathkit report: warning: no report history at " + hist + " yet; starting a new trend\npathkit report: wrote " + out + "\n"
 	if stderr != wantErr {
 		t.Errorf("stderr %q\nwant   %q", stderr, wantErr)
+	}
+	if os.Getenv("PATHKIT_UPDATE_HTML_GOLDEN") != "" { // regenerate on purpose: PATHKIT_UPDATE_HTML_GOLDEN=1 go test ./internal/cli -run TestReportHTMLGolden
+		if err := os.WriteFile(golden, []byte(readFile(t, out)), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if got := readFile(t, out); got != readFile(t, golden) {
 		t.Errorf("the page differs from testdata/report_orders.html:\n%s", got)
@@ -233,7 +274,7 @@ func TestAnalyzeHTML(t *testing.T) {
 	}
 	page := readFile(t, out)
 	// The page has the full listing, whatever --summary says.
-	if strings.Count(page, `<code class="path">`) != 3 || !strings.Contains(page, "Not measured.") {
+	if n := len(htmlPathTexts(t, page)); n != 3 || !strings.Contains(page, "Not measured.") {
 		t.Errorf("analysis page:\n%s", page)
 	}
 }
@@ -254,7 +295,7 @@ func TestHTMLTruncated(t *testing.T) {
 	}
 	for file, wants := range map[string][]string{
 		a: {"Total paths: 2000+ (truncated at maxPaths=2000)", `<span class="truncated">truncated</span>`},
-		r: {`data-truncated="true"`, "0/2000+ paths (truncated at maxPaths=2000)", "Total paths: 2000+ (truncated at maxPaths=2000)", `<span class="truncated">truncated</span>`},
+		r: {`data-truncated="true"`, "0/2000+ paths (truncated at maxPaths=2000)", `<span class="truncated">truncated</span>`},
 	} {
 		page := html.UnescapeString(readFile(t, file))
 		for _, want := range wants {
@@ -301,22 +342,15 @@ func TestHTMLEscapesUserCode(t *testing.T) {
 				t.Errorf("%s: raw %q in the page", filepath.Base(file), raw)
 			}
 		}
-		var got []string
-		for _, m := range regexp.MustCompile(`<code class="path">(.*?)</code>`).FindAllStringSubmatch(page, -1) {
-			got = append(got, html.UnescapeString(m[1]))
-		}
-		// report.html has each path twice (Coverage and Analysis tabs).
-		copies := map[string]int{a: 1, r: 2}[file]
-		if len(got) != copies*len(want) {
-			t.Fatalf("%s: %d paths shown, want %d", filepath.Base(file), len(got), copies*len(want))
+		// Each path is in the data block once, unchanged.
+		got := htmlPathTexts(t, page)
+		if len(got) != len(want) {
+			t.Fatalf("%s: %d paths in the data, want %d", filepath.Base(file), len(got), len(want))
 		}
 		for i, g := range got {
-			if w := want[i%len(want)]; g != w {
-				t.Errorf("%s path %d shows\n  %q\nwant\n  %q", filepath.Base(file), i%len(want)+1, g, w)
+			if g != want[i] {
+				t.Errorf("%s path %d is\n  %q\nwant\n  %q", filepath.Base(file), i+1, g, want[i])
 			}
-		}
-		if !strings.Contains(page, "&amp;amp;") {
-			t.Errorf("%s: the literal &amp; in the code is not shown as &amp;", filepath.Base(file))
 		}
 		m := regexp.MustCompile(`<span class="reason">(.*?)</span>`).FindStringSubmatch(page)
 		if m == nil || html.UnescapeString(m[1]) != reason {

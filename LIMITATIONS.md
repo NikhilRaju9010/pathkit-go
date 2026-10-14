@@ -72,7 +72,7 @@ Go words used below: a *type assertion* is Go code that treats a value as anothe
 - **Priority labels are per workflow, not per path.** High (below 50%), Medium (50–80%, both included) or Low (above 80%), compared exactly with whole numbers. A workflow with no paths gets no label.
 - **Colour appears only on a real terminal**, never when the output is piped or redirected, with `--no-color`, config `noColor`, or `NO_COLOR`. The `--out` file and `--json` never have colour.
 - **`report` takes folders, not single files.** With no folder it uses every entry of the config's `packages`; a workflow reached through two entries is counted once.
-- **The HTML page is a snapshot of one run**, has no diagram (it has no scripts; use `analyze --mermaid`), and needs `=` to name a file (`--html=out.html`). Its trend covers the last 5 `report --html` runs written to that folder; a CI job starting from a fresh checkout starts the trend empty unless it keeps `report-history.json`.
+- **The HTML page is a snapshot of one run**, has no diagram (use `analyze --mermaid`), needs JavaScript for its path tables (the summary and the glossary work without it), and needs `=` to name a file (`--html=out.html`). Its trend covers the last 5 `report --html` runs written to that folder; a CI job starting from a fresh checkout starts the trend empty unless it keeps `report-history.json`.
 - **`--version` shows a commit-based version for local builds**, for example `v0.0.0-20250101000000-abcdef123456+dirty`; `go run` prints `dev`. Only release builds and `go install ...@vX.Y.Z` show a clean `vX.Y.Z`.
 
 ## Scope (`.pathkitrc.json`)

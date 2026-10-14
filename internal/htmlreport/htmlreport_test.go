@@ -1,6 +1,8 @@
 package htmlreport
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -46,11 +48,12 @@ func mustReport(t *testing.T, in ReportInput) string {
 	return string(page)
 }
 
-// The page loads nothing from anywhere: no scripts at all, no external
-// stylesheets, fonts or images, and a Content-Security-Policy that makes
+// The page loads nothing from anywhere: no external stylesheets, fonts,
+// images or scripts, links only inside the page, and a Content-Security-
+// Policy that allows exactly the page's own script (by its hash) and makes
 // the browser refuse any request.
 func TestSelfContained(t *testing.T) {
-	pages := map[string]string{"report": mustReport(t, sample("p.W", "p/w.go", "why"))}
+	pages := map[string]string{"report": mustReport(t, sample("p.W", "p/w.go", "why")), "classified": mustReport(t, classified())}
 	a, err := Analysis(AnalysisInput{Header: Header{Generated: time.Now()}})
 	if err != nil {
 		t.Fatal(err)
@@ -58,29 +61,56 @@ func TestSelfContained(t *testing.T) {
 	pages["analysis"] = string(a)
 	for kind, page := range pages {
 		lower := strings.ToLower(page)
-		for _, bad := range []string{"<script", "<link", "@import", "@font-face", "http:", "https:", "<iframe", "<img", "<object", "<embed"} {
+		for _, bad := range []string{"<link", "@import", "@font-face", "http:", "https:", "<iframe", "<img", "<object", "<embed", "<form"} {
 			if strings.Contains(lower, bad) {
 				t.Errorf("%s page contains %q", kind, bad)
 			}
 		}
-		if m := regexp.MustCompile(`(?i)\b(src|href)\s*=`).FindString(page); m != "" {
-			t.Errorf("%s page has a %s attribute", kind, m)
+		if n := strings.Count(lower, "<script"); n != 2 {
+			t.Errorf("%s page has %d script elements, want 2 (the data and the code)", kind, n)
+		}
+		for _, m := range regexp.MustCompile(`(?i)\bsrc\s*=`).FindAllString(page, -1) {
+			t.Errorf("%s page has a src attribute", kind)
+			_ = m
+		}
+		for _, m := range regexp.MustCompile(`(?i)\bhref\s*=\s*"([^"]*)"`).FindAllStringSubmatch(page, -1) {
+			if !strings.HasPrefix(m[1], "#") {
+				t.Errorf("%s page has a link out of the page: %q", kind, m[1])
+			}
 		}
 		for _, u := range regexp.MustCompile(`url\(([^)]*)\)`).FindAllStringSubmatch(page, -1) {
 			if !strings.HasPrefix(strings.Trim(u[1], `'" `), "data:") {
 				t.Errorf("%s page has url(%s)", kind, u[1])
 			}
 		}
-		csp := `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:">`
-		if strings.Count(page, "Content-Security-Policy") != 1 || !strings.Contains(page, csp) {
-			t.Errorf("%s page lacks exactly one CSP meta: %s", kind, csp)
+		// the one CSP allows the one script by its hash
+		code := regexp.MustCompile(`(?s)<script id="pk-code">(.*?)</script>`).FindStringSubmatch(page)
+		if code == nil || strings.Count(page, "Content-Security-Policy") != 1 {
+			t.Fatalf("%s page: no script or not exactly one CSP meta", kind)
+		}
+		sum := sha256.Sum256([]byte(code[1]))
+		csp := `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-` +
+			base64.StdEncoding.EncodeToString(sum[:]) + `'; img-src data:">`
+		if !strings.Contains(page, csp) {
+			t.Errorf("%s page: the CSP does not name the script's hash: want %s", kind, csp)
+		}
+		// the script never reaches for the network or builds HTML from data
+		for _, bad := range []string{"fetch(", "XMLHttpRequest", "WebSocket", "import(", "eval(", "new Function", "innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "localStorage", "sessionStorage"} {
+			if strings.Contains(code[1], bad) {
+				t.Errorf("%s page: the script contains %q", kind, bad)
+			}
+		}
+		// light only
+		if strings.Contains(lower, "prefers-color-scheme: dark") || !strings.Contains(lower, "color-scheme: light") {
+			t.Errorf("%s page is not light only", kind)
 		}
 	}
 }
 
 // Everything that comes from user code or config is escaped: the
-// dangerous text never appears raw, and every place shows it exactly
-// (unescaping gives the original back, so nothing is escaped twice).
+// dangerous text never appears raw, every server-written place shows it
+// exactly (unescaping gives the original back, so nothing is escaped
+// twice), and the data block decodes to the original strings.
 func TestEscapesEverything(t *testing.T) {
 	name, file, reason := "p.W"+danger, "dir"+danger+"/w.go", "reason "+danger
 	page := mustReport(t, sample(name, file, reason))
@@ -88,6 +118,9 @@ func TestEscapesEverything(t *testing.T) {
 		if strings.Contains(page, raw) {
 			t.Errorf("raw %q in the page", raw)
 		}
+	}
+	if n := strings.Count(page, "</script>"); n != 2 {
+		t.Errorf("%d closing script tags, want 2: the data must not close its element", n)
 	}
 	shown := func(re string) []string {
 		var out []string
@@ -97,12 +130,12 @@ func TestEscapesEverything(t *testing.T) {
 		return out
 	}
 	checks := map[string]string{
-		`<h3>(.*?)</h3>`:                            name,
-		`<span class="file">(.*?)</span>`:           file,
-		`<span class="reason">(.*?)</span>`:         reason,
-		`data-workflow="(.*?)"`:                     name,
-		`data-excluded-workflow="(.*?)"`:            name + "2",
-		`<p class="meta">Generated .*? · (.*?)</p>`: "./... · config " + file + ".json",
+		`<summary><h3>(.*?)</h3>`:                              name,
+		`<p class="file">(.*?)</p>`:                            file,
+		`<span class="reason">(.*?)</span>`:                    reason,
+		`data-workflow="(.*?)"`:                                name,
+		`data-excluded-workflow="(.*?)"`:                       name + "2",
+		`<p class="meta"[^>]*>Generated .*? · (.*?) · PathKit`: "./... · config " + file + ".json",
 	}
 	for re, want := range checks {
 		got := shown(re)
@@ -114,6 +147,13 @@ func TestEscapesEverything(t *testing.T) {
 				t.Errorf("%s shows %q, want %q", re, g, want)
 			}
 		}
+	}
+	d := decodeData(t, page)
+	if got := d.W[0].N; got != name {
+		t.Errorf("data block: workflow name %q, want %q", got, name)
+	}
+	if got := d.W[0].F; got != strings.ReplaceAll(file, "\\", "/") {
+		t.Errorf("data block: file %q", got)
 	}
 }
 
@@ -152,20 +192,24 @@ func TestNothingMarkedSafe(t *testing.T) {
 	}
 }
 
-// A workflow cut at the path cap says "truncated", as the text report does.
+// A workflow cut at the path cap says "truncated", as the text report does,
+// in the page and in the data.
 func TestTruncatedShown(t *testing.T) {
 	in := sample("p.W", "p/w.go", "why")
 	in.Result.Workflows[0].Truncated = true
-	page := html.UnescapeString(mustReport(t, in)) // as the browser shows it ("+" is written &#43;)
+	raw := mustReport(t, in)
+	page := html.UnescapeString(raw) // as the browser shows it ("+" is written &#43;)
 	for _, want := range []string{
 		`data-truncated="true"`,
 		`2/3+ paths (truncated at maxPaths=2000)`,
 		`<span class="truncated">truncated</span>`,
-		`Total paths: 3+ (truncated at maxPaths=2000)`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
 		}
+	}
+	if !decodeData(t, raw).W[0].Tr {
+		t.Error("the data block does not say truncated")
 	}
 }
 
@@ -174,13 +218,16 @@ func TestAnalysisPageSaysNotMeasured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`id="tab-analysis" checked`, "Not measured.", "No workflows excluded"} {
+	for _, want := range []string{"Not measured.", "No workflows excluded"} {
 		if !strings.Contains(string(page), want) {
 			t.Errorf("analysis page lacks %q", want)
 		}
 	}
 	if strings.Contains(string(page), `class="trend"`) || strings.Contains(string(page), `class="traces"`) {
 		t.Errorf("analysis page shows coverage-only sections")
+	}
+	if decodeData(t, string(page)).M {
+		t.Error("the data block says the run was measured")
 	}
 }
 

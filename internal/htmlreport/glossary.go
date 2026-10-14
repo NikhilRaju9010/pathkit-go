@@ -16,9 +16,9 @@ import (
 // Everything here is laid out from data computed elsewhere: the paths'
 // classifications come from the shared measure, the wording of every label
 // from classify.Definitions (the one list), and the sentences from render.
-// There is no script: a label is a link to its definition, a definition
-// lists links back to where it is used, and the browser's own Back button
-// returns to where the reader was.
+// A label is a link to its definition, a definition lists links back to
+// where it is used (a link to a path is drawn by the page's script), and
+// the browser's own Back button returns to where the reader was.
 
 const maxUseLinks = 10
 
@@ -54,42 +54,11 @@ type (
 	// cannot-be-tested.
 	auditRow struct {
 		Workflow, Anchor, Label, Detector, Confidence, Reason, Path string
-		Number                                                      int
-	}
-	// tagView is the label next to a path.
-	tagView struct {
-		Bucket, Label, Source, By, Meaning, Explanation string
-		Link                                            bool
+		Number, WfIndex                                             int
 	}
 )
 
 func useAnchor(wi, number int) string { return fmt.Sprintf("use-%d-%d", wi+1, number) }
-
-// tagFor describes how a path was classified, or nil for a plain testable
-// path.
-func tagFor(c classify.Classification, defs map[string]classify.Definition) *tagView {
-	if render.ClassTag(c) == "" {
-		return nil
-	}
-	t := &tagView{Bucket: string(c.Bucket), Label: c.Label, Source: string(c.Source), Explanation: c.Explanation}
-	if t.Label == "" {
-		t.Label = "no label"
-	}
-	switch {
-	case c.Origin == classify.OriginRule:
-		t.By = fmt.Sprintf("rule %q", c.RuleID)
-	case c.Origin == classify.OriginOverride:
-		t.By = "config override"
-	case c.Origin == classify.OriginComment:
-		t.By = "//pathkit:untestable"
-	case c.Detector != "":
-		t.By = "detector " + c.Detector
-	}
-	if d, ok := defs[c.Label]; ok && c.Label != "" {
-		t.Link, t.Meaning = true, d.Meaning
-	}
-	return t
-}
 
 // definitionsByName is the built-in labels plus the config's custom ones.
 func definitionsByName(custom []classify.Definition) (order []classify.Definition, byName map[string]classify.Definition) {
@@ -143,7 +112,7 @@ func buildGlossary(res coverage.Result, custom []classify.Definition) *glossaryV
 			}
 			u.uses = append(u.uses, useLink{Anchor: useAnchor(wi, p.Number), Text: where})
 			if c.Detector != "" && c.Source == classify.SourceAuto && c.Bucket == classify.CannotBeTested {
-				g.Audit = append(g.Audit, auditRow{Workflow: w.Name, Number: p.Number, Anchor: useAnchor(wi, p.Number),
+				g.Audit = append(g.Audit, auditRow{Workflow: w.Name, WfIndex: wi, Number: p.Number, Anchor: useAnchor(wi, p.Number),
 					Label: c.Label, Detector: c.Detector, Confidence: string(c.Confidence), Reason: c.Explanation, Path: render.PathText(p.Path)})
 			} else if c.Detector != "" && c.Source == classify.SourceAuto {
 				g.AuditOther++
