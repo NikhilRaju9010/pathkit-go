@@ -50,6 +50,7 @@ type observed struct {
 	paths    map[string][]model.Path                       // workflow -> every listed path
 	unmatch  []string                                      // traces that fit no path
 	claims   map[string]map[string]classify.Classification // workflow -> path key -> claim
+	eng      *classify.Engine                              // the classifier the claims came from (graphs added)
 }
 
 // runBatch writes the programs into a throw-away module, records the paths
@@ -95,10 +96,13 @@ func runBatch(t *testing.T, programs []Program) *observed {
 	for _, p := range programs {
 		byName["progs."+p.Name] = p
 	}
-	eng, err := classify.NewEngine(scope.Classification{Enabled: true})
+	// PATHKIT_SOUNDNESS_ENGINE=off runs the same programs without the fact
+	// engine, to see how many claims it adds.
+	eng, err := classify.NewEngine(scope.Classification{Enabled: true, EngineOff: os.Getenv("PATHKIT_SOUNDNESS_ENGINE") == "off"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	obs.eng = eng
 	graphs := map[string]*model.Graph{}
 	hashes := map[string]string{}
 	var targets []instrument.Target
@@ -109,6 +113,9 @@ func runBatch(t *testing.T, programs []Program) *observed {
 		}
 		graphs[wf.Name], hashes[wf.Name] = g, model.FunctionHash(wf.Pkg.Fset, wf.Func)
 		targets = append(targets, instrument.Target{Workflow: wf, Graph: g})
+		if err := eng.AddGraph(wf.Name, g); err != nil {
+			t.Fatal(err)
+		}
 		obs.programs[wf.Name] = byName[wf.Name]
 		obs.claims[wf.Name] = map[string]classify.Classification{}
 		for _, p := range g.Paths(model.DefaultMaxPaths).List {
@@ -234,11 +241,7 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		if len(obs.unmatch) > 0 {
 			t.Errorf("%d recorded runs fit no path (the map and the recorder disagree); first: %s", len(obs.unmatch), obs.unmatch[0])
 		}
-		eng, err := classify.NewEngine(scope.Classification{Enabled: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range obs.falseClaims(eng.Claim) {
+		for _, f := range obs.falseClaims(obs.eng.Claim) {
 			falseCount++
 			t.Error(f)
 		}

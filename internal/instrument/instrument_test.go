@@ -77,6 +77,8 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 		{fixtures, fixtures + "/waits"},
 		{fixtures, fixtures + "/saga"},
 		{fixtures, fixtures + "/unnamedctx"},
+		{fixtures, fixtures + "/loopfirstnamed"},
+		{fixtures, fixtures + "/namedboolloop"},
 		{pilot, pilot + "/..."},
 	}
 	for _, c := range cases {
@@ -199,54 +201,32 @@ func TestNameClashes(t *testing.T) {
 	}
 }
 
-// A loop condition of a named bool type ("type Flag bool; for !v") would
-// not compile once wrapped in pathkitRec.loop, which takes a plain bool.
-// PathKit says so in its own words, with the fix, before go test runs.
+// A loop condition of a named bool type ("type Flag bool; for !v") or of a
+// type parameter constrained by ~bool is recorded through a conversion,
+// bool(...), so the marked-up copy compiles. A plain bool condition is
+// wrapped exactly as before, without one.
 func TestNamedBoolLoopCondition(t *testing.T) {
-	_, err := instrument.Instrument(targets(t, fixtures+"/loopfirstnamed"), "/tmp/x")
-	if err == nil {
-		t.Fatal("no error for a loop condition of a named bool type")
-	}
-	for _, want := range []string{
-		"cannot record loopfirstnamed.",
-		"the loop condition `!v` at ",
-		"loopfirstnamed.go:",
-		"has the type Flag, not the plain type bool",
-		"pathkit can record a loop condition only of the plain type bool",
-		"write `for bool(!v)` instead",
-		"or exclude the workflow in .pathkitrc.json with a reason",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q\ndoes not contain %q", err, want)
+	for _, arg := range []string{fixtures + "/loopfirstnamed", fixtures + "/namedboolloop"} {
+		ts := targets(t, arg)
+		if len(ts) == 0 {
+			t.Fatalf("%s: nothing to instrument", arg)
+		}
+		res := instrumentAll(t, ts)
+		found := false
+		for file, src := range res.Files {
+			if strings.HasSuffix(file, ".go") && strings.Contains(string(src), ".loop(") && strings.Contains(string(src), "bool(") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s: no loop condition was wrapped in bool(...)", arg)
 		}
 	}
-
-	// The two shapes that already have the plain type bool still record.
-	if _, err := instrument.Instrument(targets(t, fixtures+"/loops"), "/tmp/x"); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// The message quotes the condition as written (a func literal included)
-// and does not call a type parameter a named type.
-func TestNamedBoolLoopConditionWording(t *testing.T) {
-	want := map[string]string{
-		"namedboolloop.FuncLit":   "write `for bool(func() Flag { return i < n }())` instead",
-		"namedboolloop.TypeParam": "the loop condition `!v` at ",
-	}
-	for _, tg := range targets(t, fixtures+"/namedboolloop") {
-		_, err := instrument.Instrument([]instrument.Target{tg}, "/tmp/x")
-		w, ok := want[tg.Workflow.Name]
-		if !ok {
-			t.Fatalf("unexpected workflow %s", tg.Workflow.Name)
+	// A plain bool condition has no conversion.
+	for _, src := range instrumentAll(t, targets(t, fixtures+"/loops")).Files {
+		if strings.Contains(string(src), ".loop(\"J1\", bool(") {
+			t.Error("a plain bool loop condition must not get a conversion")
 		}
-		delete(want, tg.Workflow.Name)
-		if err == nil || !strings.Contains(err.Error(), w) || !strings.Contains(err.Error(), "not the plain type bool") || strings.Contains(err.Error(), "a named true/false type") {
-			t.Errorf("%s: err = %v, want it to contain %q and \"not the plain type bool\", and not \"a named true/false type\"", tg.Workflow.Name, err, w)
-		}
-	}
-	if len(want) > 0 {
-		t.Errorf("workflows not found: %v", want)
 	}
 }
 

@@ -134,6 +134,8 @@ func (b *builder) loopRoad(l *loopInfo) Target {
 	var t Target
 	if !l.junction() {
 		t = b.intoBody(l)
+		// Walked once, but the real loop runs its body any number of times.
+		t.Nodes = append([]ast.Node{SkipMark{Stmt: l.stmt}}, t.Nodes...)
 	} else {
 		j := b.newJunction(l.stmt, Loop, loopLabel(l.stmt))
 		iterate := addExit(j, "iterate", nil)

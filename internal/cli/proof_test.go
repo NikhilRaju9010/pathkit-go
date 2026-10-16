@@ -88,3 +88,54 @@ func TestJSONProofKeyOnClaimsOnly(t *testing.T) {
 		}
 	}
 }
+
+// The fact engine through the program: explain prints the proof with
+// numbered sentences (decision steps with step and line, code between
+// decisions with a line), the JSON has the proof, and the config can turn
+// the engine off.
+func TestExplainAnEngineClaim(t *testing.T) {
+	folder := absPath(t, "../../testdata/shapes/valueflow")
+	cfg := writeConfig(t, `{"packages": [`+jsonString(folder)+`], "classification": {"enabled": true}}`)
+	var claimed string
+	for _, id := range stableIDsOf(t, folder, "valueflow.ContradictionThroughAssign") {
+		out, stderr, code := run(t, "explain", id, "--config", cfg, "--function", "ContradictionThroughAssign", "--traces", t.TempDir())
+		if code != ExitOK {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
+		}
+		if strings.Contains(out, "Label:       value-flow") {
+			claimed = out
+		}
+	}
+	if claimed == "" {
+		t.Fatal("no path was explained as value-flow")
+	}
+	for _, want := range []string{
+		"Bucket:      cannot-be-tested",
+		"Decided by:  detector value-flow (automatic, certain)",
+		"Proof:\n",
+		"  1. `id` is set to \"\". [valueflow.go:17]\n",
+		"  2. J1 (if ok) takes the false side, so `id = v` is skipped. [step 1, valueflow.go:19]\n",
+		"  3. J2 (if id == \"\") takes the false side. [step 2, valueflow.go:22]\n",
+		"  4. Nothing on the path changes this in between, so `id == \"\"` is always true at that point and the false side cannot be taken.\n",
+	} {
+		if !strings.Contains(claimed, want) {
+			t.Errorf("explain lacks %q:\n%s", want, claimed)
+		}
+	}
+
+	// The same workflow with the engine turned off in the config: every path testable.
+	off := writeConfig(t, `{"packages": [`+jsonString(folder)+`], "classification": {"enabled": true, "engine": {"enabled": false}}}`)
+	traces := writeTracesFor(t, "../../testdata/shapes/valueflow", "valueflow.ContradictionThroughAssign", []string{"J1.true", "J2.true"})
+	out, _, code := run(t, "coverage", folder, "--config", off, "--include", "ContradictionThroughAssign", "--traces", traces, "--json")
+	if code != ExitOK {
+		t.Fatalf("code=%d", code)
+	}
+	if b := decode(t, out)["classification"].(map[string]any)["buckets"].(map[string]any)["cannotBeTested"].(map[string]any)["paths"].(float64); b != 0 {
+		t.Errorf("engine off: %v cannot-be-tested paths, want 0", b)
+	}
+	on := writeConfig(t, `{"packages": [`+jsonString(folder)+`], "classification": {"enabled": true}}`)
+	out, _, _ = run(t, "coverage", folder, "--config", on, "--include", "ContradictionThroughAssign", "--traces", traces, "--json")
+	if b := decode(t, out)["classification"].(map[string]any)["buckets"].(map[string]any)["cannotBeTested"].(map[string]any)["paths"].(float64); b != 1 {
+		t.Errorf("engine on: %v cannot-be-tested paths, want 1", b)
+	}
+}

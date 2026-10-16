@@ -240,8 +240,11 @@ func writeProof(b *strings.Builder, proof []classify.ProofStep) {
 	b.WriteString("Proof:\n")
 	for i, s := range proof {
 		at := ""
-		if s.Step > 0 {
+		switch {
+		case s.Step > 0:
 			at = fmt.Sprintf(" [step %d, %s:%d]", s.Step, s.File, s.Line)
+		case s.Line > 0:
+			at = fmt.Sprintf(" [%s:%d]", s.File, s.Line)
 		}
 		fmt.Fprintf(b, "  %d. %s%s\n", i+1, s.Text, at)
 	}

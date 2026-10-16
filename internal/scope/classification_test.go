@@ -203,3 +203,28 @@ func TestWithoutAndExplainedTracesAreRead(t *testing.T) {
 		t.Errorf("explained: %+v", x)
 	}
 }
+
+// classification.engine.enabled turns the fact engine off; the default is on.
+func TestEngineEnabledRead(t *testing.T) {
+	read := func(body string) (Classification, error) {
+		path := filepath.Join(t.TempDir(), FileName)
+		write(t, path, body)
+		c, err := Read(path)
+		if err != nil {
+			return Classification{}, err
+		}
+		return c.Classification, nil
+	}
+	if c, err := read(`{"classification": {"enabled": true}}`); err != nil || c.EngineOff {
+		t.Errorf("default: off=%v err=%v", c.EngineOff, err)
+	}
+	if c, err := read(`{"classification": {"enabled": true, "engine": {"enabled": false}}}`); err != nil || !c.EngineOff {
+		t.Errorf("disabled: off=%v err=%v", c.EngineOff, err)
+	}
+	if c, err := read(`{"classification": {"enabled": true, "engine": {"enabled": true}}}`); err != nil || c.EngineOff {
+		t.Errorf("enabled: off=%v err=%v", c.EngineOff, err)
+	}
+	if _, err := read(`{"classification": {"enabled": true, "engine": {"enable": false}}}`); err == nil {
+		t.Error("a misspelled key under engine must be refused")
+	}
+}

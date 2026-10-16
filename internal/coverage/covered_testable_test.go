@@ -63,3 +63,36 @@ func TestCheckCoveredAreTestableCatchesAViolation(t *testing.T) {
 		t.Errorf("want an error about a covered path that is not testable, got %v", err)
 	}
 }
+
+// A possible-correlation suspect is only for paths no test ran. When a test
+// ran the path, it is simply testable, with no warning (a real run settled
+// it); an engine claim of impossible on a path a test ran still warns.
+func TestCoveredSuspectIsQuietlyTestable(t *testing.T) {
+	w := fixtureWorkflow(t, "../../testdata/fixtures/factsengine", "factsengine.SuspectLoopBetween")
+	e, err := classify.NewEngine(scope.Classification{Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddGraph(w.Name, w.Graph); err != nil {
+		t.Fatal(err)
+	}
+	// Not run: the suspect is needs-review.
+	res := Compute(Input{Workflows: []Workflow{w}, Traces: []TraceFile{tf("a", w, "complete", "J1.false", "J2.false")}, Classifier: e.Classify})
+	if res.Breakdown.NeedsReview.Paths != 1 {
+		t.Fatalf("want one needs-review suspect, got %+v", res.Breakdown)
+	}
+	// Run: testable, covered, nothing to warn about.
+	res = Compute(Input{Workflows: []Workflow{w}, Traces: []TraceFile{tf("a", w, "complete", "J1.true", "J2.true")}, Classifier: e.Classify})
+	if res.Breakdown.NeedsReview.Paths != 0 || res.Covered != 1 || len(res.Warnings) != 0 {
+		t.Errorf("a covered suspect: %+v warnings %v", res.Breakdown, res.Warnings)
+	}
+	// A claim of impossible on a path a test ran: testable, with a warning.
+	z := fixtureWorkflow(t, "../../testdata/shapes/zerovalue", "zerovalue.NeverAssigned")
+	if err := e.AddGraph(z.Name, z.Graph); err != nil {
+		t.Fatal(err)
+	}
+	res = Compute(Input{Workflows: []Workflow{z}, Traces: []TraceFile{tf("b", z, "complete", "J1.false")}, Classifier: e.Classify})
+	if res.Covered != 1 || res.Breakdown.CannotBeTested.Paths != 0 || len(res.Warnings) != 1 || res.InternalError != nil {
+		t.Errorf("a covered engine claim: %+v warnings %v err %v", res.Breakdown, res.Warnings, res.InternalError)
+	}
+}

@@ -16,6 +16,18 @@ import "go.temporal.io/sdk/workflow"
 
 func noop() {}
 
+// Rec is a struct held by value; Flagged is a named bool type.
+type Rec struct {
+	A  string
+	B  int
+	C  bool
+	In struct{ ID string }
+}
+
+func (r *Rec) setA(s string) { r.A = s }
+
+type Flagged bool
+
 func sp(s string) *string { return &s }
 
 // normalise stands for "any call PathKit cannot see into".

@@ -1,0 +1,150 @@
+{
+  "shape": "o",
+  "description": "Safety: a value assigned a call result, arithmetic, ++ or an activity result is unknown afterwards. Must stay testable. (Some branches may in truth never run, but PathKit cannot prove it, so the safe answer is testable.)",
+  "workflows": {
+    "notunderstood.ActivityResult": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if res == \"\" --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if res == \"\" --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if res == \"\" --true--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if res == \"\" --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    },
+    "notunderstood.Arithmetic": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if b == 0 --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if b == 0 --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if b == 0 --true--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if b == 0 --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    },
+    "notunderstood.CallResult": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if a == \"\" --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if a == \"\" --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if a == \"\" --true--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if a == \"\" --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    },
+    "notunderstood.Increment": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if c == 0 --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if c == 0 --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if c == 0 --true--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if c == 0 --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    }
+  }
+}

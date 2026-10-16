@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/facts"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 )
@@ -40,6 +41,10 @@ type Engine struct {
 	marks     map[string][]model.Mark
 	detectors []Detector
 	disabled  []scope.DisabledDetector
+	// facts is the fact engine's analyzer for each workflow (see AddGraph);
+	// engineOff is true when the config turns the engine off.
+	facts     map[string]*facts.Analyzer
+	engineOff bool
 	explained []scope.ExplainedTrace
 	// extraWarnings are config warnings found while resolving rules.
 	extraWarnings []string
@@ -82,7 +87,8 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{}}
+	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{},
+		facts: map[string]*facts.Analyzer{}, engineOff: c.EngineOff}
 	if c.Policy == string(Exclude) {
 		e.policy = Exclude
 	}
@@ -221,6 +227,9 @@ func (e *Engine) classify(workflow string, p model.Path, count bool) Classificat
 	}
 
 	if len(found) == 0 {
+		if c, ok := e.engineClaim(workflow, p); ok {
+			return c
+		}
 		return DefaultTestable()
 	}
 	main := found[0].c

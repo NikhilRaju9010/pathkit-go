@@ -23,7 +23,6 @@ import (
 	"text/template"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
-	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
 
@@ -142,9 +141,6 @@ func workflowEdits(t Target) ([]Edit, error) {
 	labels := labelsOf(wf.Func.Body)
 	for _, j := range g.Junctions {
 		if j.Kind == model.Loop {
-			if err := checkLoopCondition(wf, j); err != nil {
-				return nil, err
-			}
 			e, err := loopEdits(g, j, labels, off, end)
 			if err != nil {
 				return nil, fmt.Errorf("%v in %s", err, wf.Name)
@@ -294,9 +290,16 @@ func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.Label
 		if s.Cond == nil {
 			return append(edits, atBodyTop(s.Body)), nil
 		}
+		// pathkitRec.loop takes a plain bool. A condition of a named bool type
+		// ("type Flag bool; for !done") or of a type parameter constrained by
+		// ~bool needs a conversion, which means the same.
+		open, shut := fmt.Sprintf("%s.loop(%q, ", recVar, key), ")"
+		if !plainBool(g.TypesInfo(), s.Cond) {
+			open, shut = open+"bool(", "))"
+		}
 		return append(edits,
-			Edit{Offset: off(s.Cond), Text: fmt.Sprintf("%s.loop(%q, ", recVar, key)},
-			Edit{Offset: end(s.Cond), Order: 3, Text: ")"}), nil
+			Edit{Offset: off(s.Cond), Text: open},
+			Edit{Offset: end(s.Cond), Order: 3, Text: shut}), nil
 	case *ast.RangeStmt:
 		edits = append(edits, atBodyTop(s.Body), Edit{Offset: end(s), Text: fmt.Sprintf("; %s.rangeDone(%q)", recVar, key)})
 		name := ""
@@ -309,6 +312,17 @@ func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.Label
 		return edits, nil
 	}
 	return nil, fmt.Errorf("internal error: %s is a loop junction but not a loop", j.ID)
+}
+
+// plainBool reports whether e has the type bool or an untyped bool, so it
+// can be passed where a bool is wanted without a conversion.
+func plainBool(info *types.Info, e ast.Expr) bool {
+	tv, ok := info.Types[e]
+	if !ok {
+		return true
+	}
+	b, ok := types.Unalias(tv.Type).(*types.Basic)
+	return ok && b.Info()&types.IsBoolean != 0 && (b.Kind() == types.Bool || b.Kind() == types.UntypedBool)
 }
 
 // labelsOf maps each labeled statement in body to its label.
@@ -410,43 +424,6 @@ func resultTypeTexts(wf discover.Workflow) ([]string, error) {
 		return nil, fmt.Errorf("cannot record %s: it has %d results; pathkit handles at most %d", wf.Name, len(out), maxResults)
 	}
 	return out, nil
-}
-
-// checkLoopCondition stops before go test runs when a loop's condition
-// has a named bool type ("type Flag bool; for !v"). loopEdits wraps the
-// condition in pathkitRec.loop, which takes a plain bool, and Go does not
-// pass a Flag where a bool is wanted, so the marked-up copy would fail to
-// compile with an error that points at PathKit's copy instead of the
-// user's file (LIMITATIONS.md).
-func checkLoopCondition(wf discover.Workflow, j *model.Junction) error {
-	s, ok := j.Stmt.(*ast.ForStmt)
-	if !ok || s.Cond == nil {
-		return nil
-	}
-	tv, ok := wf.Pkg.TypesInfo.Types[s.Cond]
-	if !ok {
-		return nil
-	}
-	if b, ok := types.Unalias(tv.Type).(*types.Basic); ok && b.Info()&types.IsBoolean != 0 {
-		return nil // bool or untyped bool
-	}
-	pos := wf.Pkg.Fset.Position(s.Cond.Pos())
-	// The condition as the user wrote it (types.ExprString shortens func
-	// literals, which would make the suggested fix invalid Go).
-	cond := types.ExprString(s.Cond)
-	if src, err := os.ReadFile(pos.Filename); err == nil {
-		if endPos := wf.Pkg.Fset.Position(s.Cond.End()); endPos.Offset <= len(src) {
-			cond = strings.Join(strings.Fields(string(src[pos.Offset:endPos.Offset])), " ")
-		}
-	}
-	typ := types.TypeString(tv.Type, func(p *types.Package) string {
-		if p == wf.Pkg.Types {
-			return ""
-		}
-		return p.Name()
-	})
-	return fmt.Errorf("cannot record %s: the loop condition `%s` at %s:%d has the type %s, not the plain type bool, and pathkit can record a loop condition only of the plain type bool; write `for bool(%s)` instead (it means the same), or exclude the workflow in .pathkitrc.json with a reason",
-		wf.Name, cond, load.DisplayPath(pos.Filename), pos.Line, typ, cond)
 }
 
 func checkNames(wf discover.Workflow) error {
