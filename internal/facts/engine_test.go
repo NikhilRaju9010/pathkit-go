@@ -18,12 +18,17 @@ const engineDir = "../../testdata/fixtures/factsengine"
 type found struct {
 	claims   map[string]Kind // path text -> kind
 	suspects []string
+	unknown  []string
 	paths    []string
 	proofs   map[string][]ProofStep
 	off      string
 }
 
 func analyzeFixture(t *testing.T, dir string) map[string]found {
+	return analyzeFixtureWith(t, dir, Options{JSONDecode: true})
+}
+
+func analyzeFixtureWith(t *testing.T, dir string, opts Options) map[string]found {
 	t.Helper()
 	res, err := load.Load(dir)
 	if err != nil {
@@ -35,7 +40,7 @@ func analyzeFixture(t *testing.T, dir string) map[string]found {
 		if err != nil {
 			t.Fatalf("%s: %v", wf.Name, err)
 		}
-		a := New(g)
+		a := New(g, opts)
 		f := found{claims: map[string]Kind{}, proofs: map[string][]ProofStep{}, off: a.Off()}
 		for _, p := range g.Paths(model.DefaultMaxPaths).List {
 			text := p.Key()
@@ -47,6 +52,9 @@ func analyzeFixture(t *testing.T, dir string) map[string]found {
 			}
 			if r.Suspect != nil {
 				f.suspects = append(f.suspects, text)
+			}
+			if r.Unknown != nil {
+				f.unknown = append(f.unknown, text)
 			}
 		}
 		out[strings.TrimPrefix(wf.Name, "factsengine.")] = f
@@ -82,6 +90,9 @@ func TestDumpEngine(t *testing.T) {
 		for _, k := range f.suspects {
 			fmt.Printf("    suspect %s\n", k)
 		}
+		for _, k := range f.unknown {
+			fmt.Printf("    unknown %s\n", k)
+		}
 	}
 }
 
@@ -116,6 +127,9 @@ func TestEngineClaimsOnFixtures(t *testing.T) {
 			}
 			if fmt.Sprint(f.suspects) != fmt.Sprint(wantSuspects[name]) && !(len(f.suspects) == 0 && len(wantSuspects[name]) == 0) {
 				t.Errorf("suspects %v, want %v", f.suspects, wantSuspects[name])
+			}
+			if fmt.Sprint(f.unknown) != fmt.Sprint(wantUnknown[name]) && !(len(f.unknown) == 0 && len(wantUnknown[name]) == 0) {
+				t.Errorf("unknown-input candidates %v, want %v", f.unknown, wantUnknown[name])
 			}
 			if f.off != wantOff[name] {
 				t.Errorf("engine off = %q, want %q", f.off, wantOff[name])
@@ -182,5 +196,60 @@ func TestProofTextForTheValueFlowShape(t *testing.T) {
 func TestThreeValuedHelpers(t *testing.T) {
 	if isTrue.not() != isFalse || isFalse.not() != isTrue || unknown.not() != unknown {
 		t.Error("not() is wrong")
+	}
+}
+
+// With the default-json-converter assumption off, nothing is claimed about
+// decoded values: the fixtures that rest on it make no claim.
+func TestJSONRuleOff(t *testing.T) {
+	all := analyzeFixtureWith(t, engineDir, Options{JSONDecode: false})
+	for _, name := range []string{"ImpossibleJSONParam", "ImpossibleJSONMapParam", "ImpossibleJSONNested", "ImpossibleJSONGet"} {
+		if f := all[name]; len(f.claims) != 0 {
+			t.Errorf("%s: claims with the rule off: %v", name, f.claims)
+		}
+	}
+	// ... and on, they do (and say what they rest on).
+	on := analyzeFixture(t, engineDir)
+	if len(on["ImpossibleJSONParam"].claims) == 0 {
+		t.Error("the rule on makes no claim on ImpossibleJSONParam")
+	}
+	for key, proof := range on["ImpossibleJSONParam"].proofs {
+		text := ""
+		for _, p := range proof {
+			text += p.Text + "\n"
+		}
+		if !strings.Contains(text, "default JSON converter") {
+			t.Errorf("%s: the proof does not name the assumption:\n%s", key, text)
+		}
+	}
+}
+
+// The proof of a type switch claim (shape b): the stores, the decision, and
+// what it adds up to.
+func TestProofTextForTheTypeSwitchShape(t *testing.T) {
+	f := analyzeFixture(t, "../../testdata/shapes/typeswitch")["typeswitch.SwitchOnLocalMap"]
+	var got []string
+	for _, s := range f.proofs["J1.case int|completed"] {
+		pos := ""
+		switch {
+		case s.Step > 0:
+			pos = fmt.Sprintf(" [step %d, line %d]", s.Step, s.Line)
+		case s.Line > 0:
+			pos = fmt.Sprintf(" [line %d]", s.Line)
+		}
+		got = append(got, s.Text+pos)
+	}
+	want := []string{
+		"`vals` is built here. [line 18]",
+		"`vals` receives a value in `vals[\"name\"]`. [line 19]",
+		"`vals` receives a value in `vals[\"alias\"]`. [line 20]",
+		"This is a `string`. [line 19]",
+		"This is a `*string`. [line 20]",
+		"`vals[key]` may not have that key, and a missing key gives nil.",
+		"J1 (switch vals[key].(type)) takes `case int`. [step 1, line 21]",
+		"`vals[key]` can hold `string`, `*string`, nil, none of which takes `case int`, so that case cannot be taken.",
+	}
+	if len(got) < 4 || !strings.Contains(strings.Join(got, "\n"), "takes `case int`. [step 1,") || !strings.Contains(strings.Join(got, "\n"), "`string`, `*string`") {
+		t.Errorf("proof:\n%s\n(for reference, the shape of a good proof:\n%s)", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

@@ -45,7 +45,14 @@ type Engine struct {
 	// engineOff is true when the config turns the engine off.
 	facts     map[string]*facts.Analyzer
 	engineOff bool
-	explained []scope.ExplainedTrace
+	// jsonMode is classification.assumptions.default_json_converter; jsonHits
+	// are the places a custom data converter was found in the module (the
+	// assumption is then off).
+	jsonMode string
+	jsonHits []string
+	// jsonRelevant: some workflow has a value the assumption is about.
+	jsonRelevant bool
+	explained    []scope.ExplainedTrace
 	// extraWarnings are config warnings found while resolving rules.
 	extraWarnings []string
 	// anchors are where each numbered ("#n") rule entry points, for the
@@ -88,7 +95,7 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{},
-		facts: map[string]*facts.Analyzer{}, engineOff: c.EngineOff}
+		facts: map[string]*facts.Analyzer{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter}
 	if c.Policy == string(Exclude) {
 		e.policy = Exclude
 	}
@@ -348,6 +355,8 @@ func (e *Engine) Notes(final []Classification, measured []string) []string {
 	for _, d := range e.disabled {
 		out = append(out, fmt.Sprintf("Detector %s is turned off in the config: %s", d.Name, d.Reason))
 	}
+	out = append(out, groupNotes(final)...)
+	out = append(out, e.assumptionNotes(final)...)
 	return out
 }
 
@@ -356,4 +365,23 @@ func pathsN(n int) string {
 		return "1 path"
 	}
 	return fmt.Sprintf("%d paths", n)
+}
+
+// SetConverterScan tells the engine where the module sets its own Temporal
+// data converter (see load.CustomConverterUse). Any hit turns the assumption
+// default-json-converter off. Call it before AddGraph.
+func (e *Engine) SetConverterScan(hits []string) { e.jsonHits = hits }
+
+// JSONConverterOn reports whether claims may rest on Temporal's default JSON
+// converter, and when not, why.
+func (e *Engine) JSONConverterOn() (on bool, why string) {
+	switch {
+	case e.engineOff:
+		return false, "the fact engine is off"
+	case e.jsonMode == "off":
+		return false, "turned off in the config (classification.assumptions.default_json_converter)"
+	case len(e.jsonHits) > 0:
+		return false, "the module sets its own data converter or decodes numbers specially (" + e.jsonHits[0] + ")"
+	}
+	return true, ""
 }

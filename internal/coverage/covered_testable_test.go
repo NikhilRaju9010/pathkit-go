@@ -96,3 +96,25 @@ func TestCoveredSuspectIsQuietlyTestable(t *testing.T) {
 		t.Errorf("a covered engine claim: %+v warnings %v err %v", res.Breakdown, res.Warnings, res.InternalError)
 	}
 }
+
+// unknown-input-type is only for a case no test has taken: a path that was
+// run, or whose case another run took, is an ordinary path.
+func TestUnknownInputTypeNeedsAnUntakenCase(t *testing.T) {
+	w := fixtureWorkflow(t, "../../testdata/shapes/typeswitch", "typeswitch.SwitchWithUnknownValue")
+	e, err := classify.NewEngine(scope.Classification{Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddGraph(w.Name, w.Graph); err != nil {
+		t.Fatal(err)
+	}
+	res := Compute(Input{Workflows: []Workflow{w}, Classifier: e.Classify})
+	if res.Breakdown.NeedsReview.Paths != 3 {
+		t.Fatalf("no trace: want 3 needs-review paths, got %+v", res.Breakdown)
+	}
+	// A run of the "case string" path settles that path only.
+	res = Compute(Input{Workflows: []Workflow{w}, Traces: []TraceFile{tf("a", w, "complete", `J1.case string`)}, Classifier: e.Classify})
+	if res.Breakdown.NeedsReview.Paths != 2 || res.Covered != 1 || len(res.Warnings) != 0 {
+		t.Errorf("one case run: %+v warnings %v", res.Breakdown, res.Warnings)
+	}
+}

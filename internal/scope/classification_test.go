@@ -228,3 +228,31 @@ func TestEngineEnabledRead(t *testing.T) {
 		t.Error("a misspelled key under engine must be refused")
 	}
 }
+
+// classification.assumptions.default_json_converter is "auto" (the default)
+// or "off"; anything else, and any other key under assumptions, is refused.
+func TestAssumptionsRead(t *testing.T) {
+	read := func(body string) (string, error) {
+		path := filepath.Join(t.TempDir(), FileName)
+		write(t, path, body)
+		c, err := Read(path)
+		if err != nil {
+			return "", err
+		}
+		return c.Classification.JSONConverter, nil
+	}
+	if v, err := read(`{"classification": {"enabled": true}}`); err != nil || v != "auto" {
+		t.Errorf("default: %q %v", v, err)
+	}
+	if v, err := read(`{"classification": {"enabled": true, "assumptions": {"default_json_converter": "off"}}}`); err != nil || v != "off" {
+		t.Errorf("off: %q %v", v, err)
+	}
+	for _, bad := range []string{
+		`{"classification": {"enabled": true, "assumptions": {"default_json_converter": "on"}}}`,
+		`{"classification": {"enabled": true, "assumptions": {"default_json": "off"}}}`,
+	} {
+		if _, err := read(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

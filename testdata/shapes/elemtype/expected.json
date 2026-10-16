@@ -7,8 +7,8 @@
         {
           "key": "J1.iterate J2.true J1.retry J1.exit|completed",
           "text": "for range items --iterate--> if !ok --true--> retry --> for range items --exit--> End (completed)",
-          "bucket": "testable",
-          "label": ""
+          "bucket": "cannot-be-tested",
+          "label": "impossible-type"
         },
         {
           "key": "J1.iterate J2.false J1.retry J1.exit|completed",
@@ -19,8 +19,8 @@
         {
           "key": "J1.exit|completed",
           "text": "for range items --exit--> End (completed)",
-          "bucket": "testable",
-          "label": ""
+          "bucket": "cannot-be-tested",
+          "label": "impossible-loop-exit"
         }
       ],
       "v2": [
@@ -31,7 +31,7 @@
             "bucket": "cannot-be-tested",
             "label": "impossible-type"
           },
-          "status": "today: missed",
+          "status": "today: correct",
           "note": "every element was built as a map"
         },
         {
@@ -50,7 +50,7 @@
             "bucket": "cannot-be-tested",
             "label": "impossible-loop-exit"
           },
-          "status": "today: missed",
+          "status": "today: correct",
           "note": "items always holds two elements, so the loop cannot be skipped"
         }
       ]
@@ -60,8 +60,8 @@
         {
           "key": "J1.true|completed",
           "text": "if !ok --true--> End (completed)",
-          "bucket": "testable",
-          "label": ""
+          "bucket": "cannot-be-tested",
+          "label": "impossible-type"
         },
         {
           "key": "J1.false|completed",
@@ -78,7 +78,7 @@
             "bucket": "cannot-be-tested",
             "label": "impossible-type"
           },
-          "status": "today: missed",
+          "status": "today: correct",
           "note": "every element was built as a map"
         },
         {

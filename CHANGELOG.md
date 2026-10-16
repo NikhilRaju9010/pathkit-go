@@ -23,6 +23,13 @@ Some paths can never run (a loop the code always enters, the same value tested t
 - **A loop condition of a named bool type** (`type Flag bool`, `for !done`) or of a type parameter constrained by `~bool` can now be recorded by `pathkit test`: the recorder converts it with `bool(...)`. Before, `pathkit test` and `pathkit prepare` stopped with a message.
 - **Internal check:** if PathKit's own check "a path a test ran is never hidden" ever fails, the command now stops with an error message instead of crashing.
 
+### Added: type, nil and length facts
+
+- **New claims** (cannot-be-tested): `impossible-type` (a type switch case or a type assertion no possible type takes) and `impossible-nil` (`v == nil` for an interface that holds a typed value). Leaving a loop before its first round is claimed with the existing label `impossible-loop-exit` when the loop always has a first round (a `range` over something not empty, a condition true at the first test).
+- **Decoded values.** With Temporal's default JSON converter, an `interface{}` it fills holds only a string, float64, bool, nil, `[]interface{}` or `map[string]interface{}`; claims that use this name the assumption `default-json-converter`. PathKit turns it off by itself when the module sets its own converter or uses `UseNumber` / `json.Number`, and says so in the text report, the HTML glossary and the JSON (`assumptions`). Config: `classification.assumptions.default_json_converter` (`"auto"` or `"off"`).
+- **`unknown-input-type`** (needs-review): an untested path takes a type switch case on a value PathKit cannot follow and no test has taken. The reports group these by switch.
+- In the fixtures: `PossibleTypedNil` became `ImpossibleTypedNil` (the typed-nil rule now claims it), and the shape fixture `SwitchWithUnknownValue` now gets its unknown value from a call (a workflow input of type `interface{}` is a decoded value, which the new rule follows; that case has its own fixture, `SwitchOnDecodedInput`).
+
 ### Added: proofs for automatic claims
 
 - **Claim proofs.** Every claim an automatic detector makes now carries its reasoning as an ordered list of plain sentences: one for each decision on the path that matters (with its step number and line of code), then a closing sentence. This includes the needs-review claims of the closed-channel and history-size detectors; a claim PathKit no longer trusts (because a trace fits no path) has no proof. `pathkit explain` prints it as a numbered `Proof:` block, and `--json` has a new `proof` key on those paths only. Nothing else in any output changed.

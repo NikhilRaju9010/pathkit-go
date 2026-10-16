@@ -7,8 +7,8 @@
         {
           "key": "J1.true J2.true|completed",
           "text": "if flag --true--> if v == nil --true--> End (completed)",
-          "bucket": "testable",
-          "label": ""
+          "bucket": "cannot-be-tested",
+          "label": "impossible-nil"
         },
         {
           "key": "J1.true J2.false|completed",
@@ -37,7 +37,7 @@
             "bucket": "cannot-be-tested",
             "label": "impossible-nil"
           },
-          "status": "today: missed",
+          "status": "today: correct",
           "note": "flag is true, so v holds a *string, which is never a nil interface"
         },
         {
@@ -75,8 +75,8 @@
         {
           "key": "J1.true|completed",
           "text": "if v == nil --true--> End (completed)",
-          "bucket": "testable",
-          "label": ""
+          "bucket": "cannot-be-tested",
+          "label": "impossible-nil"
         },
         {
           "key": "J1.false|completed",
@@ -93,7 +93,7 @@
             "bucket": "cannot-be-tested",
             "label": "impossible-nil"
           },
-          "status": "today: missed",
+          "status": "today: correct",
           "note": "v holds a *string, so it is never a nil interface"
         },
         {

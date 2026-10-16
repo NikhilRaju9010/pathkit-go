@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -137,5 +139,87 @@ func TestExplainAnEngineClaim(t *testing.T) {
 	out, _, _ = run(t, "coverage", folder, "--config", on, "--include", "ContradictionThroughAssign", "--traces", traces, "--json")
 	if b := decode(t, out)["classification"].(map[string]any)["buckets"].(map[string]any)["cannotBeTested"].(map[string]any)["paths"].(float64); b != 1 {
 		t.Errorf("engine on: %v cannot-be-tested paths, want 1", b)
+	}
+}
+
+// copyShape copies the typeswitch shape fixture into a throw-away module.
+func copyShape(t *testing.T) string {
+	t.Helper()
+	src := absPath(t, "../../testdata/shapes")
+	dst := t.TempDir()
+	for _, f := range []string{"go.mod", "go.sum", "typeswitch/typeswitch.go"} {
+		data, err := os.ReadFile(filepath.Join(src, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dst, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, f), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dst
+}
+
+// The assumption default-json-converter: claims rest on it and say so; when
+// the module sets its own data converter the rule turns itself off, the claim
+// goes, and the JSON, the text report and the HTML all say so.
+func TestConverterScanTurnsTheRuleOff(t *testing.T) {
+	mod := copyShape(t)
+	cfg := writeConfig(t, `{"packages": [`+jsonString(mod+"/typeswitch")+`], "workflows": {"include": ["SwitchOnDecodedInput"]}, "classification": {"enabled": true}}`)
+	traces := writeTracesFor(t, "../../testdata/shapes/typeswitch", "typeswitch.SwitchOnDecodedInput", []string{"J1.case string"})
+
+	out, stderr, code := run(t, "coverage", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--json")
+	if code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+	m := decode(t, out)
+	as := m["assumptions"].([]any)
+	if len(as) != 1 {
+		t.Fatalf("assumptions: %v", as)
+	}
+	a := as[0].(map[string]any)
+	if a["name"] != "default-json-converter" || a["on"] != true || a["claims"].(float64) != 1 {
+		t.Errorf("on: %v", a)
+	}
+	var claimed map[string]any
+	for _, p := range m["workflows"].([]any)[0].(map[string]any)["pathList"].([]any) {
+		if pp := p.(map[string]any); pp["bucket"] == "cannot-be-tested" {
+			claimed = pp
+		}
+	}
+	if claimed == nil || claimed["label"] != "impossible-type" || claimed["assumptions"].([]any)[0] != "default-json-converter" {
+		t.Errorf("the claim: %v", claimed)
+	}
+	text, _, _ := run(t, "report", mod+"/typeswitch", "--config", cfg, "--traces", traces)
+	if !strings.Contains(text, "Assumption default-json-converter: on; 1 claim rests on it") {
+		t.Errorf("text report lacks the assumption line:\n%s", text)
+	}
+
+	// The module now sets its own data converter.
+	if err := os.WriteFile(filepath.Join(mod, "typeswitch", "conv.go"), []byte("package typeswitch\n\n// the worker uses a DataConverter of our own\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ = run(t, "coverage", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--json")
+	m = decode(t, out)
+	a = m["assumptions"].([]any)[0].(map[string]any)
+	if a["on"] != false || !strings.Contains(a["why"].(string), "typeswitch/conv.go:3") {
+		t.Errorf("off: %v", a)
+	}
+	for _, p := range m["workflows"].([]any)[0].(map[string]any)["pathList"].([]any) {
+		if pp := p.(map[string]any); pp["bucket"] == "cannot-be-tested" {
+			t.Errorf("a claim about a decoded value with the rule off: %v", pp)
+		}
+	}
+	text, _, _ = run(t, "report", mod+"/typeswitch", "--config", cfg, "--traces", traces)
+	if !strings.Contains(text, "Assumption default-json-converter: OFF") || !strings.Contains(text, "typeswitch/conv.go:3") {
+		t.Errorf("text report lacks the OFF line:\n%s", text)
+	}
+	page := filepath.Join(t.TempDir(), "r.html")
+	run(t, "report", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--html="+page)
+	html, err := os.ReadFile(page)
+	if err != nil || !strings.Contains(string(html), "Assumption: default-json-converter") || !strings.Contains(string(html), "OFF: the module sets its own data converter") {
+		t.Errorf("the HTML lacks the assumption (err %v)", err)
 	}
 }

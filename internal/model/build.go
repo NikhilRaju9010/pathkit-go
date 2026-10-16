@@ -93,7 +93,7 @@ func newBuilder(wf discover.Workflow) *builder {
 
 // finish numbers the junctions in source order and assigns every ID.
 func (b *builder) finish(start Target) *Graph {
-	g := &Graph{Workflow: b.wf.Name, Start: start, byStmt: b.junctions, byID: map[string]*Exit{}, info: b.info, fn: b.wf.Func, fset: b.fset,
+	g := &Graph{Workflow: b.wf.Name, Start: start, byStmt: b.junctions, byID: map[string]*Exit{}, info: b.info, fn: b.wf.Func, fset: b.fset, pkg: b.wf.Pkg.Types,
 		trusted: func(e ast.Expr) bool { return b.trustedConstant(e, map[types.Object]bool{}) }}
 	for _, j := range b.junctions {
 		g.Junctions = append(g.Junctions, j)

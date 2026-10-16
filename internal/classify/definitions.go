@@ -14,6 +14,9 @@ const (
 	KindBucket  DefinitionKind = "bucket"
 	KindLabel   DefinitionKind = "label"
 	KindComment DefinitionKind = "comment" // a //pathkit:... comment in the user's code
+	// KindAssumption: something a claim rests on that PathKit does not check
+	// by itself (and turns off when it sees it does not hold).
+	KindAssumption DefinitionKind = "assumption"
 )
 
 // Definition explains one bucket, reason label or comment. This list is
@@ -138,6 +141,16 @@ var definitions = []Definition{
 		"If nothing changed the value, the two answers could not both happen. PathKit cannot tell whether something did, so it does not call the path impossible.", "A value is checked, then a loop that may change it runs, then it is checked again.", "yes",
 		"Check whether the value can change in between. If it cannot, mark the path untestable in the config with that reason; if it can, write a test."),
 
+	label("impossible-type", CannotBeTested, "certain", "A type switch case, or a type assertion, that no type the value can hold takes.",
+		"PathKit followed what is stored in the interface, slice or map (or what Temporal's decoder puts in it), so it knows the list of types it can hold. A case for a type not in the list can never be taken.", "A map that only ever received a string and a *string, then a type switch with case int.", "no",
+		"Nothing, once you have read the proof (pathkit explain) and agree. If a type can reach the value another way that PathKit cannot see, mark the path testable in the config (classification.paths.mark_testable, with a reason)."),
+	label("impossible-nil", CannotBeTested, "certain", "v == nil taken true, for an interface that holds a typed value: even a nil pointer inside an interface makes it non-nil.",
+		"An interface value is nil only when it holds no type at all. A *string that is nil, stored in an interface{}, makes a non-nil interface.", "var v interface{} = note, where note is a *string, then if v == nil.", "no",
+		"Nothing, once you have read the proof (pathkit explain). If the code means \"the pointer is nil\", compare the pointer, not the interface."),
+	label("unknown-input-type", NeedsReview, "likely", "An untested path takes a type switch case on a value PathKit cannot follow, and no test has ever taken that case.",
+		"PathKit does not know where the value comes from, so it does not know which types it can hold. The case may be one the input never has, or one nobody has tried.", "A type switch on a value passed in by a helper, with case int, when no test ever sent an int.", "yes",
+		"Check what the input can hold. If the case can happen, write a test that sends it; if it cannot, mark the path untestable in the config with that reason."),
+
 	// B. loops.
 	label("same-list-loops", CannotBeTested, "certain", "Two loops over the same collection must run the same number of times.",
 		"One loop running zero times while the other runs once can't happen.", "Two range loops over the same slice.", "no", "Nothing."),
@@ -180,6 +193,12 @@ var definitions = []Definition{
 		"A person knows something PathKit can't see.", "mark_untestable with a reason.", "as chosen", "Keep the reason up to date."),
 	label("needs-review", NeedsReview, "likely", "PathKit is not sure, or the label is unknown.",
 		"The safe place for anything unrecognized.", "A custom label with no definition.", "unknown", "Review it."),
+
+	// Assumptions.
+	{Kind: KindAssumption, Name: AssumptionJSON, Meaning: "a value Temporal decodes into an interface{} holds only a string, float64, bool, nil, []interface{} or map[string]interface{}",
+		Why:                  "Temporal's default data converter decodes JSON that way. The claims named impossible-type rest on it for workflow inputs, activity results, signal payloads and SideEffect results that land in an interface{}.",
+		Example:              "A workflow input of type map[string]interface{}: a type switch on one of its values has no int case that can run.",
+		PossibleInProduction: "not applicable", DecidedBy: "PathKit", WhatToDo: "PathKit turns this off by itself when the module sets a custom DataConverter, PayloadConverter or codec, or uses json.Number or UseNumber, and says so in every report. To turn it off yourself: classification.assumptions.default_json_converter = \"off\"."},
 
 	// Comments in the user's code.
 	{Kind: KindComment, Name: "//pathkit:ignore", Meaning: "On an if (same line, or the line above): this if is never a junction. It is NOT the same as //pathkit:untestable.",

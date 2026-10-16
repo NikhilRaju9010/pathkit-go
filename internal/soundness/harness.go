@@ -30,6 +30,34 @@ type Flagged bool
 
 func sp(s string) *string { return &s }
 
+// pair stands for a call with two results PathKit cannot see into.
+func pair(s string) (interface{}, error) {
+	if s == "" {
+		return 7, nil
+	}
+	return s, nil
+}
+
+// mutateAny writes an int into a map that an interface holds.
+func mutateAny(v interface{}) {
+	if m, ok := v.(map[string]interface{}); ok && m != nil {
+		m["a"] = 5
+	}
+}
+
+// mutate stores an int in a map; mutateS in a slice (if it has an element).
+func mutate(m map[string]interface{}) {
+	if m != nil {
+		m["a"] = 1
+	}
+}
+
+func mutateS(s []interface{}) {
+	if len(s) > 0 {
+		s[0] = 1
+	}
+}
+
 // normalise stands for "any call PathKit cannot see into".
 func normalise(s string) string { return s + "" }
 

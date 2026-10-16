@@ -75,6 +75,9 @@ type ReportInput struct {
 	// CustomLabels are the config's custom label definitions, shown in the
 	// glossary next to the built-in ones.
 	CustomLabels []classify.Definition
+	// Assumptions are the assumptions that are off, or that claims rest on
+	// (classify.Engine.Assumptions); shown in the glossary.
+	Assumptions []classify.AssumptionStatus
 }
 
 // overallThreshold is the threshold for the overall figures: none when
@@ -194,7 +197,7 @@ func Report(in ReportInput) ([]byte, error) {
 	v.buildCards(res, in.Classification != nil)
 
 	if in.Classification != nil {
-		v.Glossary = buildGlossary(res, in.CustomLabels)
+		v.Glossary = buildGlossary(res, in.CustomLabels, in.Assumptions)
 	}
 	data := newPageData(true, in.Classification != nil)
 	for wi, w := range res.Workflows {

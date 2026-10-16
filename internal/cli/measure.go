@@ -58,6 +58,8 @@ type measured struct {
 	basis      coverage.Basis
 	showClass  bool
 	classNotes []string // where the markings came from (classify.Engine.Notes)
+	// assumptions that are off, or that claims rest on (classify.Engine.Assumptions)
+	assumptions []classify.AssumptionStatus
 	// customLabels are the config's custom label definitions (the HTML
 	// glossary shows them next to the built-in ones).
 	customLabels []classify.Definition
@@ -266,6 +268,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 			}
 		}
 		m.classNotes = append(engine.Notes(final, measured), unexplainedNotes(m.res)...)
+		m.assumptions = engine.Assumptions(final)
 		m.customLabels = engine.CustomLabels()
 	}
 	return m, nil
@@ -424,6 +427,22 @@ func classificationEngine(sc *scoped, cmdName string, stderr io.Writer) (*classi
 		explained = append(explained, x)
 	}
 	engine.SetExplained(explained)
+	// The module(s) of the workflows are searched for a custom data converter
+	// (the assumption default-json-converter), unless the engine or the
+	// assumption is off anyway.
+	if !cl.EngineOff && cl.JSONConverter != "off" {
+		var hits []string
+		seenRoot := map[string]bool{}
+		for _, r := range sc.mapped {
+			root := load.ModuleRoot(r.wf.Filename)
+			if root == "" || seenRoot[root] {
+				continue
+			}
+			seenRoot[root] = true
+			hits = append(hits, load.CustomConverterUse(root)...)
+		}
+		engine.SetConverterScan(hits)
+	}
 	for _, r := range sc.mapped {
 		engine.AddMarks(r.wf.Name, r.graph.Marks)
 		if err := engine.AddGraph(r.wf.Name, r.graph); err != nil {

@@ -37,6 +37,7 @@ func (s *state) skip(m model.SkipMark) {
 
 func (s *state) exec(n ast.Node) {
 	s.callEffects(n)
+	s.decodeEffects(n)
 	switch x := n.(type) {
 	case *ast.AssignStmt:
 		s.execAssign(x)
@@ -51,12 +52,15 @@ func (s *state) exec(n ast.Node) {
 			}
 		}
 	case *ast.IncDecStmt:
+		s.storeIndex(x.X, nil, x.Tok)
 		s.killLHS(x.X)
 	case *ast.RangeStmt:
 		if x.Key != nil {
+			s.storeIndex(x.Key, nil, token.ASSIGN)
 			s.killLHS(x.Key)
 		}
 		if x.Value != nil {
+			s.storeIndex(x.Value, nil, token.ASSIGN)
 			s.killLHS(x.Value)
 		}
 	}
@@ -132,6 +136,11 @@ func (s *state) derive(rhs ast.Expr, lt types.Type) []spec {
 	info := s.a.info
 	lk := kindOf(lt)
 	tv := info.Types[rhs]
+	if !tv.IsNil() && (isInterface(lt) || isMapOrSlice(lt)) {
+		if out := s.deriveTypes(rhs, lt); len(out) > 0 {
+			return append(out, s.deriveNilness(rhs, lt)...)
+		}
+	}
 	switch {
 	case tv.IsNil():
 		if lk == tkNilable {
@@ -154,7 +163,7 @@ func (s *state) derive(rhs ast.Expr, lt types.Type) []spec {
 		if lk != tkNilable {
 			return nil
 		}
-		w := s.newWhy(oNonNil, rhs.Pos(), key{}, lit("is set to a new value (&T{}, new, make or a literal), which is never nil"))
+		w := s.newWhy(oNonNil, rhs.Pos(), key{}, lit(neverNil))
 		return []spec{{d: datum{op: dNonNil, why: w}}}
 	}
 	switch x := e.(type) {
@@ -186,10 +195,34 @@ func (s *state) derive(rhs ast.Expr, lt types.Type) []spec {
 			sub := kk.path[len(rk.path):]
 			for _, d := range ds {
 				w := s.newWhy(oCopy, rhs.Pos(), key{}, func() string { return fmt.Sprintf("is a copy of `%s`", exprText(rhs)) }, d.why)
-				out = append(out, spec{sub: sub, d: datum{op: d.op, val: d.val, why: w, soft: d.soft}})
+				cp := datum{op: d.op, val: d.val, keys: d.keys, why: w, soft: d.soft}
+				if d.ts != nil {
+					cp.ts = d.ts.clone()
+				}
+				out = append(out, spec{sub: sub, d: cp})
 			}
 		}
 		return out
+	}
+	return nil
+}
+
+// deriveNilness: a composite literal, make or &T{} is never nil.
+func (s *state) deriveNilness(rhs ast.Expr, lt types.Type) []spec {
+	if kindOf(lt) != tkNilable || isInterface(lt) {
+		return nil
+	}
+	switch x := ast.Unparen(rhs).(type) {
+	case *ast.CompositeLit:
+		w := s.newWhy(oNonNil, rhs.Pos(), key{}, lit(neverNil))
+		return []spec{{d: datum{op: dNonNil, why: w}}}
+	case *ast.CallExpr:
+		if id, ok := ast.Unparen(x.Fun).(*ast.Ident); ok {
+			if b, ok := s.a.info.Uses[id].(*types.Builtin); ok && b.Name() == "make" {
+				w := s.newWhy(oNonNil, rhs.Pos(), key{}, lit(neverNil))
+				return []spec{{d: datum{op: dNonNil, why: w}}}
+			}
+		}
 	}
 	return nil
 }
@@ -207,8 +240,12 @@ func (s *state) apply(k key, specs []spec) {
 func (s *state) execAssign(x *ast.AssignStmt) {
 	if x.Tok != token.ASSIGN && x.Tok != token.DEFINE { // x += ...
 		for _, l := range x.Lhs {
+			s.storeIndex(l, nil, x.Tok)
 			s.killLHS(l)
 		}
+		return
+	}
+	if s.appendSelf(x) {
 		return
 	}
 	if len(x.Lhs) == len(x.Rhs) {
@@ -221,6 +258,7 @@ func (s *state) execAssign(x *ast.AssignStmt) {
 			}
 		}
 		for i, l := range x.Lhs {
+			s.storeIndex(l, x.Rhs[i], token.ASSIGN)
 			s.killLHS(l)
 			if k, ok := s.operand(l); ok {
 				s.apply(k, all[i])
@@ -230,15 +268,27 @@ func (s *state) execAssign(x *ast.AssignStmt) {
 	}
 	// v, ok := x.(T)   v, ok := m[k]   (and calls with several results)
 	for _, l := range x.Lhs {
+		s.storeIndex(l, nil, token.ASSIGN) // m["a"], err = f(): the element is not understood
 		s.killLHS(l)
 	}
 	if len(x.Lhs) == 2 && len(x.Rhs) == 1 {
 		switch r := ast.Unparen(x.Rhs[0]).(type) {
 		case *ast.TypeAssertExpr:
 			s.commaOk(x.Lhs[0], x.Lhs[1], x.Rhs[0])
+			s.assertion(x.Lhs[0], x.Lhs[1], x.Rhs[0])
 		case *ast.IndexExpr:
 			if _, isMap := s.a.info.TypeOf(r.X).Underlying().(*types.Map); isMap {
 				s.commaOk(x.Lhs[0], x.Lhs[1], x.Rhs[0])
+				// the value is one of the elements, or nil when the key is missing
+				if vk, okv := s.operand(x.Lhs[0]); okv && s.a.trackable(vk.v) && isInterface(s.a.info.TypeOf(x.Lhs[0])) {
+					if ts, used, known := s.elemTypes(r); known {
+						d := s.typesDatum(ts, r.Pos(), key{})
+						for _, u := range used {
+							d.why.parents = append(d.why.parents, datumWhys(u)...)
+						}
+						s.apply(vk, []spec{{d: *d}})
+					}
+				}
 			}
 		}
 	}
@@ -415,9 +465,14 @@ func (s *state) zeroWith(k key, t types.Type, w *why, depth int) {
 func (s *state) learnForm(f cmpForm, taken bool, si stepInfo) {
 	holds := (f.op == token.EQL || f.op == token.NEQ) && ((f.op == token.EQL) == taken) // the equality is true
 	switch {
+	case f.elem != nil:
+		return // nothing learned about an element
 	case f.isNil:
 		if f.op != token.EQL && f.op != token.NEQ {
 			return
+		}
+		if !holds {
+			s.refineTypes(f.k, si)
 		}
 		if holds {
 			s.add(f.k, &datum{op: dNil, why: s.branchWhy(f.k, si, func() string { return fmt.Sprintf("`%s` is nil.", f.k) })})
@@ -434,11 +489,19 @@ func (s *state) learnForm(f cmpForm, taken bool, si stepInfo) {
 		case f.op == token.EQL && n == 0 && taken, f.op == token.NEQ && n == 0 && !taken,
 			f.op == token.LSS && n == 1 && taken, f.op == token.LEQ && n == 0 && taken,
 			f.op == token.GTR && n == 0 && !taken, f.op == token.GEQ && n == 1 && !taken:
-			s.addEqString(f.k, emptyString, si)
+			if f.coll {
+				s.add(f.k, &datum{op: dLenZero, why: s.branchWhy(f.k, si, func() string { return fmt.Sprintf("`%s` is empty.", f.k) })})
+			} else {
+				s.addEqString(f.k, emptyString, si)
+			}
 		case f.op == token.EQL && n == 0 && !taken, f.op == token.NEQ && n == 0 && taken,
 			f.op == token.GTR && n == 0 && taken, f.op == token.GEQ && n == 1 && taken,
 			f.op == token.LSS && n == 1 && !taken, f.op == token.LEQ && n == 0 && !taken:
-			s.add(f.k, &datum{op: dNe, val: emptyString, why: s.branchWhy(f.k, si, func() string { return fmt.Sprintf("`%s` is not empty.", f.k) })})
+			op := dNe
+			if f.coll {
+				op = dLenNonZero
+			}
+			s.add(f.k, &datum{op: op, val: emptyString, why: s.branchWhy(f.k, si, func() string { return fmt.Sprintf("`%s` is not empty.", f.k) })})
 		}
 	case f.op == token.EQL || f.op == token.NEQ:
 		if holds {
@@ -475,3 +538,21 @@ func terminates(b ast.Stmt) bool {
 	}
 	return false
 }
+
+// refineTypes: a value was found not to be nil, so it is not nil in the set
+// of types it may hold either.
+func (s *state) refineTypes(k key, si stepInfo) {
+	for _, d := range s.d[k] {
+		if d.op == dTypes && d.soft == "" && d.ts.mayNil {
+			ts := d.ts.clone()
+			ts.mayNil, ts.nilWhy = false, nil
+			w := s.branchWhy(k, si, func() string { return fmt.Sprintf("`%s` is not nil.", k) })
+			w.parents = append(w.parents, datumWhys(d)...)
+			s.add(k, &datum{op: dTypes, ts: ts, why: w})
+			return
+		}
+	}
+}
+
+// neverNil is the reason for a fact about a value built by &T{}, new, make or a literal.
+const neverNil = "is set to a new value (&T{}, new, make or a literal), which is never nil"

@@ -160,6 +160,7 @@ type Graph struct {
 	info *types.Info
 	fn   *ast.FuncDecl
 	fset *token.FileSet
+	pkg  *types.Package
 
 	trusted func(ast.Expr) bool
 }
@@ -176,6 +177,9 @@ func (g *Graph) TypesInfo() *types.Info { return g.info }
 
 // Func is the workflow function.
 func (g *Graph) Func() *ast.FuncDecl { return g.fn }
+
+// Types is the workflow's package, for writing type names.
+func (g *Graph) Types() *types.Package { return g.pkg }
 
 // FileSet is the file set the workflow's positions belong to.
 func (g *Graph) FileSet() *token.FileSet { return g.fset }

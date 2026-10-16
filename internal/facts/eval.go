@@ -107,6 +107,8 @@ type cmpForm struct {
 	val   constant.Value
 	isNil bool
 	isLen bool
+	coll  bool           // isLen of a slice or map (not a string)
+	elem  *ast.IndexExpr // a nil check of coll[i]; k is the collection
 }
 
 // formOf reads a comparison expression into a cmpForm.
@@ -130,14 +132,27 @@ func (s *state) formOf(x *ast.BinaryExpr) (cmpForm, bool) {
 	if isNil && op != token.EQL && op != token.NEQ {
 		return cmpForm{}, false
 	}
-	// len(s) for a string s
+	// len(s) for a string, slice or map s
 	if call, ok := ast.Unparen(l).(*ast.CallExpr); ok && len(call.Args) == 1 {
 		if id, ok := ast.Unparen(call.Fun).(*ast.Ident); ok {
-			if b, ok := s.a.info.Uses[id].(*types.Builtin); ok && b.Name() == "len" && kindOf(s.a.info.TypeOf(call.Args[0])) == tkString {
+			if b, ok := s.a.info.Uses[id].(*types.Builtin); ok && b.Name() == "len" {
+				at := s.a.info.TypeOf(call.Args[0])
 				if k, ok := s.operand(call.Args[0]); ok && !isNil && val.Kind() == constant.Int {
-					return cmpForm{k: k, op: op, val: val, isLen: true}, true
+					switch {
+					case kindOf(at) == tkString:
+						return cmpForm{k: k, op: op, val: val, isLen: true}, true
+					case isMapOrSlice(at):
+						return cmpForm{k: k, op: op, val: val, isLen: true, coll: true}, true
+					}
 				}
 			}
+		}
+		return cmpForm{}, false
+	}
+	// coll[i] == nil for a slice or map built here
+	if ix, ok := ast.Unparen(l).(*ast.IndexExpr); ok {
+		if ck, ok := s.operand(ix.X); ok && isNil && (op == token.EQL || op == token.NEQ) && isInterface(s.a.info.TypeOf(ix)) {
+			return cmpForm{k: ck, op: op, isNil: true, elem: ix}, true
 		}
 		return cmpForm{}, false
 	}
@@ -219,7 +234,32 @@ func (s *state) eval(e ast.Expr, shadow bool) (tri, []*datum) {
 	return unknown, nil
 }
 
+// nilFromSet: is a value that holds one of ts nil? A value that can only be
+// nil is; one that holds a type and cannot be nil is not.
+func nilFromSet(ts *typeSet, op token.Token) (tri, bool) {
+	switch {
+	case len(ts.ents) > 0 && !ts.mayNil:
+		return triOf(op != token.EQL), true
+	case len(ts.ents) == 0 && ts.mayNil:
+		return triOf(op == token.EQL), true
+	}
+	return unknown, false
+}
+
 func (s *state) evalForm(f cmpForm, shadow bool) (tri, []*datum) {
+	if f.elem != nil {
+		if shadow {
+			return unknown, nil
+		}
+		ts, used, ok := s.elemTypes(f.elem)
+		if !ok {
+			return unknown, nil
+		}
+		if t, ok := nilFromSet(ts, f.op); ok {
+			return t, used
+		}
+		return unknown, nil
+	}
 	ds := s.datums(f.k, shadow)
 	if f.isNil {
 		for _, d := range ds {
@@ -228,11 +268,34 @@ func (s *state) evalForm(f cmpForm, shadow bool) (tri, []*datum) {
 				return triOf(f.op == token.EQL), []*datum{d}
 			case dNonNil:
 				return triOf(f.op != token.EQL), []*datum{d}
+			case dTypes:
+				if t, ok := nilFromSet(d.ts, f.op); ok {
+					return t, []*datum{d}
+				}
 			}
 		}
 		return unknown, nil
 	}
 	if f.isLen {
+		for _, d := range ds {
+			if d.op == dLenZero {
+				if r, ok := cmp(constant.MakeInt64(0), f.op, f.val); ok {
+					return triOf(r), []*datum{d}
+				}
+			}
+		}
+		for _, d := range ds {
+			if d.op == dLenNonZero {
+				if n, ok := constant.Int64Val(f.val); ok {
+					switch {
+					case f.op == token.EQL && n == 0, f.op == token.LSS && n <= 1, f.op == token.LEQ && n <= 0:
+						return isFalse, []*datum{d}
+					case f.op == token.NEQ && n == 0, f.op == token.GTR && n <= 0, f.op == token.GEQ && n <= 1:
+						return isTrue, []*datum{d}
+					}
+				}
+			}
+		}
 		for _, d := range ds {
 			if d.op == dEq && d.val.Kind() == constant.String {
 				n := constant.MakeInt64(int64(len(constant.StringVal(d.val))))

@@ -282,8 +282,9 @@ func PossibleCommaOkBroken(ctx workflow.Context, raw interface{}) error {
 	return nil
 }
 
-// A copy of an interface from a pointer is not nil even if the pointer is.
-func PossibleTypedNil(ctx workflow.Context) error {
+// An interface that holds a pointer is not nil even if the pointer is: the
+// typed-nil rule (impossible-nil).
+func ImpossibleTypedNil(ctx workflow.Context) error {
 	var p *Input
 	var v interface{} = p
 	if v == nil {
@@ -352,7 +353,8 @@ func PossibleCommaOkFieldAppended(ctx workflow.Context, m map[string]Rec) error 
 	return nil
 }
 
-func MixedCommaOkNestedFieldWritten(ctx workflow.Context, raw interface{}) error {
+func MixedCommaOkNestedFieldWritten(ctx workflow.Context, s string) error {
+	raw := unknownIface(s)
 	v, ok := raw.(Rec)
 	v.In.ID = "x"
 	if !ok {

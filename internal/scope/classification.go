@@ -32,6 +32,10 @@ type Classification struct {
 	// EngineOff is true when the config turns the fact engine off
 	// (classification.engine.enabled: false). The default is on.
 	EngineOff bool
+	// JSONConverter is classification.assumptions.default_json_converter:
+	// "auto" (the default: on unless the module sets a custom data
+	// converter) or "off".
+	JSONConverter string
 }
 
 // CISettings is classification.ci.
@@ -103,6 +107,11 @@ type classificationPart struct {
 	ExplainedTraces    []json.RawMessage `json:"explained_traces"`
 	CI                 json.RawMessage   `json:"ci"`
 	Engine             *enginePart       `json:"engine"`
+	Assumptions        *assumptionsPart  `json:"assumptions"`
+}
+
+type assumptionsPart struct {
+	DefaultJSONConverter *string `json:"default_json_converter"`
 }
 
 type enginePart struct {
@@ -310,6 +319,15 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 
 	if p.Engine != nil && p.Engine.Enabled != nil && !*p.Engine.Enabled {
 		c.EngineOff = true
+	}
+	c.JSONConverter = "auto"
+	if p.Assumptions != nil && p.Assumptions.DefaultJSONConverter != nil {
+		switch v := *p.Assumptions.DefaultJSONConverter; v {
+		case "auto", "off":
+			c.JSONConverter = v
+		default:
+			return c, fail(`classification.assumptions.default_json_converter must be "auto" or "off", got %q`, v)
+		}
 	}
 
 	if p.Detectors != nil {

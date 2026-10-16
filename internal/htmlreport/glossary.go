@@ -30,6 +30,18 @@ type (
 		Unused     []defView
 		Audit      []auditRow
 		AuditOther int // paths a detector sent to needs-review or needs-special-test
+		// Assumptions are the assumptions that are off or relied on.
+		Assumptions []assumptionView
+		// Groups are the unknown-input-type paths, by the type switch they take.
+		Groups []groupRow
+	}
+	assumptionView struct {
+		Name, Status, Meaning, Why, WhatToDo string
+		Claims                               int
+	}
+	groupRow struct {
+		Switch string
+		Paths  int
 	}
 	summaryRow struct {
 		Label, Bucket, DecidedBy string
@@ -76,7 +88,7 @@ func definitionsByName(custom []classify.Definition) (order []classify.Definitio
 	return order, byName
 }
 
-func buildGlossary(res coverage.Result, custom []classify.Definition) *glossaryView {
+func buildGlossary(res coverage.Result, custom []classify.Definition, assumptions []classify.AssumptionStatus) *glossaryView {
 	order, _ := definitionsByName(custom)
 	isCustom := map[string]bool{}
 	for _, d := range custom {
@@ -88,12 +100,16 @@ func buildGlossary(res coverage.Result, custom []classify.Definition) *glossaryV
 		exampleWhere, text  string
 	}
 	use := map[string]*usage{}
+	groups := map[string]int{}
 	g := &glossaryView{Version: classify.DefinitionsVersion()}
 	for wi, w := range res.Workflows {
 		for _, p := range w.Paths {
 			c := p.Class
 			if c.Label == "" {
 				continue
+			}
+			if c.Label == "unknown-input-type" && c.Group != "" {
+				groups[c.Group]++
 			}
 			u := use[c.Label]
 			if u == nil {
@@ -146,6 +162,23 @@ func buildGlossary(res coverage.Result, custom []classify.Definition) *glossaryV
 		} else {
 			g.Unused = append(g.Unused, mk(d, nil))
 		}
+	}
+	for name, n := range groups {
+		g.Groups = append(g.Groups, groupRow{Switch: name, Paths: n})
+	}
+	sort.Slice(g.Groups, func(i, j int) bool {
+		if g.Groups[i].Paths != g.Groups[j].Paths {
+			return g.Groups[i].Paths > g.Groups[j].Paths
+		}
+		return g.Groups[i].Switch < g.Groups[j].Switch
+	})
+	for _, a := range assumptions {
+		d, _ := classify.Lookup(classify.KindAssumption, a.Name)
+		status := "on"
+		if !a.On {
+			status = "OFF: " + a.Why
+		}
+		g.Assumptions = append(g.Assumptions, assumptionView{Name: a.Name, Status: status, Meaning: d.Meaning, Why: d.Why, WhatToDo: d.WhatToDo, Claims: a.Claims})
 	}
 	// A label with no definition is a bug (a test forbids it); never hide
 	// it: list it as used, with a plain statement.

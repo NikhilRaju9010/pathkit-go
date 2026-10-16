@@ -457,6 +457,11 @@ func Compute(in Input) Result {
 					pr.Class = c
 				}
 			}
+			if pr.Class.Label == "unknown-input-type" && (pr.Covered || st.branches[pr.Class.SuspectExit]) {
+				// Only for a case no test has taken: this one was run (by this
+				// path or another), so it is an ordinary path.
+				pr.Class = classify.DefaultTestable()
+			}
 			if pr.Covered && pr.Class.Label == "possible-correlation" {
 				// A suspect is only for paths no test ran; a run settled this
 				// one, so it is simply testable, with nothing to warn about.

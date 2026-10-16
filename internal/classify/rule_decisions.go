@@ -148,7 +148,9 @@ func (e *ambiguousError) Error() string {
 //     "when" entry only makes a rule match nothing (reported as stale), but
 //     a misspelled "without" entry would make the rule match MORE paths.
 func (e *Engine) AddGraph(workflow string, g *model.Graph) error {
-	e.facts[workflow] = facts.New(g)
+	on, _ := e.JSONConverterOn()
+	e.facts[workflow] = facts.New(g, facts.Options{JSONDecode: on})
+	e.jsonRelevant = e.jsonRelevant || e.facts[workflow].JSONRelevant()
 	t := newDecisionTable(g)
 	kept := e.anchors[:0]
 	for _, a := range e.anchors {

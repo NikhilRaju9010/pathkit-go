@@ -42,6 +42,7 @@ var detectors = []Detector{
 	contradictoryGetResult{},
 	valueFlow{},
 	possibleCorrelation{},
+	unknownInputType{},
 }
 
 // DetectorNames lists the names of all detectors.
