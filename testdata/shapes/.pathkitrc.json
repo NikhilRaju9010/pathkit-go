@@ -1,0 +1,9 @@
+{
+  "packages": ["./..."],
+  "workflows": {
+    "exclude": [
+      {"name": "gotofn.UsesGoto", "reason": "PathKit does not map goto; the refusal itself is tested separately"}
+    ]
+  },
+  "classification": {"enabled": true}
+}

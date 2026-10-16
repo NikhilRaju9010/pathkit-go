@@ -67,6 +67,10 @@ type Classification struct {
 	// override, a second rule): the main reason is the first that applies,
 	// the rest are shown for transparency. Empty for most paths.
 	ExtraReasons []string
+	// Proof is the reasoning behind a detector's claim, step by step in
+	// plain words. Empty for a plain testable path and for a claim a
+	// person made (config override, comment, rule).
+	Proof []ProofStep
 }
 
 // Origin is the written-down source of a classification.
@@ -106,6 +110,7 @@ func DowngradeUnexplained(c Classification, why string) (out Classification, cha
 	out = c
 	out.Bucket, out.Label, out.Confidence, out.PossibleInProduction = NeedsReview, "model-limit", Likely, true
 	out.Origin = OriginUnexplained
+	out.Proof = nil // the proof belonged to the claim that is no longer trusted
 	out.Explanation = fmt.Sprintf("%s would mark this path cannot-be-tested (%s), but %s; the claim is not trusted until that trace is explained.", by, was, why)
 	return out, true
 }

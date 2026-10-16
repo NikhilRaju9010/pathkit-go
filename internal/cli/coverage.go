@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/classify"
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"github.com/NikhilRaju9010/pathkit-go/internal/render"
@@ -121,8 +122,17 @@ type (
 		RuleID               *string `json:"ruleId"`
 		// Other things that also applied; left out when there are none.
 		ExtraReasons []string `json:"extraReasons,omitempty"`
+		// Added with claim proofs: the steps behind a detector's claim;
+		// left out when the path has none.
+		Proof []jsonProofStep `json:"proof,omitempty"`
 		// With --hints only, on testable paths no test ran.
 		HowToCover []string `json:"howToCover,omitempty"`
+	}
+	jsonProofStep struct {
+		Step int    `json:"step"` // 1-based step on the path; 0 for the closing sentence
+		File string `json:"file,omitempty"`
+		Line int    `json:"line,omitempty"`
+		Text string `json:"text"`
 	}
 	jsonBucket struct {
 		Paths   int `json:"paths"`
@@ -239,6 +249,14 @@ func classificationJSON(b coverage.Breakdown) jsonClassification {
 	return c
 }
 
+func proofJSON(ps []classify.ProofStep) []jsonProofStep {
+	var out []jsonProofStep
+	for _, s := range ps {
+		out = append(out, jsonProofStep{Step: s.Step, File: s.File, Line: s.Line, Text: s.Text})
+	}
+	return out
+}
+
 func count1(covered, total int) jsonCount {
 	return jsonCount{Total: total, Covered: covered, Percent: math.Round(coverage.Percent(covered, total)*10) / 10}
 }
@@ -268,7 +286,7 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 			jw.PathList = append(jw.PathList, jsonPath{Number: p.Number, ID: p.Path.ID(), Text: render.PathText(p.Path), Steps: steps,
 				End: string(p.Path.End), Compensation: p.Path.Compensation, Covered: p.Covered, Traces: p.Traces, StaleTrace: p.StaleTrace,
 				StableID: p.StableID, Bucket: string(p.Class.Bucket), Label: optional(p.Class.Label), Source: string(p.Class.Source),
-				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons})
+				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons, Proof: proofJSON(p.Class.Proof)})
 		}
 		for _, u := range w.Unexplained {
 			jw.UnexplainedTraces = append(jw.UnexplainedTraces, jsonUnexplained{StepsID: u.StepsID, Steps: u.Steps, Count: u.Count, Mismatch: u.Mismatch,

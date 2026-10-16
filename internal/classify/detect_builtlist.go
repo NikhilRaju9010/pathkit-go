@@ -25,5 +25,10 @@ func (listBuiltFromList) Detect(p model.Path) (Classification, bool) {
 	c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = CannotBeTested, "same-list-loops", Certain, false
 	c.Explanation = fmt.Sprintf("%s (%s) is skipped but %s (%s) runs; one of them builds the list the other walks, adding one element on every trip, so the list is empty exactly when the first loop does not run.",
 		skipped.ID, skipped.Label, ran.ID, ran.Label)
+	c.Proof = []ProofStep{
+		stepProof(p, skipped, fmt.Sprintf("%s is skipped.", where(skipped))),
+		stepProof(p, ran, fmt.Sprintf("%s runs.", where(ran))),
+		conclusion("One of them builds the list the other walks, adding one element on every trip, so the list is empty exactly when the first loop does not run."),
+	}
 	return c, true
 }

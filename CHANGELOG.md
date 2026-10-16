@@ -15,6 +15,16 @@ Some paths can never run (a loop the code always enters, the same value tested t
 - **Automatic detectors**, each with a definition and a reason on every path it marks: `closed-signal-channel`, `constant-condition`, `contradictory`, `contradictory-get-result`, `same-list-loops`, `list-built-from-list`, `loop-exit-before-first-trip`, `version-gate-old-branch` and `history-limit`. A detector can be switched off with a reason. When unsure, PathKit leaves a path testable or marks it needs-review.
 - **HTML glossary.** The shareable web page shows each label's definition and which detector or rule decided it.
 
+### Added: proofs for automatic claims
+
+- **Claim proofs.** Every claim an automatic detector makes now carries its reasoning as an ordered list of plain sentences: one for each decision on the path that matters (with its step number and line of code), then a closing sentence. This includes the needs-review claims of the closed-channel and history-size detectors; a claim PathKit no longer trusts (because a trace fits no path) has no proof. `pathkit explain` prints it as a numbered `Proof:` block, and `--json` has a new `proof` key on those paths only. Nothing else in any output changed.
+
+### Added: safety nets for the next claims (tests only)
+
+- **Shape fixtures** (`testdata/shapes`, checked by `internal/shapes`): made-up workflows for the code shapes PathKit does not understand yet, each with a hand-written answer for every path and today's actual answer. The test log lists the gaps ("today: missed").
+- **Soundness test** (`internal/soundness`): writes random small workflow-shaped functions, runs every input combination, and fails if a path PathKit calls cannot-be-tested is ever taken. 500 programs by default (50 with `-short`); `PATHKIT_SOUNDNESS_N=10000` for the long run; `PATHKIT_SOUNDNESS_SEED=<n>` repeats one failing seed.
+- **Covered-path check.** A path a test ran that is not testable is now an internal error, checked on every run and by tests.
+
 ### Added: new commands and flags
 
 - **`pathkit explain <stableId>`** says whether a test ran a path, its bucket and label, what decided it, and why.

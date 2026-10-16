@@ -43,12 +43,20 @@ func (closedSignalChannel) Detect(p model.Path) (Classification, bool) {
 					name = fmt.Sprintf(" %q", f.Name)
 				}
 				c.Explanation = fmt.Sprintf("%s (%s) takes the side where the channel from workflow.GetSignalChannel%s is closed (more == false). The Temporal SDK and server do not close signal channels; only a custom worker interceptor could.", s.Junction.ID, s.Junction.Label, name)
+				c.Proof = []ProofStep{
+					stepProof(p, s.Junction, fmt.Sprintf("%s takes the side where the channel is closed (more == false).", where(s.Junction))),
+					conclusion("The channel comes from workflow.GetSignalChannel; the Temporal SDK and server do not close signal channels (only a custom worker interceptor could), so this side is not reached in a normal run."),
+				}
 				return c, true
 			case model.OriginUnknown:
 				if review == nil {
 					c := DefaultTestable()
 					c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = NeedsReview, "needs-review", Likely, true
 					c.Explanation = fmt.Sprintf("%s (%s) takes the closed side of a channel receive, but PathKit could not follow the channel back to the call that made it, so it can't tell whether the workflow closes it.", s.Junction.ID, s.Junction.Label)
+					c.Proof = []ProofStep{
+						stepProof(p, s.Junction, fmt.Sprintf("%s takes the closed side of a channel receive.", where(s.Junction))),
+						conclusion("PathKit could not follow the channel back to the call that made it, so it cannot tell whether it is ever closed."),
+					}
 					review = &c
 				}
 			}

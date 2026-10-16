@@ -273,6 +273,7 @@ If the rounded number would look the same as the threshold, PathKit prints more 
 - `traces`: the counts;
 - `failUnder`: `{threshold, passed, basis}`, or `null` when no threshold is set;
 - added with path classification (everything above is unchanged): `classification`, `coverageBasis` and `classificationShown` at the top; `classification` inside each workflow; `stableId` (a path's id that survives unrelated edits; explained under "`stableId`" below), `bucket`, `label`, `source`, `confidence`, `possibleInProduction`, `explanation` and `ruleId` on each path. See "Testable and overall coverage" below;
+- added with claim proofs: `proof` on a path that an automatic detector made a claim about, needs-review claims included (a list of `{step, file, line, text}`; `step` is the 1-based step on the path, and 0 with no `file`/`line` for the closing sentence). A path with no detector claim has no `proof` key, and neither does a claim PathKit no longer trusts because the workflow has a trace that fits no path. It is the same reasoning `pathkit explain` prints as `Proof:`;
 - added with the path-cap warning, only when a workflow reached the 2000-path cap: `pathCapWarning`: `{limit, workflows, message}`. It says that the workflow's path list and classification are incomplete (see "Path enumeration stops at 2000 paths per workflow" in LIMITATIONS.md). Absent otherwise.
 
 `percent` has one decimal; use `covered`/`total` for exact math.
@@ -537,6 +538,8 @@ Decided by:  a person: config rule "never-charged" in /path/.pathkitrc.json
 Why:         Rule "never-charged": ...
 What to do:  ...
 ```
+
+When a detector decided, a `Proof:` block follows `Why:`. It is the reasoning in numbered plain sentences. A sentence about one decision on the path names its step and its place in the code (`[step 2, orders.go:41]`); the last sentence says what the steps add up to. The step number is the position of the decision on the path (the first decision is step 1). For example, for a path that takes `if valid` true and later `if !valid` true: `1. J1 (if valid) takes the true side. [step 1, orders.go:30]`, `2. J2 (if !valid) takes the true side, but it tests the same value as the step before. [step 2, orders.go:36]`, `3. The value cannot change in between, so the two steps cannot give these two answers.` A claim a person made (config rule, override or comment) has no proof block: the person's reason is the explanation.
 
 "Decided by" is one of: a `detector <name>` (automatic, with how sure it is), a config rule, a config override (`mark_untestable` / `mark_testable`), a `//pathkit:untestable` comment, PathKit itself (a claim it does not trust because the workflow has a trace that fits no path), or nobody (testable by default). `Also:` lists other rules or detectors that say the same thing. When a test ran the path, it always counts as testable, and a `Note:` names the rule or detector whose claim is therefore wrong. With classification off, a `Note:` says so. Trace files are optional (without them `Tested:` says it does not know). A stable id is only unique inside one workflow; if it fits paths of several, each is explained (`--function` picks one).
 

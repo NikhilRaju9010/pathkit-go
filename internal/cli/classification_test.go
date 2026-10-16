@@ -15,7 +15,7 @@ import (
 
 // additiveKeys are the JSON fields added with path classification. Every
 // other key and value must be exactly what it was before.
-var additivePathKeys = []string{"stableId", "bucket", "label", "source", "confidence", "possibleInProduction", "explanation", "ruleId"}
+var additivePathKeys = []string{"stableId", "bucket", "label", "source", "confidence", "possibleInProduction", "explanation", "ruleId", "proof"}
 
 func stripAdditive(v any) {
 	switch x := v.(type) {

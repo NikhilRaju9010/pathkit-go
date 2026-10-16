@@ -1,0 +1,40 @@
+{
+  "shape": "g",
+  "description": "A helper function that wraps ExecuteActivity and returns its error.",
+  "workflows": {
+    "helpererr.HelperWrapsActivity": {
+      "today": [
+        {
+          "key": "|completed",
+          "text": "End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.failure|failed",
+          "text": "if err != nil --failure--> End (failed)",
+          "provisional": true,
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: missed",
+          "note": "v2 follows the helper: its error is the error of the Charge activity, so the check is a real two-way step. The keys are provisional names."
+        },
+        {
+          "key": "J1.success|completed",
+          "text": "if err != nil --success--> End (completed)",
+          "provisional": true,
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: missed",
+          "note": "v2 follows the helper: its error is the error of the Charge activity, so the check is a real two-way step. The keys are provisional names."
+        }
+      ]
+    }
+  }
+}
