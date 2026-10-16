@@ -147,6 +147,11 @@ type Result struct {
 	Warnings      []Warning
 	Counts        Counts
 	Breakdown     Breakdown
+	// InternalError is set when PathKit's own consistency check failed (a
+	// path a test ran is not testable). It never happens in a correct
+	// build; the command that called Compute stops with this message
+	// instead of printing numbers it cannot stand behind.
+	InternalError error
 }
 
 // Basis says which paths --fail-under and "coverage basis" use as the
@@ -452,6 +457,11 @@ func Compute(in Input) Result {
 					pr.Class = c
 				}
 			}
+			if pr.Covered && pr.Class.Label == "possible-correlation" {
+				// A suspect is only for paths no test ran; a run settled this
+				// one, so it is simply testable, with nothing to warn about.
+				pr.Class = classify.DefaultTestable()
+			}
 			if pr.Covered && pr.Class.Bucket != classify.Testable {
 				// A real run proves the path is possible: never hide it.
 				res.Warnings = append(res.Warnings, Warning{Workflow: st.wf.Name, Kind: "classification",
@@ -514,9 +524,10 @@ func Compute(in Input) Result {
 	}
 	sort.SliceStable(res.Warnings, func(i, j int) bool { return res.Warnings[i].File < res.Warnings[j].File })
 	// Internal assertion: the demotion above makes this impossible. If a
-	// later change breaks it, stop loudly instead of hiding a path a test ran.
+	// later change breaks it, say so loudly (the caller stops with an error)
+	// instead of hiding a path a test ran.
 	if err := CheckCoveredAreTestable(res); err != nil {
-		panic("pathkit internal error: " + err.Error())
+		res.InternalError = fmt.Errorf("internal error, please report it: %v", err)
 	}
 	return res
 }

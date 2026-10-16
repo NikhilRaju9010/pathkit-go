@@ -29,6 +29,9 @@ type Classification struct {
 	Explained []ExplainedTrace
 	// CI is the "ci" part: what makes a CI run fail.
 	CI CISettings
+	// EngineOff is true when the config turns the fact engine off
+	// (classification.engine.enabled: false). The default is on.
+	EngineOff bool
 }
 
 // CISettings is classification.ci.
@@ -99,6 +102,11 @@ type classificationPart struct {
 	Detectors          *detectorsPart    `json:"detectors"`
 	ExplainedTraces    []json.RawMessage `json:"explained_traces"`
 	CI                 json.RawMessage   `json:"ci"`
+	Engine             *enginePart       `json:"engine"`
+}
+
+type enginePart struct {
+	Enabled *bool `json:"enabled"`
 }
 
 type ciEntry struct {
@@ -298,6 +306,10 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 			return c, fail(`rule %q needs a "reason"`, id)
 		}
 		c.Rules = append(c.Rules, Rule{ID: id, Workflow: strings.TrimSpace(*e.Workflow), Label: *e.Label, When: *e.When, Without: without, Reason: *e.Reason})
+	}
+
+	if p.Engine != nil && p.Engine.Enabled != nil && !*p.Engine.Enabled {
+		c.EngineOff = true
 	}
 
 	if p.Detectors != nil {

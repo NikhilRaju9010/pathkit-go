@@ -93,7 +93,8 @@ func newBuilder(wf discover.Workflow) *builder {
 
 // finish numbers the junctions in source order and assigns every ID.
 func (b *builder) finish(start Target) *Graph {
-	g := &Graph{Workflow: b.wf.Name, Start: start, byStmt: b.junctions, byID: map[string]*Exit{}}
+	g := &Graph{Workflow: b.wf.Name, Start: start, byStmt: b.junctions, byID: map[string]*Exit{}, info: b.info, fn: b.wf.Func, fset: b.fset,
+		trusted: func(e ast.Expr) bool { return b.trustedConstant(e, map[types.Object]bool{}) }}
 	for _, j := range b.junctions {
 		g.Junctions = append(g.Junctions, j)
 	}
@@ -155,16 +156,22 @@ func (b *builder) computeRoad(blk *cfg.Block) Target { return b.computeRoadFrom(
 // A road that passes a saga compensation defer carries the note (docs/DESIGN.md
 // D3: noted, never a branch).
 func (b *builder) computeRoadFrom(blk *cfg.Block, from int) Target {
-	t, passed := b.roadThrough(blk, from)
+	t, passed, upto := b.roadThrough(blk, from)
 	if passed {
 		t.Compensation = true
 	}
+	// The statements this road runs before it reaches t (see Target.Nodes).
+	// A fresh slice: t may be a memoized Target other roads share.
+	t.Nodes = append(append([]ast.Node(nil), blk.Nodes[from:upto]...), t.Nodes...)
 	return t
 }
 
 // roadThrough does the work of computeRoadFrom; passed reports whether
-// the nodes it went through register a compensation defer.
-func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool) {
+// the nodes it went through register a compensation defer, and upto is
+// how far into blk.Nodes the road runs before its target (the nodes
+// from..upto-1 are executed; a Select call is the junction, not a node
+// that is run before it).
+func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool, upto int) {
 	cont := b.contOf[blk] // set inside a selector callback
 	for i, n := range blk.Nodes[from:] {
 		// A defer in a selector callback runs when the callback ends, not
@@ -174,34 +181,34 @@ func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool) 
 		}
 		if ret, ok := n.(*ast.ReturnStmt); ok {
 			if cont != nil {
-				return cont(), passed // returns from the callback, not the workflow
+				return cont(), passed, from + i + 1 // returns from the callback, not the workflow
 			}
-			return Target{End: b.endKind(ret)}, passed
+			return Target{End: b.endKind(ret)}, passed, from + i + 1
 		}
 		if s, ok := n.(ast.Stmt); ok && b.selectAt[s] != nil {
-			return b.selectorJunction(b.selectAt[s], blk, from+i), passed
+			return b.selectorJunction(b.selectAt[s], blk, from+i), passed, from + i
 		}
 	}
 	switch len(blk.Succs) {
 	case 0:
 		if cont != nil && !b.endsInNoReturn(blk) {
-			return cont(), passed // the callback's end
+			return cont(), passed, len(blk.Nodes) // the callback's end
 		}
-		return Target{End: endDead}, passed // a panic, os.Exit, ...
+		return Target{End: endDead}, passed, len(blk.Nodes) // a panic, os.Exit, ...
 	case 1:
-		return b.road(blk.Succs[0]), passed
+		return b.road(blk.Succs[0]), passed, len(blk.Nodes)
 	}
 	then, other := blk.Succs[0], blk.Succs[1]
 	if ifs, ok := then.Stmt.(*ast.IfStmt); ok && then.Kind == cfg.KindIfThen {
-		return b.decide(ifs, then, other), passed
+		return b.decide(ifs, then, other), passed, len(blk.Nodes)
 	}
 	if clause, ok := then.Stmt.(*ast.CaseClause); ok && then.Kind == cfg.KindSwitchCaseBody {
 		if sw := b.switchOf[clause]; sw != nil {
-			return b.switchJunction(sw, blk), passed
+			return b.switchJunction(sw, blk), passed, len(blk.Nodes)
 		}
 	}
 	b.fail(fmt.Errorf("internal error: unexpected branch (%s) in %s", then.Kind, b.wf.Name))
-	return Target{End: endDead}, passed
+	return Target{End: endDead}, passed, len(blk.Nodes)
 }
 
 // decide turns one if statement into a junction, or walks straight
@@ -212,7 +219,7 @@ func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
 		label, temporal := b.errSource(obj, ifs)
 		noErrorIsThen := !neq
 		if pragma == "ignore" || (!temporal && pragma != "branch") {
-			return b.transparent(noErrorIsThen, then, other)
+			return b.transparent(ifs, noErrorIsThen, then, other)
 		}
 		j := b.newJunction(ifs, ErrCheck, label)
 		failure, success := then, other
@@ -231,7 +238,7 @@ func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
 	}
 
 	if pragma == "ignore" {
-		return b.transparent(false, then, other) // assume a defensive check doesn't fire
+		return b.transparent(ifs, false, then, other) // assume a defensive check doesn't fire
 	}
 	if name, arrivedIsTrue, ok := b.waitResult(ifs.Cond); ok {
 		arrived, missed := "received", "not received"
@@ -286,11 +293,16 @@ func (b *builder) ifIsJunction(ifs *ast.IfStmt) bool {
 	return true
 }
 
-func (b *builder) transparent(takeThen bool, then, other *cfg.Block) Target {
+func (b *builder) transparent(ifs *ast.IfStmt, takeThen bool, then, other *cfg.Block) Target {
+	road := other
 	if takeThen {
-		return b.road(then)
+		road = then
 	}
-	return b.road(other)
+	t := b.road(road)
+	// The walk assumes one side of this if; a run may take the other, so
+	// nothing the if's code does can be relied on (see SkipMark).
+	t.Nodes = append([]ast.Node{SkipMark{Stmt: ifs}}, t.Nodes...)
+	return t
 }
 
 func (b *builder) newJunction(stmt ast.Node, kind JunctionKind, label string) *Junction {

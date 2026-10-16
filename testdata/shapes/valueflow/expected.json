@@ -25,8 +25,8 @@
         {
           "key": "J1.false J2.false|completed",
           "text": "if ok --false--> if id == \"\" --false--> End (completed)",
-          "bucket": "testable",
-          "label": ""
+          "bucket": "cannot-be-tested",
+          "label": "value-flow"
         }
       ],
       "v2": [
@@ -64,7 +64,7 @@
             "bucket": "cannot-be-tested",
             "label": "value-flow"
           },
-          "status": "today: missed",
+          "status": "today: correct",
           "note": "ok is false, so id is still \"\", so \"id == \\\"\\\"\" cannot be false"
         }
       ]

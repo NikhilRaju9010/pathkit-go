@@ -19,8 +19,9 @@ func TypedNilInInterface(ctx workflow.Context, note *string) error {
 	return nil
 }
 
-// NEAR-MISS: v is only set when the flag is true, so it can still be a nil
-// interface.
+// v is only set when the flag is true, so with the flag false it is still a
+// nil interface (v == nil cannot be false then), and with the flag true it
+// holds a *string, which is never a nil interface.
 func MaybeUnset(ctx workflow.Context, note *string, flag bool) error {
 	var v interface{}
 	if flag {
@@ -31,3 +32,19 @@ func MaybeUnset(ctx workflow.Context, note *string, flag bool) error {
 	}
 	return nil
 }
+
+// NEAR-MISS: an unknown call changes v after the flag is read, so nothing is
+// known about it at the check.
+func MaybeUnsetThenCall(ctx workflow.Context, note *string, flag bool) error {
+	var v interface{}
+	if flag {
+		v = note
+	}
+	v = pick(v)
+	if v == nil {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+func pick(v interface{}) interface{} { return v }

@@ -104,6 +104,9 @@ func todayResults(t *testing.T, dir string) map[string][]todayPath {
 		if err != nil {
 			t.Fatalf("%s: %v", wf.Name, err)
 		}
+		if err := eng.AddGraph(wf.Name, g); err != nil {
+			t.Fatal(err)
+		}
 		wfs = append(wfs, coverage.Workflow{Name: wf.Name, Graph: g, Hash: model.FunctionHash(wf.Pkg.Fset, wf.Func)})
 	}
 	out := map[string][]todayPath{}

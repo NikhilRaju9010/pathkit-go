@@ -20,6 +20,7 @@ When v2 work closes a gap, `today` and `status` change in the same commit as the
 | `helpererr` | (g) a helper that wraps `ExecuteActivity` and returns its error |
 | `knowndefect` | (h) a branch dead only because of a bug (needs-review, `known-defect`, set in the config) |
 | `addrtaken`, `closurewrite`, `ptrreceiver`, `loopchange`, `sidesignal` | (i) to (m) safety cases that must stay testable |
+| `notunderstood`, `pointerfield`, `unsafefn`, `skipregions` | (o) to (r) more safety cases for the fact engine: values assigned something not understood, a field behind a pointer, a function that uses `unsafe`, and an `if` or loop PathKit does not decide |
 | `recoverfn` | (n, first half) `recover`: must stay testable |
 | `gotofn` | (n, second half) `goto`: PathKit refuses it with a clear message (`TestGotoIsRefused`) |
 

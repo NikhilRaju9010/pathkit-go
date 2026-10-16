@@ -221,6 +221,9 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		in.Classifier, in.Policy, in.Explained = engine.Classify, engine.Policy(), engine.Explained()
 	}
 	m.res = coverage.Compute(in)
+	if m.res.InternalError != nil {
+		return nil, userError("%v", m.res.InternalError)
+	}
 	if m.ci != nil && engine != nil {
 		m.ci.anchors = ruleAnchors(engine.Anchors())
 	}

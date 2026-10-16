@@ -25,6 +25,111 @@
         {
           "key": "J1.false J2.false|completed",
           "text": "if flag --false--> if v == nil --false--> End (completed)",
+          "bucket": "cannot-be-tested",
+          "label": "value-flow"
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true J2.true|completed",
+          "text": "if flag --true--> if v == nil --true--> End (completed)",
+          "v2": {
+            "bucket": "cannot-be-tested",
+            "label": "impossible-nil"
+          },
+          "status": "today: missed",
+          "note": "flag is true, so v holds a *string, which is never a nil interface"
+        },
+        {
+          "key": "J1.true J2.false|completed",
+          "text": "if flag --true--> if v == nil --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false J2.true|completed",
+          "text": "if flag --false--> if v == nil --true--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false J2.false|completed",
+          "text": "if flag --false--> if v == nil --false--> End (completed)",
+          "v2": {
+            "bucket": "cannot-be-tested",
+            "label": "value-flow"
+          },
+          "status": "today: correct",
+          "note": "flag is false, so v was never set and is still a nil interface"
+        }
+      ]
+    },
+    "typednil.TypedNilInInterface": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if v == nil --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if v == nil --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if v == nil --true--> End (completed)",
+          "v2": {
+            "bucket": "cannot-be-tested",
+            "label": "impossible-nil"
+          },
+          "status": "today: missed",
+          "note": "v holds a *string, so it is never a nil interface"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if v == nil --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    },
+    "typednil.MaybeUnsetThenCall": {
+      "today": [
+        {
+          "key": "J1.true J2.true|completed",
+          "text": "if flag --true--> if v == nil --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.true J2.false|completed",
+          "text": "if flag --true--> if v == nil --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false J2.true|completed",
+          "text": "if flag --false--> if v == nil --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false J2.false|completed",
+          "text": "if flag --false--> if v == nil --false--> End (completed)",
           "bucket": "testable",
           "label": ""
         }
@@ -60,43 +165,6 @@
         {
           "key": "J1.false J2.false|completed",
           "text": "if flag --false--> if v == nil --false--> End (completed)",
-          "v2": {
-            "bucket": "testable",
-            "label": ""
-          },
-          "status": "today: correct"
-        }
-      ]
-    },
-    "typednil.TypedNilInInterface": {
-      "today": [
-        {
-          "key": "J1.true|completed",
-          "text": "if v == nil --true--> End (completed)",
-          "bucket": "testable",
-          "label": ""
-        },
-        {
-          "key": "J1.false|completed",
-          "text": "if v == nil --false--> End (completed)",
-          "bucket": "testable",
-          "label": ""
-        }
-      ],
-      "v2": [
-        {
-          "key": "J1.true|completed",
-          "text": "if v == nil --true--> End (completed)",
-          "v2": {
-            "bucket": "cannot-be-tested",
-            "label": "impossible-nil"
-          },
-          "status": "today: missed",
-          "note": "v holds a *string, so it is never a nil interface"
-        },
-        {
-          "key": "J1.false|completed",
-          "text": "if v == nil --false--> End (completed)",
           "v2": {
             "bucket": "testable",
             "label": ""

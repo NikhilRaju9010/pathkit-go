@@ -120,6 +120,9 @@ var definitions = []Definition{
 		"Nothing, once you have checked the two conditions really read the same value."),
 	label("constant-condition", CannotBeTested, "certain", "The condition is always true or always false.",
 		"The compiler can see its value.", "if false { ... }", "no", "Remove the dead branch, or ignore the path."),
+	label("value-flow", CannotBeTested, "certain", "An earlier assignment, copy or decision settles this check, and the path takes the other answer.",
+		"PathKit followed the path step by step and kept a note of what each value holds. At this check the notes give one answer, and the path takes the other. It forgets a value whenever it cannot be sure (an address is taken, a closure writes it, a loop may change it), so it never claims this on a guess.", "id starts as \"\", an if ok { id = v } is skipped, and then if id == \"\" takes its false side.", "no",
+		"Nothing, once you have read the proof (pathkit explain) and agree. If the code is wrong, fix it."),
 	label("dead-code", CannotBeTested, "certain", "Code after a return, panic, Continue-As-New or similar.",
 		"Nothing can reach it.", "A statement written after return.", "no", "Delete the code.").notYet(),
 	label("either-or-wait", CannotBeTested, "certain", "A wait ends for exactly one of two reasons (timer or signal, or an AwaitWithTimeout condition or its timeout), so \"neither\" or \"both\" is impossible.",
@@ -130,6 +133,10 @@ var definitions = []Definition{
 	label("depends-on-missing", CannotBeTested, "rule", "A condition only makes sense if another one holds.",
 		"The second condition is meaningless when the first is false.", "\"Check the discount only if a coupon was given\", on a path with no coupon.", "no",
 		"Nothing; the config rule that says so also carries the reason."),
+
+	label("possible-correlation", NeedsReview, "likely", "The path asks about the same value twice, and PathKit had to forget the value in between.",
+		"If nothing changed the value, the two answers could not both happen. PathKit cannot tell whether something did, so it does not call the path impossible.", "A value is checked, then a loop that may change it runs, then it is checked again.", "yes",
+		"Check whether the value can change in between. If it cannot, mark the path untestable in the config with that reason; if it can, write a test."),
 
 	// B. loops.
 	label("same-list-loops", CannotBeTested, "certain", "Two loops over the same collection must run the same number of times.",

@@ -15,6 +15,14 @@ Some paths can never run (a loop the code always enters, the same value tested t
 - **Automatic detectors**, each with a definition and a reason on every path it marks: `closed-signal-channel`, `constant-condition`, `contradictory`, `contradictory-get-result`, `same-list-loops`, `list-built-from-list`, `loop-exit-before-first-trip`, `version-gate-old-branch` and `history-limit`. A detector can be switched off with a reason. When unsure, PathKit leaves a path testable or marks it needs-review.
 - **HTML glossary.** The shareable web page shows each label's definition and which detector or rule decided it.
 
+### Added: the fact engine
+
+- **New claims from following values.** PathKit now walks each path step by step and keeps notes on what each local value holds. A decision that the notes settle the other way is impossible: `var s string` then `if s == ""` (false side), `id := ""` then `if ok { id = v }` then `if id == ""`, a value an early `return` makes non-empty and then checked as `len(x) == 0`, a flag set in one branch and read right after. New label `value-flow`; `contradictory` and `constant-condition` also come from it where the existing detectors say nothing. Each claim has a proof (`pathkit explain`, and `proof` in `--json`). It forgets whenever it cannot be sure (address taken, closure write, loop, call, assumed `if`); see LIMITATIONS.md.
+- **`possible-correlation`** (needs-review): an untested path that asks about the same value twice, where PathKit had to forget the value in between.
+- **Config:** `classification.engine.enabled` (default true); `detectors.disable` accepts `value-flow` and `possible-correlation`.
+- **A loop condition of a named bool type** (`type Flag bool`, `for !done`) or of a type parameter constrained by `~bool` can now be recorded by `pathkit test`: the recorder converts it with `bool(...)`. Before, `pathkit test` and `pathkit prepare` stopped with a message.
+- **Internal check:** if PathKit's own check "a path a test ran is never hidden" ever fails, the command now stops with an error message instead of crashing.
+
 ### Added: proofs for automatic claims
 
 - **Claim proofs.** Every claim an automatic detector makes now carries its reasoning as an ordered list of plain sentences: one for each decision on the path that matters (with its step number and line of code), then a closing sentence. This includes the needs-review claims of the closed-channel and history-size detectors; a claim PathKit no longer trusts (because a trace fits no path) has no proof. `pathkit explain` prints it as a numbered `Proof:` block, and `--json` has a new `proof` key on those paths only. Nothing else in any output changed.

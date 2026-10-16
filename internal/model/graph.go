@@ -8,6 +8,7 @@ package model
 import (
 	"go/ast"
 	"go/token"
+	"go/types"
 )
 
 // EdgeID names one exit of one junction, like "J2.failure". Its field is
@@ -117,7 +118,26 @@ type Target struct {
 	// Compensation: the road to this target registers a saga
 	// compensation defer. It is a note on the path, never a branch.
 	Compensation bool
+	// Nodes are the statements and expressions a run executes, in order,
+	// on the way to this target (from the start of the road to the
+	// junction, retry edge or end station). They are extra information for
+	// the fact engine (internal/facts); nothing in the graph, in an ID or
+	// in a path depends on them. A SkipMark among them says the walk
+	// assumed one side of an if or a loop that it did not decide.
+	Nodes []ast.Node
 }
+
+// SkipMark is a pseudo node in Target.Nodes: the walk passes an if that is
+// not a junction (an error check it assumes succeeds, an if marked
+// //pathkit:ignore) or a loop that is not a junction. A real run may go the
+// other way or round the loop any number of times, so whatever Stmt assigns
+// is unknown afterwards, and the nodes inside Stmt that follow the mark are
+// not facts.
+type SkipMark struct{ Stmt ast.Stmt }
+
+// Pos and End make SkipMark an ast.Node; it covers its statement.
+func (m SkipMark) Pos() token.Pos { return m.Stmt.Pos() }
+func (m SkipMark) End() token.Pos { return m.Stmt.End() }
 
 // Dead reports a road that ends in a panic or os.Exit: not a path at all.
 func (t Target) Dead() bool { return t.Junction == nil && t.Retry == nil && t.End == endDead }
@@ -135,7 +155,30 @@ type Graph struct {
 
 	byStmt map[ast.Node]*Junction
 	byID   map[string]*Exit
+
+	// info, fn and fset are what the fact engine needs to read the code.
+	info *types.Info
+	fn   *ast.FuncDecl
+	fset *token.FileSet
+
+	trusted func(ast.Expr) bool
 }
+
+// TrustedConstant reports whether expr is a constant whose value is the
+// same on every machine and in every build (see extractConst): only then
+// may a claim rest on it.
+func (g *Graph) TrustedConstant(expr ast.Expr) bool {
+	return g.trusted != nil && g.trusted(expr)
+}
+
+// TypesInfo is the type information of the workflow's package.
+func (g *Graph) TypesInfo() *types.Info { return g.info }
+
+// Func is the workflow function.
+func (g *Graph) Func() *ast.FuncDecl { return g.fn }
+
+// FileSet is the file set the workflow's positions belong to.
+func (g *Graph) FileSet() *token.FileSet { return g.fset }
 
 // ExitFor returns the ID of the exit with this label ("true", "failure",
 // "case x", ...) of the junction built from stmt. The recorder uses it to

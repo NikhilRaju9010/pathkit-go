@@ -40,6 +40,8 @@ var detectors = []Detector{
 	listBuiltFromList{},
 	loopExitBeforeFirstTrip{},
 	contradictoryGetResult{},
+	valueFlow{},
+	possibleCorrelation{},
 }
 
 // DetectorNames lists the names of all detectors.
@@ -78,6 +80,17 @@ func (e *Engine) settle(c Classification) Classification {
 		c.PossibleInProduction = true
 	}
 	return c
+}
+
+// detectorOn reports whether the named detector is on (not turned off in
+// the config).
+func (e *Engine) detectorOn(name string) bool {
+	for _, d := range e.disabled {
+		if d.Name == name {
+			return false
+		}
+	}
+	return true
 }
 
 // CheckDetectorNames refuses a detectors.disable entry that is not a real

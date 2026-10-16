@@ -252,6 +252,30 @@ One JSON file per workflow run, written by the recorder that `pathkit test` adds
 
 What is deliberately **not** in the file: the Go test name (the workflow runs on its own goroutine and can't see it), the end kind (the matcher gets it from the graph), and the path number (display order can change; the path's identity is its steps plus end kind).
 
+### D14 — The fact engine (value claims)
+
+**Problem.** The automatic detectors (D13) look for exact code shapes. The same idea written in a slightly different shape was missed: `var s string` then `if s == ""`; `id := ""`, then `if ok { id = v }`, then `if id == ""`; a value an early `return` makes non-empty, checked again as `len(x) == 0`.
+
+**Choice.** One engine, `internal/facts`, that walks each listed path step by step and keeps a small notebook of facts it is sure of. When a decision asks something the notebook answers, and the path takes the other answer, the path is impossible and the notebook entries are the proof. Options that were left out: one more detector per shape (does not scale; each new project showed a new shape), and a full symbolic solver (slow, and a wrong "impossible" would hide a real missing test).
+
+**How it fits.** The graph builder (D5) records, for each road between decisions, the statements a run executes there (`Target.Nodes`). It changes no junction, exit, id or stable id. The engine reads those statements along a path; nothing else about the graph changes.
+
+**What it knows.** For locals and parameters (not package-level variables, not map or slice elements), and for field paths under a struct held *by value*: one constant, up to 8 constants it is not, and nil / not nil. Facts come from zero-value declarations, constant assignments, `&T{}`, `new`, `make` and slice/map literals (not nil), the outcome of a decision (`==`, `!=`, `!`, `&&` when true, `||` when false, `len(s) == 0` forms, bools), early returns (the other outcome of the `if`), comma-ok forms (`v, ok := x.(T)` or `m[k]`, with `ok` false, give `v` its zero value), and copies (`y := x` copies everything known).
+
+**When it forgets (the safety list).** Never wrongly kept: a value assigned something it does not understand; any value whose address is taken anywhere in the function (`&x`, which covers `Get(ctx, &x)`, `SideEffect(...).Get(&v)`, `Receive(ctx, &v)`, `json.Unmarshal`), or on which a pointer-receiver method is called, or that is sliced as an array; any value written inside a closure (`workflow.Go`, a selector callback, `defer`); every value a loop assigns, at each step on that loop; every value an `if` or loop assigns that PathKit walks without deciding it (an error check it assumes succeeds, an `if` marked `//pathkit:ignore`, a loop with nothing to decide), from there on, with the code inside it ignored; a field behind a pointer is never tracked. A function that uses `goto`, `recover` or `unsafe` is left alone.
+
+**Answers.** Three-valued: true, false, unknown. Unknown never produces a claim.
+
+**Labels.** `contradictory` when the same unchanged value was tested earlier on the path (not by an early return) and this decision gives the opposite answer; `constant-condition` when the answer follows from declarations and constants alone with no decision in between; `value-flow` for everything else (copies, assignments, early returns, decisions that skipped an assignment). If a detector, rule, override or comment already decided the path, the engine says nothing: their label and wording stay.
+
+**Proof.** Every fact keeps where it came from; a claim prints them in order as numbered plain sentences (`pathkit explain`, and the `proof` JSON key).
+
+**Possible correlation.** On a path no test ran, two decisions on the same value that would contradict each other if the value had not changed, with a point in between where the engine had to forget it (a loop that assigns it, an `if` or loop PathKit does not decide); a value whose address is taken or that a closure writes is remembered only until the next call, go to needs-review (`possible-correlation`), naming both steps. Never for a path a test ran.
+
+**Config.** `classification.engine.enabled` (default true) turns the engine off; `detectors.disable` accepts `value-flow` (no engine claims) and `possible-correlation` (no suspects).
+
+**How it is kept honest.** Shape fixtures with hand-written answers, a safety fixture for each forget rule, and `internal/soundness`: random programs, run for every input, fail the build if a path called impossible is ever taken.
+
 ## Non-goals for v1
 
 - **One package at a time for analysis.** `analyze` takes a file (analyzes the workflows in it, but type-checks its whole package, since Go needs that) or a package; `report` takes package patterns like `./...` and analyzes each package separately.
