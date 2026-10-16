@@ -32,6 +32,10 @@ func (loopExitBeforeFirstTrip) Detect(p model.Path) (Classification, bool) {
 			c := DefaultTestable()
 			c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = CannotBeTested, "impossible-loop-exit", Certain, false
 			c.Explanation = fmt.Sprintf("%s (%s) is left without running its body, but %s.", s.Junction.ID, s.Junction.Label, f.Detail)
+			c.Proof = []ProofStep{
+				stepProof(p, s.Junction, fmt.Sprintf("%s is left without running its body.", where(s.Junction))),
+				conclusion(f.Detail + "; leaving it without a trip is therefore impossible."),
+			}
 			return c, true
 		}
 	}

@@ -513,7 +513,27 @@ func Compute(in Input) Result {
 		}
 	}
 	sort.SliceStable(res.Warnings, func(i, j int) bool { return res.Warnings[i].File < res.Warnings[j].File })
+	// Internal assertion: the demotion above makes this impossible. If a
+	// later change breaks it, stop loudly instead of hiding a path a test ran.
+	if err := CheckCoveredAreTestable(res); err != nil {
+		panic("pathkit internal error: " + err.Error())
+	}
 	return res
+}
+
+// CheckCoveredAreTestable returns an error naming the first path that a
+// test ran but that is not in the testable bucket. That must never happen
+// (a real run proves a path possible); Compute asserts it on every run and
+// the tests check it on every project they measure.
+func CheckCoveredAreTestable(res Result) error {
+	for _, w := range res.Workflows {
+		for _, p := range w.Paths {
+			if p.Covered && p.Class.Bucket != classify.Testable {
+				return fmt.Errorf("%s path %d (%s) was run by a test but is classified %s (%s)", w.Name, p.Number, p.StableID, p.Class.Bucket, p.Class.Label)
+			}
+		}
+	}
+	return nil
 }
 
 func plural(n int, word string) string {

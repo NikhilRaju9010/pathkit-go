@@ -1,0 +1,78 @@
+{
+  "shape": "l",
+  "description": "Safety: a variable changed in the loop body and checked at the loop head. Must stay testable. Some branch of these may in truth never run (for example a variable that is always set by the time it is checked), but PathKit cannot prove it, so the safe v2 answer is testable: \"must stay testable\" is a deliberate conservative rule, not a claim that every branch can run.",
+  "workflows": {
+    "loopchange.ChangedInBody": {
+      "today": [
+        {
+          "key": "J1.iterate J1.retry J1.exit|completed",
+          "text": "for !done --iterate--> retry --> for !done --exit--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.exit|completed",
+          "text": "for !done --exit--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.iterate J1.retry J1.exit|completed",
+          "text": "for !done --iterate--> retry --> for !done --exit--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.exit|completed",
+          "text": "for !done --exit--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    },
+    "loopchange.CountedLoop": {
+      "today": [
+        {
+          "key": "J1.iterate J1.retry J1.exit|completed",
+          "text": "for n < limit --iterate--> retry --> for n < limit --exit--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.exit|completed",
+          "text": "for n < limit --exit--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.iterate J1.retry J1.exit|completed",
+          "text": "for n < limit --iterate--> retry --> for n < limit --exit--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.exit|completed",
+          "text": "for n < limit --exit--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    }
+  }
+}

@@ -32,12 +32,20 @@ func (historySuggested) Detect(p model.Path) (Classification, bool) {
 				c := DefaultTestable()
 				c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = NeedsSpecialTest, "history-limit", Certain, true
 				c.Explanation = fmt.Sprintf("%s (%s) is the side taken when the SDK suggests Continue-As-New. Fake it in a test with env.SetContinueAsNewSuggested(true).", s.Junction.ID, s.Junction.Label)
+				c.Proof = []ProofStep{
+					stepProof(p, s.Junction, fmt.Sprintf("%s is the side taken when the SDK suggests Continue-As-New.", where(s.Junction))),
+					conclusion("A normal test is never given that suggestion; the test environment can fake it."),
+				}
 				return c, true
 			case model.HistorySize:
 				if weak == nil {
 					c := DefaultTestable()
 					c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = NeedsReview, "needs-review", Likely, true
 					c.Explanation = fmt.Sprintf("%s (%s) compares the history length or size with a number. If that is a history limit, a test can fake it with env.SetCurrentHistoryLength or SetCurrentHistorySize; PathKit can't tell, so please review.", s.Junction.ID, s.Junction.Label)
+					c.Proof = []ProofStep{
+						stepProof(p, s.Junction, fmt.Sprintf("%s compares the history length or size with a number.", where(s.Junction))),
+						conclusion("If that number is a history limit, a test can fake it; PathKit cannot tell, so a person should review it."),
+					}
 					weak = &c
 				}
 			}

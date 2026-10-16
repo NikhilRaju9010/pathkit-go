@@ -1,0 +1,124 @@
+{
+  "shape": "b",
+  "description": "A type switch on an interface{} whose values were only ever a string or a *string (kept in a local map).",
+  "workflows": {
+    "typeswitch.SwitchOnLocalMap": {
+      "today": [
+        {
+          "key": "J1.case string|completed",
+          "text": "switch vals[key].(type) --case string--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.case *string|completed",
+          "text": "switch vals[key].(type) --case *string--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.case int|completed",
+          "text": "switch vals[key].(type) --case int--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.default|completed",
+          "text": "switch vals[key].(type) --default--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.case string|completed",
+          "text": "switch vals[key].(type) --case string--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.case *string|completed",
+          "text": "switch vals[key].(type) --case *string--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.case int|completed",
+          "text": "switch vals[key].(type) --case int--> End (completed)",
+          "v2": {
+            "bucket": "cannot-be-tested",
+            "label": "impossible-type"
+          },
+          "status": "today: missed",
+          "note": "only a string and a *string were ever stored (the key is an input, so either can come out; a missing key gives nil, which goes to default)"
+        },
+        {
+          "key": "J1.default|completed",
+          "text": "switch vals[key].(type) --default--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    },
+    "typeswitch.SwitchWithUnknownValue": {
+      "today": [
+        {
+          "key": "J1.case string|completed",
+          "text": "switch vals[\"extra\"].(type) --case string--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.case int|completed",
+          "text": "switch vals[\"extra\"].(type) --case int--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.default|completed",
+          "text": "switch vals[\"extra\"].(type) --default--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.case string|completed",
+          "text": "switch vals[\"extra\"].(type) --case string--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.case int|completed",
+          "text": "switch vals[\"extra\"].(type) --case int--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.default|completed",
+          "text": "switch vals[\"extra\"].(type) --default--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    }
+  }
+}

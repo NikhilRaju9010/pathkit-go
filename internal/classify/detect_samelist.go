@@ -27,6 +27,11 @@ func (sameListLoops) Detect(p model.Path) (Classification, bool) {
 	c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = CannotBeTested, "same-list-loops", Certain, false
 	c.Explanation = fmt.Sprintf("%s (%s) is skipped but %s (%s) runs; both walk the same list, which cannot change between them, so they run the same number of times.",
 		skipped.ID, skipped.Label, ran.ID, ran.Label)
+	c.Proof = []ProofStep{
+		stepProof(p, skipped, fmt.Sprintf("%s is skipped.", where(skipped))),
+		stepProof(p, ran, fmt.Sprintf("%s runs.", where(ran))),
+		conclusion("Both walk the same list, which cannot change between them, so they run the same number of times."),
+	}
 	return c, true
 }
 

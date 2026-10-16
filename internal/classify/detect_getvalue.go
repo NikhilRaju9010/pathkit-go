@@ -47,6 +47,11 @@ func (contradictoryGetResult) Detect(p model.Path) (Classification, bool) {
 				c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = CannotBeTested, "contradictory", Certain, false
 				c.Explanation = fmt.Sprintf("%s (%s) --%s--> needs the value to be %v and %s (%s) --%s--> needs it to be %v; it is filled in once by Get and nothing changes it, so it cannot give both answers.",
 					a.j.ID, a.j.Label, a.exit, a.value, b.j.ID, b.j.Label, b.exit, b.value)
+				c.Proof = []ProofStep{
+					stepProof(p, a.j, fmt.Sprintf("%s --%s--> needs the value to be %v.", where(a.j), a.exit, a.value)),
+					stepProof(p, b.j, fmt.Sprintf("%s --%s--> needs the value to be %v.", where(b.j), b.exit, b.value)),
+					conclusion("The value is filled in once by Get and nothing changes it, so it cannot be both."),
+				}
 				return c, true
 			}
 		}

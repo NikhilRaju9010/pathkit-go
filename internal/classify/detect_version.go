@@ -25,6 +25,10 @@ func (versionGateOldBranch) Detect(p model.Path) (Classification, bool) {
 			c := DefaultTestable()
 			c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = NeedsSpecialTest, "version-gate-old-branch", Certain, true
 			c.Explanation = fmt.Sprintf("%s (%s) takes the old side of workflow.GetVersion(%q). Normal test runs get the newest version. Mock the version with env.OnGetVersion(%q, ...) to reach it.", s.Junction.ID, s.Junction.Label, f.Name, f.Name)
+			c.Proof = []ProofStep{
+				stepProof(p, s.Junction, fmt.Sprintf("%s takes the old side of workflow.GetVersion(%q).", where(s.Junction), f.Name)),
+				conclusion("Normal test runs get the newest version, so a test must mock the version to reach this side."),
+			}
 			return c, true
 		}
 	}

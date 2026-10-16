@@ -51,6 +51,11 @@ func (contradictory) Detect(p model.Path) (Classification, bool) {
 				c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = CannotBeTested, "contradictory", Certain, false
 				c.Explanation = fmt.Sprintf("%s (%s) --%s--> and %s (%s) --%s--> test the same value, which cannot change between them, so they cannot give these two answers.",
 					a.j.ID, a.j.Label, a.exit, b.j.ID, b.j.Label, b.exit)
+				c.Proof = []ProofStep{
+					stepProof(p, a.j, fmt.Sprintf("%s takes the %s side.", where(a.j), a.exit)),
+					stepProof(p, b.j, fmt.Sprintf("%s takes the %s side, but it tests the same value as the step before.", where(b.j), b.exit)),
+					conclusion("The value cannot change in between, so the two steps cannot give these two answers."),
+				}
 				return c, true
 			}
 		}

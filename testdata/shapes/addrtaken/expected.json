@@ -1,0 +1,42 @@
+{
+  "shape": "i",
+  "description": "Safety: Get(ctx, &x) fills x, then \"if x == \\\"\\\"\". Must stay testable. Some branch of these may in truth never run (for example a variable that is always set by the time it is checked), but PathKit cannot prove it, so the safe v2 answer is testable: \"must stay testable\" is a deliberate conservative rule, not a claim that every branch can run.",
+  "workflows": {
+    "addrtaken.GetFillsVariable": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if x == \"\" --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if x == \"\" --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if x == \"\" --true--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if x == \"\" --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    }
+  }
+}

@@ -160,6 +160,7 @@ func explainPath(m *measured, w coverage.WorkflowResult, p coverage.PathResult) 
 	} else {
 		line("Decided by", "%s", decidedBy(m, c))
 		line("Why", "%s", c.Explanation)
+		writeProof(&b, c.Proof)
 		if len(c.ExtraReasons) > 0 {
 			line("Also", "%s also applied to this path; the first reason found wins (config override, then comment, then rule, then detector)", strings.Join(c.ExtraReasons, ", "))
 		}
@@ -228,4 +229,20 @@ func decidedBy(m *measured, c classify.Classification) string {
 		return fmt.Sprintf("detector %s (automatic, %s)", c.Detector, c.Confidence)
 	}
 	return "nobody: no detector, rule, override or comment applies, so the path is testable by default"
+}
+
+// writeProof prints a claim's proof as numbered plain sentences. A step that
+// is about one step of the path says which one and where in the code.
+func writeProof(b *strings.Builder, proof []classify.ProofStep) {
+	if len(proof) == 0 {
+		return
+	}
+	b.WriteString("Proof:\n")
+	for i, s := range proof {
+		at := ""
+		if s.Step > 0 {
+			at = fmt.Sprintf(" [step %d, %s:%d]", s.Step, s.File, s.Line)
+		}
+		fmt.Fprintf(b, "  %d. %s%s\n", i+1, s.Text, at)
+	}
 }

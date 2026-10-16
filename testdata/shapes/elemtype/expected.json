@@ -1,0 +1,132 @@
+{
+  "shape": "e",
+  "description": "A type assertion on the elements of a slice that only ever received maps.",
+  "workflows": {
+    "elemtype.AssertInLoop": {
+      "today": [
+        {
+          "key": "J1.iterate J2.true J1.retry J1.exit|completed",
+          "text": "for range items --iterate--> if !ok --true--> retry --> for range items --exit--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.iterate J2.false J1.retry J1.exit|completed",
+          "text": "for range items --iterate--> if !ok --false--> retry --> for range items --exit--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.exit|completed",
+          "text": "for range items --exit--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.iterate J2.true J1.retry J1.exit|completed",
+          "text": "for range items --iterate--> if !ok --true--> retry --> for range items --exit--> End (completed)",
+          "v2": {
+            "bucket": "cannot-be-tested",
+            "label": "impossible-type"
+          },
+          "status": "today: missed",
+          "note": "every element was built as a map"
+        },
+        {
+          "key": "J1.iterate J2.false J1.retry J1.exit|completed",
+          "text": "for range items --iterate--> if !ok --false--> retry --> for range items --exit--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.exit|completed",
+          "text": "for range items --exit--> End (completed)",
+          "v2": {
+            "bucket": "cannot-be-tested",
+            "label": "impossible-loop-exit"
+          },
+          "status": "today: missed",
+          "note": "items always holds two elements, so the loop cannot be skipped"
+        }
+      ]
+    },
+    "elemtype.AssertOnLocalSlice": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if !ok --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if !ok --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if !ok --true--> End (completed)",
+          "v2": {
+            "bucket": "cannot-be-tested",
+            "label": "impossible-type"
+          },
+          "status": "today: missed",
+          "note": "every element was built as a map"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if !ok --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    },
+    "elemtype.AssertWithUnknownElement": {
+      "today": [
+        {
+          "key": "J1.true|completed",
+          "text": "if !ok --true--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if !ok --false--> End (completed)",
+          "bucket": "testable",
+          "label": ""
+        }
+      ],
+      "v2": [
+        {
+          "key": "J1.true|completed",
+          "text": "if !ok --true--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        },
+        {
+          "key": "J1.false|completed",
+          "text": "if !ok --false--> End (completed)",
+          "v2": {
+            "bucket": "testable",
+            "label": ""
+          },
+          "status": "today: correct"
+        }
+      ]
+    }
+  }
+}
