@@ -137,7 +137,7 @@ func TestRulesWithoutAmbiguityAndUnexplainedTrace(t *testing.T) {
 	}
 	const listWF, twiceWF = "rulewithout.ListWorkflow", "rulewithout.TwiceWorkflow"
 	writeJSONFile(t, filepath.Join(traces, "list.trace.json"), map[string]any{
-		"schemaVersion": 1, "tool": "pathkit-go", "workflow": listWF, "functionHash": "0000000000000000",
+		"schemaVersion": 2, "tool": "pathkit-go", "workflow": listWF, "functionHash": "0000000000000000",
 		"status": "complete", "steps": []string{"J1.nowhere"}, "workflowId": "w", "runId": "r", "recordedAt": "2026-10-12T00:00:00Z",
 	})
 

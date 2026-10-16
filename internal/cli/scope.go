@@ -178,8 +178,11 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 		if err != nil {
 			return nil, err
 		}
+		if note := g.HelperNote(); note != "" {
+			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, note)
+		}
 		out.mapped = append(out.mapped, recordable{
-			wf: e.Workflow, graph: g, hash: model.FunctionHash(e.Workflow.Pkg.Fset, e.Workflow.Func), addedByConfig: e.AddedByConfig,
+			wf: e.Workflow, graph: g, hash: g.CodeHash(), addedByConfig: e.AddedByConfig,
 		})
 	}
 	return out, nil

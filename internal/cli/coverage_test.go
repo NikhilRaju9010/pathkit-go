@@ -24,7 +24,7 @@ func ordersTraces(t *testing.T) string {
 	hash := model.FunctionHash(wf.Pkg.Fset, wf.Func)
 	dir := t.TempDir()
 	for name, steps := range map[string][]string{"a": {"J1.true"}, "b": {"J1.false", "J2.failure"}} {
-		writeTrace(t, dir, name, map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
+		writeTrace(t, dir, name, map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
 			"functionHash": hash, "status": "complete", "steps": steps})
 	}
 	return dir
@@ -177,7 +177,7 @@ func TestCoverageFunction(t *testing.T) {
 // exit code.
 func TestCoverageWarnings(t *testing.T) {
 	traces := ordersTraces(t)
-	writeTrace(t, traces, "c-unmatched", map[string]any{"schemaVersion": 1, "workflow": "orders.OrderWorkflow",
+	writeTrace(t, traces, "c-unmatched", map[string]any{"schemaVersion": 2, "workflow": "orders.OrderWorkflow",
 		"functionHash": "x", "status": "complete", "steps": []string{"J1.true"}})
 	stdout, stderr, code := run(t, "coverage", pilot+"/orders/orders.go", "--traces", traces)
 	if code != ExitOK || stderr != "pathkit coverage: warning: trace c-unmatched.trace.json was recorded for an older version of orders.OrderWorkflow; re-run pathkit test, or pass --allow-stale\n" ||
@@ -189,7 +189,7 @@ func TestCoverageWarnings(t *testing.T) {
 func TestClean(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"old", "new"} {
-		writeTrace(t, dir, n, map[string]any{"schemaVersion": 1})
+		writeTrace(t, dir, n, map[string]any{"schemaVersion": 2})
 	}
 	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("keep"), 0o644)
 	old := time.Now().Add(-48 * time.Hour)

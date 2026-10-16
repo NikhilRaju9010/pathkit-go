@@ -17,6 +17,10 @@ func (s *state) run(nodes []ast.Node) {
 			s.skip(m)
 			continue
 		}
+		if m, ok := n.(model.EnterMark); ok {
+			s.enter(m)
+			continue
+		}
 		if s.inSkip(n.Pos()) {
 			continue // inside an if or loop PathKit did not decide
 		}
@@ -33,6 +37,30 @@ func (s *state) skip(m model.SkipMark) {
 		s.forgetVar(v, reason)
 	}
 	s.skips = append(s.skips, span{m.Stmt.Pos(), m.Stmt.End()})
+}
+
+// enter handles an EnterMark: the walk goes into a copy of a helper's code.
+// Whatever an earlier copy left in the helper's variables (its parameters
+// and locals) is gone, and when the call itself was in code this walk does
+// not follow, so is the helper's.
+func (s *state) enter(m model.EnterMark) {
+	from, to := m.Site.Type.Pos(), m.Site.Body.End()
+	if m.Site.Decl != nil {
+		from = m.Site.Decl.Pos()
+	}
+	for k := range s.d {
+		if k.v != nil && k.v.Pos() >= from && k.v.Pos() < to {
+			s.killKey(key{v: k.v})
+		}
+	}
+	for k, l := range s.links {
+		if (k.v != nil && k.v.Pos() >= from && k.v.Pos() < to) || (l.v.v != nil && l.v.v.Pos() >= from && l.v.v.Pos() < to) {
+			delete(s.links, k)
+		}
+	}
+	if s.inSkip(m.Site.Call.Pos()) {
+		s.skips = append(s.skips, span{from, to})
+	}
 }
 
 func (s *state) exec(n ast.Node) {

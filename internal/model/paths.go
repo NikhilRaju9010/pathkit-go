@@ -103,7 +103,11 @@ func (g *Graph) Paths(max int) PathList {
 			out.List = append(out.List, p)
 			return
 		}
-		for _, e := range t.Junction.Exits {
+		exits := t.Junction.Exits
+		if t.Only != nil {
+			exits = []*Exit{t.Only}
+		}
+		for _, e := range exits {
 			if used[e.ID] {
 				continue
 			}

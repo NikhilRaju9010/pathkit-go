@@ -20,7 +20,7 @@ func PathText(p model.Path) string {
 			b.WriteString(" retry -->") // the loop goes round again; its head comes next
 			continue
 		}
-		fmt.Fprintf(&b, " %s --%s-->", s.Junction.Label, s.Exit.Label)
+		fmt.Fprintf(&b, " %s%s --%s-->", s.Junction.Label, s.Junction.Where(), s.Exit.Label)
 	}
 	b.WriteString(" " + p.End.String())
 	if p.Compensation {
@@ -72,7 +72,7 @@ func Mermaid(g *model.Graph, ps model.PathList, max int) string {
 	fmt.Fprintf(&b, "  n0([\"Start\"])\n")
 	for i, j := range g.Junctions {
 		ids[j] = fmt.Sprintf("n%d", i+1)
-		fmt.Fprintf(&b, "  %s{\"%s\"}\n", ids[j], escape(j.Label))
+		fmt.Fprintf(&b, "  %s{\"%s\"}\n", ids[j], escape(j.Label+j.Where()))
 	}
 	var ends []model.EndKind
 	endID := map[model.EndKind]string{}

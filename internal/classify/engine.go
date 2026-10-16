@@ -3,6 +3,7 @@ package classify
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -44,6 +45,7 @@ type Engine struct {
 	// facts is the fact engine's analyzer for each workflow (see AddGraph);
 	// engineOff is true when the config turns the engine off.
 	facts     map[string]*facts.Analyzer
+	graphs    map[string]*model.Graph
 	engineOff bool
 	// jsonMode is classification.assumptions.default_json_converter; jsonHits
 	// are the places a custom data converter was found in the module (the
@@ -95,7 +97,7 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{},
-		facts: map[string]*facts.Analyzer{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter}
+		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter}
 	if c.Policy == string(Exclude) {
 		e.policy = Exclude
 	}
@@ -277,8 +279,8 @@ func (e *Engine) Findings(measured []string, truncated map[string]bool) []string
 				o.Workflow, o.StableID, o.Reason, cap(o.Workflow)))
 			continue
 		}
-		out = append(out, fmt.Sprintf("classification: stale entry: %s %s (%s) matches no path of the current code; check the id with \"pathkit coverage --json\" (stableId), or remove the entry",
-			o.Workflow, o.StableID, o.Reason))
+		out = append(out, fmt.Sprintf("classification: stale entry: %s %s (%s) matches no path of the current code; check the id with \"pathkit coverage --json\" (stableId), or remove the entry%s",
+			o.Workflow, o.StableID, o.Reason, e.replacements(o.Workflow, o.StableID)))
 	}
 	for _, r := range e.allRules {
 		if !in[r.Workflow] || r.matched > 0 || r.off {
@@ -288,7 +290,11 @@ func (e *Engine) Findings(measured []string, truncated map[string]bool) []string
 			out = append(out, fmt.Sprintf("classification: rule %q matches none of the listed paths of %s; %s", r.ID, r.Workflow, cap(r.Workflow)))
 			continue
 		}
-		out = append(out, fmt.Sprintf("classification: stale rule %q: no path of %s takes all of its \"when\" decisions; write them as \"pathkit analyze\" prints them, like \"if x > 0 --true\"", r.ID, r.Workflow))
+		hint := ""
+		if g := e.graphs[r.Workflow]; g != nil && g.UsesHelpers() {
+			hint = fmt.Sprintf(". %s follows helper functions now: a decision inside one has its own text, with the helper and the call named (\"pathkit analyze\" prints it)", r.Workflow)
+		}
+		out = append(out, fmt.Sprintf("classification: stale rule %q: no path of %s takes all of its \"when\" decisions; write them as \"pathkit analyze\" prints them, like \"if x > 0 --true\"%s", r.ID, r.Workflow, hint))
 	}
 	return out
 }
@@ -384,4 +390,24 @@ func (e *Engine) JSONConverterOn() (on bool, why string) {
 		return false, "the module sets its own data converter or decodes numbers specially (" + e.jsonHits[0] + ")"
 	}
 	return true, ""
+}
+
+// replacements says, for a saved stableId that no path has any more, which
+// paths took its place when PathKit started following helper functions: the
+// ones whose older ID it was. "" when there are none.
+func (e *Engine) replacements(workflow, stableID string) string {
+	g := e.graphs[workflow]
+	if g == nil || !g.UsesHelpers() {
+		return ""
+	}
+	var ids []string
+	for _, p := range g.Paths(model.DefaultMaxPaths).List {
+		if slices.Contains(p.LegacyStableIDs(), stableID) {
+			ids = append(ids, p.StableID())
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(". %s follows helper functions now, and this path was split by what happens inside them: the paths that replace it are %s; mark the ones you mean under their new ids", workflow, strings.Join(ids, ", "))
 }

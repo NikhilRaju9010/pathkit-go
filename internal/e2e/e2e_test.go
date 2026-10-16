@@ -88,7 +88,7 @@ func graphs(t *testing.T, pattern string) map[string]current {
 	out := map[string]current{}
 	for _, wf := range discover.Find(res.Packages) {
 		if g, err := model.Build(wf); err == nil {
-			out[wf.Name] = current{g, model.FunctionHash(wf.Pkg.Fset, wf.Func)}
+			out[wf.Name] = current{g, g.CodeHash()}
 		}
 	}
 	return out
@@ -136,7 +136,7 @@ func TestAnswerKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		now[name] = current{g, model.FunctionHash(workflows[name].Pkg.Fset, workflows[name].Func)}
+		now[name] = current{g, g.CodeHash()}
 	}
 	wantTests := expected.TestCount(key)
 	if wantTests != 21 {
@@ -531,7 +531,7 @@ func TestScopeExcludesShipment(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out := trace.Check(f, g, model.FunctionHash(workflows[f.Workflow].Pkg.Fset, workflows[f.Workflow].Func))
+		out := trace.Check(f, g, g.CodeHash())
 		if out.Kind != trace.Matched {
 			t.Fatalf("%s trace %v: %s (%s)", f.Workflow, f.Steps, out.Kind, out.Reason)
 		}

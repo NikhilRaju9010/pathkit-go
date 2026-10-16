@@ -109,8 +109,17 @@ func (b *builder) attachFacts(g *Graph) {
 	if !factsEnabled {
 		return
 	}
+	// The extractors read the workflow function; decisions in copies of
+	// helper code get no notes (a claim about them rests on nothing here).
+	view := *g
+	view.Junctions = nil
+	for _, j := range g.Junctions {
+		if j.Site == nil {
+			view.Junctions = append(view.Junctions, j)
+		}
+	}
 	for _, x := range extractors {
-		x(b, g)
+		x(b, &view)
 	}
 }
 

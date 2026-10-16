@@ -369,6 +369,9 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 		if blank(e.Reason) {
 			return c, fail(`%s (%s %s) needs a "reason": accepting a trace that fits no path is a decision, and the reason is shown in every report`, where, strings.TrimSpace(*e.Workflow), *e.StepsID)
 		}
+		if strings.EqualFold(strings.TrimSpace(*e.Reason), "TODO") {
+			return c, fail(`%s (%s %s) still has the reason "TODO" that PathKit prints in its ready-made entry: replace it with why this run takes a road PathKit does not draw (the reason is shown in every report)`, where, strings.TrimSpace(*e.Workflow), *e.StepsID)
+		}
 		key := strings.TrimSpace(*e.Workflow) + "|" + *e.StepsID
 		if seenTrace[key] {
 			return c, fail(`%s %s is listed twice in classification.explained_traces`, strings.TrimSpace(*e.Workflow), *e.StepsID)

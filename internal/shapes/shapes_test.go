@@ -107,7 +107,7 @@ func todayResults(t *testing.T, dir string) map[string][]todayPath {
 		if err := eng.AddGraph(wf.Name, g); err != nil {
 			t.Fatal(err)
 		}
-		wfs = append(wfs, coverage.Workflow{Name: wf.Name, Graph: g, Hash: model.FunctionHash(wf.Pkg.Fset, wf.Func)})
+		wfs = append(wfs, coverage.Workflow{Name: wf.Name, Graph: g, Hash: g.CodeHash()})
 	}
 	out := map[string][]todayPath{}
 	for _, w := range coverage.Compute(coverage.Input{Workflows: wfs, Classifier: eng.Classify}).Workflows {

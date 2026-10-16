@@ -233,7 +233,7 @@ func TestTracesExcluded(t *testing.T) {
 	p := absPath(t, pilot)
 	t.Chdir(t.TempDir())
 	dir := t.TempDir()
-	writeTrace(t, dir, "x", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
+	writeTrace(t, dir, "x", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
 		"functionHash": "0000000000000000", "status": "complete", "steps": []string{"J1.true"}})
 	stdout, _, code := run(t, "traces", p+"/orders", "--traces", dir, "--exclude", "OrderWorkflow")
 	want := "orders.OrderWorkflow: excluded from scope (excluded by --exclude flag) [x.trace.json]\n\n1 trace: 1 excluded\n"

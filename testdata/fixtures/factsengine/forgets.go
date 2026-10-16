@@ -132,7 +132,7 @@ func ImpossibleLoopKeepsOthers(ctx workflow.Context, items []string) error {
 	var fixed string
 	count := 0
 	for range items {
-		_ = act(ctx)
+		_ = unknownString("x") // not a workflow call: the loop stays a plain loop
 		count++
 	}
 	if fixed != "" {
@@ -301,7 +301,7 @@ func SuspectLoopBetween(ctx workflow.Context, items []string, x string) error {
 	}
 	for _, it := range items {
 		x = it
-		_ = act(ctx)
+		_ = unknownString(it) // not a workflow call: the loop stays a plain loop
 	}
 	if x == "b" {
 		_ = act(ctx)

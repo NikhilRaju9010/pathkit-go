@@ -24,9 +24,12 @@ type loopInfo struct {
 	// Why it is a junction (docs/DESIGN.md D3): a
 	// Temporal call in it, or a junction in it. Neither: transparent.
 	temporal, inner bool
+	// helperOnly: the loop is a junction only because it calls a helper
+	// whose code is followed (otherwise it would be a plain loop).
+	helperOnly bool
 }
 
-func (l *loopInfo) junction() bool { return l.temporal || l.inner }
+func (l *loopInfo) junction() bool { return l.temporal || l.inner || l.helperOnly }
 
 // indexLoops finds every loop's head, body and done blocks in c.
 func (b *builder) indexLoops(c *cfg.CFG) {
@@ -53,6 +56,7 @@ func (b *builder) indexLoops(c *cfg.CFG) {
 			l.head, l.hasExit = l.body, false
 		}
 		l.temporal, l.inner = b.loopReasons(s)
+		l.helperOnly = !l.temporal && !l.inner && b.loopHasHelper(s)
 		if l.head != nil {
 			b.loopHeads[l.head] = l
 		}
@@ -103,6 +107,39 @@ func (b *builder) loopReasons(s ast.Stmt) (temporal, inner bool) {
 	return temporal, inner
 }
 
+// loopHasHelper: the loop's body (or condition) calls a helper whose code is
+// followed into, so what the helper decides is decided inside the loop.
+func (b *builder) loopHasHelper(s ast.Stmt) bool {
+	var parts []ast.Node
+	switch s := s.(type) {
+	case *ast.ForStmt:
+		if s.Cond != nil {
+			parts = append(parts, s.Cond)
+		}
+		if s.Post != nil {
+			parts = append(parts, s.Post)
+		}
+		parts = append(parts, s.Body)
+	case *ast.RangeStmt:
+		parts = append(parts, s.Body)
+	}
+	found := false
+	for _, p := range parts {
+		ast.Inspect(p, func(n ast.Node) bool {
+			switch n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.ExprStmt, *ast.AssignStmt, *ast.ReturnStmt, *ast.DeclStmt:
+				if b.inlineAt(n) != nil {
+					found = true
+				}
+			}
+			return !found
+		})
+	}
+	return found
+}
+
 // loopRoad is where execution goes from a loop's head.
 //
 // A loop junction has exits "iterate" (into the body) and "exit" (to the
@@ -121,7 +158,7 @@ func (b *builder) loopRoad(l *loopInfo) Target {
 	if b.busy[head] {
 		// Back at the head from inside the body.
 		if l.junction() {
-			return Target{Retry: b.junctions[l.stmt].Retry}
+			return Target{Retry: b.junctions[b.key(l.stmt)].Retry}
 		}
 		if !l.hasExit {
 			return Target{End: endDead} // "for {}" walked once can't end normally
@@ -138,6 +175,7 @@ func (b *builder) loopRoad(l *loopInfo) Target {
 		t.Nodes = append([]ast.Node{SkipMark{Stmt: l.stmt}}, t.Nodes...)
 	} else {
 		j := b.newJunction(l.stmt, Loop, loopLabel(l.stmt))
+		j.viaHelper = l.helperOnly
 		iterate := addExit(j, "iterate", nil)
 		var exit *Exit
 		if l.hasExit {

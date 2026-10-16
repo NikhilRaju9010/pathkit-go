@@ -317,6 +317,7 @@ func (s *state) buildClaim(c claimSpec) *Claim {
 	}
 	var items []item
 	earliest := c.step
+	uses := c.step
 	roots := map[*types.Var]bool{}
 	assumes := false
 	for _, w := range whys {
@@ -327,6 +328,7 @@ func (s *state) buildClaim(c claimSpec) *Claim {
 		if w.atStep+1 < earliest {
 			earliest = w.atStep + 1
 		}
+		uses = max(uses, w.step, w.atStep+1)
 		if w.key.v != nil {
 			roots[w.key.v] = true
 		}
@@ -365,7 +367,7 @@ func (s *state) buildClaim(c claimSpec) *Claim {
 	for _, w := range whys {
 		known = append(known, s.sentence(w))
 	}
-	claim := &Claim{Step: c.step, Kind: kind, Explanation: fmt.Sprintf(c.explanation, strings.Join(known, " ")), Proof: proof}
+	claim := &Claim{Step: c.step, Kind: kind, Explanation: fmt.Sprintf(c.explanation, strings.Join(known, " ")), Proof: proof, Uses: uses}
 	if assumes {
 		claim.Assumptions = []string{AssumptionJSON}
 	}

@@ -72,8 +72,18 @@ func New(g *model.Graph, opts ...Options) *Analyzer {
 		a.off = "the code is not available"
 		return a
 	}
-	a.scan(g.Func())
-	a.findEscapes(g.Func())
+	// The workflow function, and the declared helpers whose code the graph
+	// follows into: both are code the paths run.
+	fns := []*ast.FuncDecl{g.Func()}
+	seen := map[*ast.FuncDecl]bool{}
+	for _, s := range g.Sites() {
+		if s.Decl != nil && !seen[s.Decl] {
+			seen[s.Decl] = true
+			fns = append(fns, s.Decl)
+		}
+	}
+	a.scan(fns)
+	a.findEscapes(fns)
 	return a
 }
 
@@ -138,7 +148,7 @@ func (a *Analyzer) markUntracked(e ast.Expr, why string) {
 
 // scan finds everything that makes the function unsuitable, and every
 // variable that must never be tracked (the safety list).
-func (a *Analyzer) scan(fn *ast.FuncDecl) {
+func (a *Analyzer) scan(fns []*ast.FuncDecl) {
 	var lits []*ast.FuncLit // the function literals around the node being visited
 	var cands []*ast.CallExpr
 	var visit func(n ast.Node) bool
@@ -293,7 +303,9 @@ func (a *Analyzer) scan(fn *ast.FuncDecl) {
 		}
 		return true
 	}
-	ast.Inspect(fn.Body, visit)
+	for _, fn := range fns {
+		ast.Inspect(fn.Body, visit)
+	}
 	// The calls that fill a variable through its address with a value
 	// Temporal decoded: now that every assignment is known, check that the
 	// future or channel really comes from Temporal's payloads.
@@ -447,7 +459,22 @@ func (a *Analyzer) isDecodeCall(call *ast.CallExpr) bool {
 // findEscapes decides, for every slice or map variable, whether the function
 // uses it in a way that lets something else reach its elements or length.
 // Only a variable that never escapes may carry facts about its contents.
-func (a *Analyzer) findEscapes(fn *ast.FuncDecl) {
+func (a *Analyzer) findEscapes(fns []*ast.FuncDecl) {
+	for _, fn := range fns {
+		a.escapesIn(fn)
+	}
+	// A container that a type assertion took out of a decoded value is the
+	// same container the interface holds. If any such name is passed on or
+	// captured, something else may write into it, and no container found in a
+	// decoded value is followed.
+	for v := range a.assertDerived {
+		if isJSONContainer(v.Type()) && a.escapes[v] != "" {
+			a.jsonWrite = true
+		}
+	}
+}
+
+func (a *Analyzer) escapesIn(fn *ast.FuncDecl) {
 	var stack []ast.Node
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		if n == nil {
@@ -478,15 +505,6 @@ func (a *Analyzer) findEscapes(fn *ast.FuncDecl) {
 		stack = append(stack, n)
 		return true
 	})
-	// A container that a type assertion took out of a decoded value is the
-	// same container the interface holds. If any such name is passed on or
-	// captured, something else may write into it, and no container found in a
-	// decoded value is followed.
-	for v := range a.assertDerived {
-		if isJSONContainer(v.Type()) && a.escapes[v] != "" {
-			a.jsonWrite = true
-		}
-	}
 }
 
 // ifaceEscapeUse says why this use of the interface variable lets something

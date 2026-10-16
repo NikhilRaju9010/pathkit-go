@@ -1,0 +1,230 @@
+package soundness
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Helper functions (milestone M4): functions of the package that call the
+// Temporal SDK, which PathKit follows into, one copy per call. The probes
+// cover helpers with and without an error result, with branches and loops,
+// reused with other arguments, that change their own parameters, that are
+// closures writing the caller's variables, that take a pointer, that are
+// methods, and that call other helpers up to three deep. Every helper's own
+// errors are swallowed by the caller, so a program never fails.
+
+// helperName makes a name that no other program in the batch uses.
+func (g *gen) helperName() string {
+	return fmt.Sprintf("h%s_%d", g.name, g.fresh2())
+}
+
+func (g *gen) fresh2() int {
+	g.next++
+	return g.next
+}
+
+// strArg is a string a helper can be called with.
+func (g *gen) strArg() string {
+	if v, ok := g.pick(kString); ok && g.r.Intn(3) > 0 {
+		return v.name
+	}
+	return g.strConst()
+}
+
+// helperProbe declares a helper and writes calls of it in the function.
+func (g *gen) helperProbe() {
+	name := g.helperName()
+	switch g.r.Intn(12) {
+	case 0: // an error of its own, swallowed by the caller
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, s string) error {
+	_ = workflow.GetInfo(ctx)
+	if s == "a" {
+		return errors.New("a")
+	}
+	return nil
+}
+`, name))
+		err := g.fresh("er")
+		g.line(0, "if %s := %s(ctx, %s); %s != nil {", err, name, g.strArg(), err)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	case 1: // the same helper twice, which changes its own parameter
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, n int) error {
+	if n == 2 {
+		return workflow.Sleep(ctx, time.Nanosecond)
+	}
+	n = 2
+	_ = n
+	return nil
+}
+`, name))
+		g.line(0, "_ = %s(ctx, %s)", name, g.intConst())
+		g.line(0, "_ = %s(ctx, %s)", name, g.intConst())
+		g.helperCalls = append(g.helperCalls, fmt.Sprintf("_ = %s(ctx, %s)", name, g.intConst()))
+	case 2: // a constant inside the helper
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context) error {
+	m := "a"
+	if m == "b" {
+		return workflow.Sleep(ctx, time.Nanosecond)
+	}
+	if m == "a" {
+		_ = workflow.GetInfo(ctx)
+	}
+	return nil
+}
+`, name))
+		g.line(0, "_ = %s(ctx)", name)
+		g.helperCalls = append(g.helperCalls, fmt.Sprintf("_ = %s(ctx)", name))
+	case 3: // up to three helpers deep, a bool handed down
+		depth := 1 + g.r.Intn(3)
+		names := make([]string, depth)
+		for i := range names {
+			names[i] = fmt.Sprintf("%s_%d", name, i+1)
+		}
+		for i := depth - 1; i >= 0; i-- {
+			var body string
+			if i == depth-1 {
+				body = "\t_ = workflow.GetInfo(ctx)\n\tif b {\n\t\treturn errors.New(\"b\")\n\t}\n\treturn nil\n"
+			} else {
+				arg := "b"
+				if g.r.Intn(2) == 0 {
+					arg = "!b"
+				}
+				body = fmt.Sprintf("\tif err := %s(ctx, %s); err != nil {\n\t\treturn err\n\t}\n\treturn nil\n", names[i+1], arg)
+			}
+			g.helpers = append(g.helpers, fmt.Sprintf("func %s(ctx workflow.Context, b bool) error {\n%s}\n", names[i], body))
+		}
+		arg := "true"
+		if v, ok := g.pick(kBool); ok {
+			arg = v.name
+		}
+		err := g.fresh("er")
+		g.line(0, "if %s := %s(ctx, %s); %s != nil {", err, names[0], arg, err)
+		g.line(1, "noop()")
+		g.line(0, "}")
+		g.helperCalls = append(g.helperCalls, fmt.Sprintf("_ = %s(ctx, true)", names[0]))
+	case 4: // a closure that writes the caller's variable
+		flag, set := g.fresh("fg"), g.fresh("set")
+		g.line(0, "%s := %s", flag, g.boolConst())
+		g.line(0, "%s := func(ctx workflow.Context) error {", set)
+		g.line(1, "%s = %s", flag, g.boolConst())
+		g.line(1, "return workflow.Sleep(ctx, time.Nanosecond)")
+		g.line(0, "}")
+		g.line(0, "_ = %s(ctx)", set)
+		g.line(0, "if %s {", flag)
+		g.line(1, "noop()")
+		g.line(0, "}")
+		g.addLocal(flag, kBool)
+	case 5: // a pointer to the caller's variable
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, p *string) error {
+	*p = "z"
+	return workflow.Sleep(ctx, time.Nanosecond)
+}
+`, name))
+		v := g.fresh("pv")
+		g.line(0, "%s := %s", v, g.strConst())
+		g.line(0, "_ = %s(ctx, &%s)", name, v)
+		g.line(0, "if %s == \"\" {", v)
+		g.line(1, "noop()")
+		g.line(0, "}")
+		g.addLocal(v, kString)
+	case 6: // a loop inside the helper
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, s string) error {
+	for _, e := range []string{"a", "b"} {
+		if e == s {
+			return workflow.Sleep(ctx, time.Nanosecond)
+		}
+	}
+	return nil
+}
+`, name))
+		g.line(0, "_ = %s(ctx, %s)", name, g.strArg())
+		g.helperCalls = append(g.helperCalls, fmt.Sprintf("_ = %s(ctx, %s)", name, g.strConst()))
+	case 7: // a value and an error
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, s string) (string, error) {
+	if s == "" {
+		return "d", nil
+	}
+	if err := workflow.Sleep(ctx, time.Nanosecond); err != nil {
+		return "", err
+	}
+	return s, nil
+}
+`, name))
+		r, err := g.fresh("rv"), g.fresh("er")
+		g.line(0, "%s, %s := %s(ctx, %s)", r, err, name, g.strArg())
+		g.line(0, "if %s != nil {", err)
+		g.line(1, "noop()")
+		g.line(0, "}")
+		g.addLocal(r, kString)
+	case 8: // a method of a struct
+		if r, ok := g.pick(kStruct); ok {
+			g.helpers = append(g.helpers, fmt.Sprintf(`func (r *Rec) %s(ctx workflow.Context) error {
+	_ = workflow.GetInfo(ctx)
+	if r.A == "" {
+		return errors.New("e")
+	}
+	return nil
+}
+`, name))
+			err := g.fresh("er")
+			g.line(0, "if %s := %s.%s(ctx); %s != nil {", err, r.name, name, err)
+			g.line(1, "noop()")
+			g.line(0, "}")
+		} else {
+			g.line(0, "noop()")
+		}
+	case 10: // an error check PathKit only assumes passes
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, n int) error {
+	_ = workflow.GetInfo(ctx)
+	if err := pair2(n); err != nil {
+		return err
+	}
+	return nil
+}
+`, name))
+		err := g.fresh("er")
+		g.line(0, "if %s := %s(ctx, %s); %s != nil {", err, name, g.intConst(), err)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	case 11: // a deferred function clears the named result
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, b bool) (err error) {
+	defer func() {
+		if b {
+			err = nil
+		}
+	}()
+	_ = workflow.GetInfo(ctx)
+	return errors.New("x")
+}
+`, name))
+		arg := "true"
+		if v, ok := g.pick(kBool); ok {
+			arg = v.name
+		}
+		err := g.fresh("er")
+		g.line(0, "if %s := %s(ctx, %s); %s != nil {", err, name, arg, err)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	default: // returns the helper's result: the helper's end is the workflow's
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, b bool) error {
+	if b {
+		return errors.New("b")
+	}
+	return workflow.Sleep(ctx, time.Nanosecond)
+}
+`, name))
+		arg := "true"
+		if v, ok := g.pick(kBool); ok {
+			arg = v.name
+		}
+		g.line(0, "if %s {", g.cond())
+		g.line(1, "_ = %s(ctx, %s)", name, arg)
+		g.line(0, "}")
+	}
+}
+
+func (g *gen) boolConst() string { return []string{"false", "true"}[g.r.Intn(2)] }
+
+// helperSource is the helpers declared by the program, then nothing else.
+func (g *gen) helperSource() string { return strings.Join(g.helpers, "\n") }

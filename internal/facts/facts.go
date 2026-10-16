@@ -64,6 +64,12 @@ type Claim struct {
 	Proof       []ProofStep
 	// Assumptions are the named assumptions the claim rests on.
 	Assumptions []string
+	// Uses is the last step of the path the claim's reasoning depends on:
+	// its own decision, the decisions its facts were learned from, and the
+	// road after the last step done when each fact was learned. Local
+	// distrust of a trace that leaves the map after step d-1 applies to a
+	// claim only when Uses >= d.
+	Uses int
 }
 
 // Suspect says an uncovered path asks two questions about the same value

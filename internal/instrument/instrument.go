@@ -32,13 +32,17 @@ const RecorderFile = "zz_pathkit_recorder.go"
 
 // Names the generated code adds. If the user's code already uses one,
 // instrumenting stops with a clear error instead of producing broken code.
-var packageNames = []string{"pathkitStart", "pathkitRecorder", "pathkitTrace", "pathkitTraceDir", "pathkitLoop"}
+var packageNames = []string{"pathkitStart", "pathkitRecorder", "pathkitTrace", "pathkitTraceDir", "pathkitLoop",
+	"pathkitSite", "pathkitEnter", "pathkitFrame", "pathkitTables", "pathkitCtxKey", "pathkitPending", "pathkitSource"}
 
 // maxResults is how many results a workflow function may have; the
 // recorder declares one pathkitRetN helper for each N up to it.
 const maxResults = 8
 
 const recVar = "pathkitRec"
+
+// frameVar is the name of the handle a marked-up helper records through.
+const frameVar = "pathkitH"
 
 // ctxVar is the name given to a workflow's context parameter that the
 // user wrote as "_", so the recorder can be started with it.
@@ -69,30 +73,51 @@ type Result struct {
 
 // Instrument marks up every target's file and adds one recorder file per
 // package. traceDir must be absolute; it is baked into the recorder.
+//
+// The code of helper functions that a target's graph follows into is marked
+// up too (docs/DESIGN.md D15), in whatever file it is. A helper used by several
+// workflows is marked up once: every edit to it is the same for all of them
+// (it depends only on the code, never on the workflow), so the edits of all
+// targets are merged and an edit that is already there (same file, offset and
+// text) is dropped. A workflow that does not follow a call another one wraps
+// is not harmed: the recorder ignores keys its own table does not have.
 func Instrument(targets []Target, traceDir string) (*Result, error) {
 	res := &Result{Files: map[string][]byte{}, Edits: map[string][]Edit{}}
-	byFile := map[string][]Target{}
-	for _, t := range targets {
-		byFile[t.Workflow.Filename] = append(byFile[t.Workflow.Filename], t)
+	perFile := map[string][]Edit{}
+	type fileEdit struct {
+		file string
+		Edit
 	}
-
-	packages := map[string]string{} // package dir -> package name
-	for filename, ts := range byFile {
-		var edits []Edit
-		for _, t := range ts {
-			e, err := workflowEdits(t)
-			if err != nil {
-				return nil, err
-			}
-			edits = append(edits, e...)
+	seen := map[fileEdit]bool{}
+	packages := map[string]string{}                     // package dir -> package name
+	tables := map[string]map[string]map[string]string{} // package dir -> workflow -> table
+	for _, t := range targets {
+		byFile, err := workflowEdits(t)
+		if err != nil {
+			return nil, err
 		}
+		for file, es := range byFile {
+			for _, e := range es {
+				if k := (fileEdit{file, e}); !seen[k] {
+					seen[k] = true
+					perFile[file] = append(perFile[file], e)
+				}
+			}
+		}
+		dir := filepath.Dir(t.Workflow.Filename)
+		packages[dir] = t.Workflow.Pkg.Name
+		if tables[dir] == nil {
+			tables[dir] = map[string]map[string]string{}
+		}
+		tables[dir][t.Workflow.Name] = t.Graph.RecorderTable()
+	}
+	for filename, edits := range perFile {
 		src, err := os.ReadFile(filename)
 		if err != nil {
 			return nil, err
 		}
 		res.Files[filename] = Apply(src, edits)
 		res.Edits[filename] = edits
-		packages[filepath.Dir(filename)] = ts[0].Workflow.Pkg.Name
 	}
 
 	for dir, name := range packages {
@@ -101,7 +126,7 @@ func Instrument(targets []Target, traceDir string) (*Result, error) {
 			return nil, fmt.Errorf("cannot record %s: a file named %s already exists there", dir, RecorderFile)
 		}
 		var buf bytes.Buffer
-		if err := recorderTemplate.Execute(&buf, map[string]any{"Package": name, "TraceDir": traceDir, "Rets": retHelpers()}); err != nil {
+		if err := recorderTemplate.Execute(&buf, map[string]any{"Package": name, "TraceDir": traceDir, "Rets": retHelpers(), "Tables": tableTexts(tables[dir])}); err != nil {
 			return nil, err
 		}
 		res.Files[path] = buf.Bytes()
@@ -109,14 +134,72 @@ func Instrument(targets []Target, traceDir string) (*Result, error) {
 	return res, nil
 }
 
-// workflowEdits lists the insertions for one workflow function.
-func workflowEdits(t Target) ([]Edit, error) {
+// tableText is one workflow's lookup table, written as Go source.
+type tableText struct{ Workflow, Entries string }
+
+// tableTexts writes the tables in a fixed order, so the same code always
+// gives the same recorder file.
+func tableTexts(tables map[string]map[string]string) []tableText {
+	var out []tableText
+	for _, wf := range sortedKeys(tables) {
+		var b strings.Builder
+		for _, k := range sortedKeys(tables[wf]) {
+			fmt.Fprintf(&b, "%q: %q, ", k, tables[wf][k])
+		}
+		out = append(out, tableText{Workflow: wf, Entries: b.String()})
+	}
+	return out
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// scope is the code a junction's edits go into: the workflow function (it
+// records through the recorder, with the IDs of the model) or a helper (it
+// records through its handle, with keys of its own that the recorder's table
+// turns into IDs).
+type scope struct {
+	recv    string
+	exitKey func(j *model.Junction, label string) (string, bool)
+	loopKey func(j *model.Junction) string
+}
+
+func workflowScope(g *model.Graph) scope {
+	return scope{
+		recv: recVar,
+		exitKey: func(j *model.Junction, label string) (string, bool) {
+			id, ok := g.ExitFor(j.Stmt, label)
+			return id.String(), ok
+		},
+		loopKey: func(j *model.Junction) string { return j.ID },
+	}
+}
+
+func helperScope(g *model.Graph) scope {
+	return scope{
+		recv: frameVar,
+		exitKey: func(j *model.Junction, label string) (string, bool) {
+			return g.LocalKey(j.Stmt, label), true
+		},
+		loopKey: func(j *model.Junction) string { return g.LocalKey(j.Stmt, "loop") },
+	}
+}
+
+// workflowEdits lists the insertions for one workflow function and for the
+// helper code its graph follows into, by file.
+func workflowEdits(t Target) (map[string][]Edit, error) {
 	wf, g := t.Workflow, t.Graph
 	fset := wf.Pkg.Fset
 	off := func(n ast.Node) int { return fset.Position(n.Pos()).Offset }
 	end := func(n ast.Node) int { return fset.Position(n.End()).Offset }
 
-	if err := checkNames(wf); err != nil {
+	if err := checkNames(wf, g); err != nil {
 		return nil, err
 	}
 	params := wf.Func.Type.Params.List
@@ -132,61 +215,23 @@ func workflowEdits(t Target) ([]Edit, error) {
 		edits = append(edits, Edit{Offset: off(params[0].Names[0]), Delete: 1, Text: ctxVar})
 	}
 
-	hash := model.FunctionHash(fset, wf.Func)
+	hash := g.CodeHash()
 	edits = append(edits, Edit{
 		Offset: off(wf.Func.Body) + 1, // just after the function's "{"
 		Text:   fmt.Sprintf(" %s := pathkitStart(%s, %q, %q, %q); defer %s.flush();", recVar, ctxName, wf.Name, hash, wf.Pkg.PkgPath, recVar),
 	})
 
 	labels := labelsOf(wf.Func.Body)
+	wscope := workflowScope(g)
 	for _, j := range g.Junctions {
-		if j.Kind == model.Loop {
-			e, err := loopEdits(g, j, labels, off, end)
-			if err != nil {
-				return nil, fmt.Errorf("%v in %s", err, wf.Name)
-			}
-			edits = append(edits, e...)
+		if j.Site != nil {
 			continue
 		}
-		var fellInto map[*ast.CaseClause]bool
-		if body := switchBody(j.Stmt); body != nil {
-			var e []Edit
-			e, fellInto = fallthroughEdits(body, off)
-			edits = append(edits, e...)
+		e, err := junctionEdits(wscope, g, j, labels, fset)
+		if err != nil {
+			return nil, fmt.Errorf("%v in %s", err, wf.Name)
 		}
-		for _, e := range j.Exits {
-			id, ok := g.ExitFor(j.Stmt, e.Label)
-			if !ok {
-				return nil, fmt.Errorf("internal error: no ID for %s exit %q in %s", j.ID, e.Label, wf.Name)
-			}
-			hit := fmt.Sprintf("%s.hit(%q)", recVar, id.String())
-			switch road := e.Road.(type) {
-			case *ast.BlockStmt:
-				edits = append(edits, Edit{Offset: off(road) + 1, Text: " " + hit + ";"})
-			case *ast.IfStmt: // an "else if": wrap it in a block that records first
-				edits = append(edits,
-					Edit{Offset: off(road), Text: "{ " + hit + "; "},
-					Edit{Offset: end(road), Order: 2, Text: " }"})
-			case *ast.CaseClause: // record first thing after "case ...:"
-				if fellInto[road] {
-					// Reached by the previous case's fallthrough, the
-					// run is still on that case's exit: record only when
-					// this case was chosen by the switch itself.
-					hit = fmt.Sprintf("%s.hitUnlessFell(%q)", recVar, id.String())
-				}
-				edits = append(edits, Edit{Offset: fset.Position(road.Colon).Offset + 1, Text: " " + hit + ";"})
-			case nil:
-				switch s := j.Stmt.(type) {
-				case *ast.IfStmt: // no else: add one
-					edits = append(edits, Edit{Offset: end(s.Body), Order: 1, Text: " else { " + hit + " }"})
-				default: // a switch with no default: add one before its "}"
-					body := switchBody(s)
-					edits = append(edits, Edit{Offset: fset.Position(body.Rbrace).Offset, Text: "; default: " + hit + " "})
-				}
-			default:
-				return nil, fmt.Errorf("internal error: unexpected road %T in %s", road, wf.Name)
-			}
-		}
+		edits = append(edits, e...)
 	}
 
 	resultTypes, err := resultTypeTexts(wf)
@@ -207,7 +252,107 @@ func workflowEdits(t Target) ([]Edit, error) {
 		}
 		return true
 	})
-	return edits, retErr
+	if retErr != nil {
+		return nil, retErr
+	}
+	out := map[string][]Edit{wf.Filename: edits}
+
+	// The code of helpers: hand the site over at each call, take it at the
+	// top of the helper, and record the helper's own decisions.
+	hscope := helperScope(g)
+	for _, s := range g.Sites() {
+		recv := recVar
+		if s.Parent != nil {
+			recv = frameVar
+		}
+		file := fset.Position(s.Call.Pos()).Filename
+		out[file] = append(out[file],
+			Edit{Offset: off(s.Ctx), Text: fmt.Sprintf("pathkitSite(%s, ", recv)},
+			Edit{Offset: end(s.Ctx), Order: 3, Text: fmt.Sprintf(", %q)", g.CallKey(s.Call))})
+	}
+	done := map[ast.Node]bool{}
+	for _, s := range g.Helpers() {
+		file := fset.Position(s.Body.Pos()).Filename
+		ctxIdent := s.CtxName.Name
+		var es []Edit
+		if ctxIdent == "_" {
+			ctxIdent = ctxVar
+			es = append(es, Edit{Offset: off(s.CtxName), Delete: 1, Text: ctxVar})
+		}
+		es = append(es, Edit{
+			Offset: off(s.Body) + 1,
+			Text:   fmt.Sprintf(" %s, %s := pathkitEnter(%s, %q); defer %s.exit();", frameVar, ctxIdent, ctxIdent, s.Key, frameVar),
+		})
+		hlabels := labelsOf(s.Body)
+		for _, j := range g.Junctions {
+			if j.Site == nil || j.Site.Body != s.Body {
+				continue
+			}
+			st := j.Stmt
+			if done[st] {
+				continue // one edit per decision, however many copies of the helper there are
+			}
+			done[st] = true
+			e, err := junctionEdits(hscope, g, j, hlabels, fset)
+			if err != nil {
+				return nil, fmt.Errorf("%v in %s", err, wf.Name)
+			}
+			es = append(es, e...)
+		}
+		out[file] = append(out[file], es...)
+	}
+	return out, nil
+}
+
+// junctionEdits records the exits of one decision, in the workflow function
+// or in a helper (sc).
+func junctionEdits(sc scope, g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.LabeledStmt, fset *token.FileSet) ([]Edit, error) {
+	off := func(n ast.Node) int { return fset.Position(n.Pos()).Offset }
+	end := func(n ast.Node) int { return fset.Position(n.End()).Offset }
+	if j.Kind == model.Loop {
+		return loopEdits(sc, g, j, labels, off, end)
+	}
+	var edits []Edit
+	var fellInto map[*ast.CaseClause]bool
+	if body := switchBody(j.Stmt); body != nil {
+		var e []Edit
+		e, fellInto = fallthroughEdits(sc.recv, body, off)
+		edits = append(edits, e...)
+	}
+	for _, e := range j.Exits {
+		key, ok := sc.exitKey(j, e.Label)
+		if !ok {
+			return nil, fmt.Errorf("internal error: no ID for %s exit %q", j.ID, e.Label)
+		}
+		hit := fmt.Sprintf("%s.hit(%q)", sc.recv, key)
+		switch road := e.Road.(type) {
+		case *ast.BlockStmt:
+			edits = append(edits, Edit{Offset: off(road) + 1, Text: " " + hit + ";"})
+		case *ast.IfStmt: // an "else if": wrap it in a block that records first
+			edits = append(edits,
+				Edit{Offset: off(road), Text: "{ " + hit + "; "},
+				Edit{Offset: end(road), Order: 2, Text: " }"})
+		case *ast.CaseClause: // record first thing after "case ...:"
+			if fellInto[road] {
+				// Reached by the previous case's fallthrough, the
+				// run is still on that case's exit: record only when
+				// this case was chosen by the switch itself.
+				hit = fmt.Sprintf("%s.hitUnlessFell(%q)", sc.recv, key)
+			}
+			edits = append(edits, Edit{Offset: fset.Position(road.Colon).Offset + 1, Text: " " + hit + ";"})
+		case nil:
+			switch s := j.Stmt.(type) {
+			case *ast.IfStmt: // no else: add one
+				edits = append(edits, Edit{Offset: end(s.Body), Order: 1, Text: " else { " + hit + " }"})
+			default: // a switch with no default: add one before its "}"
+				body := switchBody(s)
+				edits = append(edits, Edit{Offset: fset.Position(body.Rbrace).Offset, Text: "; default: " + hit + " "})
+			}
+		default:
+			return nil, fmt.Errorf("internal error: unexpected road %T", road)
+		}
+	}
+	return edits, nil
 }
 
 // switchBody returns the { case ... } block of a switch or type switch,
@@ -224,7 +369,7 @@ func switchBody(n ast.Node) *ast.BlockStmt {
 
 // fallthroughEdits marks every "fallthrough" in a switch, so the case it
 // falls into doesn't record a second exit, and returns those cases.
-func fallthroughEdits(body *ast.BlockStmt, off func(ast.Node) int) ([]Edit, map[*ast.CaseClause]bool) {
+func fallthroughEdits(recv string, body *ast.BlockStmt, off func(ast.Node) int) ([]Edit, map[*ast.CaseClause]bool) {
 	var edits []Edit
 	fellInto := map[*ast.CaseClause]bool{}
 	for i, c := range body.List {
@@ -233,7 +378,7 @@ func fallthroughEdits(body *ast.BlockStmt, off func(ast.Node) int) ([]Edit, map[
 			continue
 		}
 		if br, ok := stmts[len(stmts)-1].(*ast.BranchStmt); ok && br.Tok == token.FALLTHROUGH {
-			edits = append(edits, Edit{Offset: off(br), Text: recVar + ".fell(); "})
+			edits = append(edits, Edit{Offset: off(br), Text: recv + ".fell(); "})
 			fellInto[body.List[i+1].(*ast.CaseClause)] = true
 		}
 	}
@@ -253,13 +398,13 @@ func fallthroughEdits(body *ast.BlockStmt, off func(ast.Node) int) ([]Edit, map[
 //   - range also gets rangeDone after its "}", which records the run-out
 //     (retry, exit), and broke before every break that leaves it, because
 //     a break leaves without an "exit" step.
-func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.LabeledStmt, off, end func(ast.Node) int) ([]Edit, error) {
+func loopEdits(sc scope, g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.LabeledStmt, off, end func(ast.Node) int) ([]Edit, error) {
 	id := func(label string) (string, error) {
-		e, ok := g.ExitFor(j.Stmt, label)
+		k, ok := sc.exitKey(j, label)
 		if !ok {
 			return "", fmt.Errorf("internal error: no ID for %s exit %q", j.ID, label)
 		}
-		return e.String(), nil
+		return k, nil
 	}
 	iterate, err := id("iterate")
 	if err != nil {
@@ -270,8 +415,8 @@ func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.Label
 		return nil, err
 	}
 	exit := "" // a "for {}" has no exit
-	if e, ok := g.ExitFor(j.Stmt, "exit"); ok {
-		exit = e.String()
+	if k, ok := sc.exitKey(j, "exit"); ok && hasExit(j) {
+		exit = k
 	}
 
 	stmt := j.Stmt.(ast.Stmt)
@@ -279,10 +424,11 @@ func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.Label
 	if l := labels[stmt]; l != nil {
 		start = l
 	}
-	key := j.ID
-	edits := []Edit{{Offset: off(start), Text: fmt.Sprintf("%s.enter(%q, %q, %q, %q); ", recVar, key, iterate, exit, retry)}}
+	key := sc.loopKey(j)
+	recv := sc.recv
+	edits := []Edit{{Offset: off(start), Text: fmt.Sprintf("%s.enter(%q, %q, %q, %q); ", recv, key, iterate, exit, retry)}}
 	atBodyTop := func(body *ast.BlockStmt) Edit {
-		return Edit{Offset: off(body) + 1, Text: fmt.Sprintf(" %s.loop(%q, true);", recVar, key)}
+		return Edit{Offset: off(body) + 1, Text: fmt.Sprintf(" %s.loop(%q, true);", recv, key)}
 	}
 
 	switch s := stmt.(type) {
@@ -293,7 +439,7 @@ func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.Label
 		// pathkitRec.loop takes a plain bool. A condition of a named bool type
 		// ("type Flag bool; for !done") or of a type parameter constrained by
 		// ~bool needs a conversion, which means the same.
-		open, shut := fmt.Sprintf("%s.loop(%q, ", recVar, key), ")"
+		open, shut := fmt.Sprintf("%s.loop(%q, ", recv, key), ")"
 		if !plainBool(g.TypesInfo(), s.Cond) {
 			open, shut = open+"bool(", "))"
 		}
@@ -301,17 +447,27 @@ func loopEdits(g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.Label
 			Edit{Offset: off(s.Cond), Text: open},
 			Edit{Offset: end(s.Cond), Order: 3, Text: shut}), nil
 	case *ast.RangeStmt:
-		edits = append(edits, atBodyTop(s.Body), Edit{Offset: end(s), Text: fmt.Sprintf("; %s.rangeDone(%q)", recVar, key)})
+		edits = append(edits, atBodyTop(s.Body), Edit{Offset: end(s), Text: fmt.Sprintf("; %s.rangeDone(%q)", recv, key)})
 		name := ""
 		if l := labels[stmt]; l != nil {
 			name = l.Label.Name
 		}
 		for _, br := range breaksLeaving(s.Body, name) {
-			edits = append(edits, Edit{Offset: off(br), Text: fmt.Sprintf("%s.broke(%q); ", recVar, key)})
+			edits = append(edits, Edit{Offset: off(br), Text: fmt.Sprintf("%s.broke(%q); ", recv, key)})
 		}
 		return edits, nil
 	}
 	return nil, fmt.Errorf("internal error: %s is a loop junction but not a loop", j.ID)
+}
+
+// hasExit: the loop junction has an "exit" exit (a "for {}" has none).
+func hasExit(j *model.Junction) bool {
+	for _, e := range j.Exits {
+		if e.Label == "exit" {
+			return true
+		}
+	}
+	return false
 }
 
 // plainBool reports whether e has the type bool or an untyped bool, so it
@@ -426,7 +582,7 @@ func resultTypeTexts(wf discover.Workflow) ([]string, error) {
 	return out, nil
 }
 
-func checkNames(wf discover.Workflow) error {
+func checkNames(wf discover.Workflow, g *model.Graph) error {
 	scope := wf.Pkg.Types.Scope()
 	for _, name := range scope.Names() {
 		if slices.Contains(packageNames, name) || strings.HasPrefix(name, "pathkitRet") {
@@ -457,6 +613,25 @@ func checkNames(wf discover.Workflow) error {
 	})
 	if clash {
 		return fmt.Errorf("cannot record %s: it already uses the name %q or %q, which pathkit needs", wf.Name, recVar, ctxVar)
+	}
+	// The helper functions the graph follows into get the same two names.
+	for _, s := range g.Helpers() {
+		ast.Inspect(s.Body, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok {
+				return !clash
+			}
+			if obj := wf.Pkg.TypesInfo.Defs[id]; obj != nil && (id.Name == frameVar || id.Name == ctxVar) {
+				clash = true
+			}
+			return !clash
+		})
+		if clash {
+			return fmt.Errorf("cannot record %s: the helper %s already uses the name %q or %q, which pathkit needs", wf.Name, s.Helper, frameVar, ctxVar)
+		}
+		if s.CtxName != nil && s.CtxName.Name == "_" && wf.Pkg.Types.Scope().Lookup(ctxVar) != nil {
+			return fmt.Errorf("cannot record %s: the package already declares %q, a name pathkit needs for the context parameter of the helper %s, which is written \"_\"", wf.Name, ctxVar, s.Helper)
+		}
 	}
 	return nil
 }
@@ -501,7 +676,7 @@ import (
 
 const pathkitTraceDir = {{printf "%q" .TraceDir}}
 
-// pathkitTrace is trace file format schemaVersion 1 (see docs/DESIGN.md).
+// pathkitTrace is trace file format schemaVersion 2 (see docs/DESIGN.md).
 type pathkitTrace struct {
 	SchemaVersion int      ` + "`json:\"schemaVersion\"`" + `
 	Tool          string   ` + "`json:\"tool\"`" + `
@@ -518,6 +693,7 @@ type pathkitTrace struct {
 // pathkitRecorder belongs to one call of one workflow function.
 type pathkitRecorder struct {
 	trace       pathkitTrace
+	table       map[string]string // this workflow's lookup table, see pathkitTables
 	done        bool
 	fellThrough bool                    // a switch case just ended with fallthrough
 	loops       map[string]*pathkitLoop // by junction ID, e.g. "J1"
@@ -530,8 +706,15 @@ type pathkitLoop struct {
 	broke                bool   // a break just left this range loop
 }
 
+// pathkitTables turn what marked-up helper code records into the exit IDs of
+// each workflow's graph, and say which call leads to which copy of a helper
+// (see model.Graph.RecorderTable).
+var pathkitTables = map[string]map[string]string{
+{{range .Tables}}	{{printf "%q" .Workflow}}: { {{.Entries}} },
+{{end}}}
+
 func pathkitStart(ctx pathkitworkflow.Context, workflow, hash, pkg string) *pathkitRecorder {
-	r := &pathkitRecorder{trace: pathkitTrace{SchemaVersion: 1, Tool: "pathkit-go", Workflow: workflow, Package: pkg, FunctionHash: hash, Steps: []string{}}}
+	r := &pathkitRecorder{table: pathkitTables[workflow], trace: pathkitTrace{SchemaVersion: 2, Tool: "pathkit-go", Workflow: workflow, Package: pkg, FunctionHash: hash, Steps: []string{}}}
 	if info := pathkitworkflow.GetInfo(ctx); info != nil {
 		r.trace.WorkflowID, r.trace.RunID = info.WorkflowExecution.ID, info.WorkflowExecution.RunID
 	}
@@ -568,6 +751,9 @@ func (r *pathkitRecorder) enter(key, iterate, exit, retry string) {
 // returns more, so it can wrap the loop's condition.
 func (r *pathkitRecorder) loop(key string, more bool) bool {
 	l := r.loops[key]
+	if l == nil {
+		return more
+	}
 	if l.entered {
 		r.hit(l.retry)
 	}
@@ -584,6 +770,9 @@ func (r *pathkitRecorder) loop(key string, more bool) bool {
 // nothing; reached because the range ran out, that is the loop's exit.
 func (r *pathkitRecorder) rangeDone(key string) {
 	l := r.loops[key]
+	if l == nil {
+		return
+	}
 	if l.broke {
 		l.broke = false
 		return
@@ -592,7 +781,130 @@ func (r *pathkitRecorder) rangeDone(key string) {
 }
 
 // broke runs just before a break that leaves a range loop.
-func (r *pathkitRecorder) broke(key string) { r.loops[key].broke = true }
+func (r *pathkitRecorder) broke(key string) {
+	if l := r.loops[key]; l != nil {
+		l.broke = true
+	}
+}
+
+// pathkitCtxKey is the context key a call site hands its identity to a
+// helper under, and pathkitPending what it hands over.
+type pathkitCtxKey struct{}
+
+type pathkitPending struct {
+	r    *pathkitRecorder
+	site string
+}
+
+// pathkitFrame is one marked-up helper's handle: the recorder and the site
+// the helper was entered from. A nil frame (the helper was entered from
+// somewhere the graph does not follow) records nothing.
+type pathkitFrame struct {
+	r    *pathkitRecorder
+	site string
+}
+
+// pathkitSource is where a call site is: the workflow function (the
+// recorder) or a helper (its frame).
+type pathkitSource interface{ pathkitSource() (*pathkitRecorder, string) }
+
+func (r *pathkitRecorder) pathkitSource() (*pathkitRecorder, string) { return r, "" }
+
+func (f *pathkitFrame) pathkitSource() (*pathkitRecorder, string) {
+	if f == nil {
+		return nil, ""
+	}
+	return f.r, f.site
+}
+
+// pathkitSite wraps the context argument of a call of a helper: when the
+// graph follows this call, the helper finds the site in the context.
+func pathkitSite(src pathkitSource, ctx pathkitworkflow.Context, call string) pathkitworkflow.Context {
+	r, parent := src.pathkitSource()
+	if r == nil {
+		return ctx
+	}
+	site, ok := r.table[parent+"|"+call]
+	if !ok {
+		return ctx
+	}
+	return pathkitworkflow.WithValue(ctx, pathkitCtxKey{}, pathkitPending{r: r, site: site})
+}
+
+// pathkitEnter runs first thing in a marked-up helper. It takes the site out
+// of the context (so a call further down that is not followed cannot take
+// it again) and records that the helper was entered.
+func pathkitEnter(ctx pathkitworkflow.Context, callee string) (*pathkitFrame, pathkitworkflow.Context) {
+	p, _ := ctx.Value(pathkitCtxKey{}).(pathkitPending)
+	if p.r == nil {
+		return nil, ctx
+	}
+	ctx = pathkitworkflow.WithValue(ctx, pathkitCtxKey{}, pathkitPending{})
+	if p.r.table[p.site+"|"] != callee {
+		return nil, ctx
+	}
+	p.r.hit(">" + p.site)
+	return &pathkitFrame{r: p.r, site: p.site}, ctx
+}
+
+func (f *pathkitFrame) exit() {
+	if f != nil {
+		f.r.hit("<" + f.site)
+	}
+}
+
+// id turns a key the helper records into the exit ID of this copy of it.
+func (f *pathkitFrame) id(local string) string { return f.r.table[f.site+"|"+local] }
+
+func (f *pathkitFrame) hit(local string) {
+	if f == nil {
+		return
+	}
+	if id := f.id(local); id != "" {
+		f.r.hit(id)
+	}
+}
+
+func (f *pathkitFrame) hitUnlessFell(local string) {
+	if f == nil {
+		return
+	}
+	if id := f.id(local); id != "" {
+		f.r.hitUnlessFell(id)
+	}
+}
+
+func (f *pathkitFrame) fell() {
+	if f != nil {
+		f.r.fell()
+	}
+}
+
+func (f *pathkitFrame) enter(key, iterate, exit, retry string) {
+	if f == nil || f.id(iterate) == "" {
+		return
+	}
+	f.r.enter(f.site+"|"+key, f.id(iterate), f.id(exit), f.id(retry))
+}
+
+func (f *pathkitFrame) loop(key string, more bool) bool {
+	if f == nil {
+		return more
+	}
+	return f.r.loop(f.site+"|"+key, more)
+}
+
+func (f *pathkitFrame) rangeDone(key string) {
+	if f != nil {
+		f.r.rangeDone(f.site + "|" + key)
+	}
+}
+
+func (f *pathkitFrame) broke(key string) {
+	if f != nil {
+		f.r.broke(f.site + "|" + key)
+	}
+}
 
 // returned marks that the run finished a return of the workflow function
 // (all return values evaluated). pathkitRetN do the same for "return a, b".

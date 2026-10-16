@@ -242,6 +242,9 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	}
 	for _, w := range m.res.Warnings {
 		fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, w.Message)
+		if w.Entry != "" {
+			fmt.Fprintf(stderr, "  to accept it after looking at it, add this to classification.explained_traces and replace the reason: %s\n", w.Entry)
+		}
 	}
 	if names := render.ZeroPathNames(m.res); len(names) > 0 && cmdName != "explain" {
 		fmt.Fprintln(stderr, "pathkit "+cmdName+": "+render.ZeroPathHeadline(names))

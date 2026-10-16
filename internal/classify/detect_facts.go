@@ -57,6 +57,7 @@ func (e *Engine) engineClaim(workflow string, p model.Path) (Classification, boo
 		c.Source, c.Detector, c.Explanation = SourceAuto, "value-flow", res.Claim.Explanation
 		c.Proof = convertProof(res.Claim.Proof)
 		c.Assumptions = res.Claim.Assumptions
+		c.UsesStep = res.Claim.Uses
 		return c, true
 	}
 	if res.Suspect != nil && e.detectorOn("possible-correlation") {

@@ -56,8 +56,13 @@ type gen struct {
 	closures  []string // names of closures that can be called
 	sinks     []string // other names that only need "_ = name" at the end
 	collSinks []string // maps and slices that only need a harmless use (len) at the end
-	strParam  []string
-	minLen    map[string]int // slices built here: how many elements they certainly have
+	name      string   // the program's function name
+	helpers   []string // helper functions the program declares (see gen_helpers.go)
+	// helperCalls are statements that call a helper, to be written anywhere
+	// (inside an if or a loop, say).
+	helperCalls []string
+	strParam    []string
+	minLen      map[string]int // slices built here: how many elements they certainly have
 }
 
 // Generate writes the program numbered number of the given seed.
@@ -67,6 +72,7 @@ func Generate(seed int64, number int) Program {
 	if seed != 0 {
 		p.Name = fmt.Sprintf("Prog%d_%04d", seed, number)
 	}
+	g.name = p.Name
 
 	// Parameters: two or three kinds, each with a small set of values.
 	domains := map[string][]string{
@@ -135,6 +141,11 @@ func Generate(seed int64, number int) Program {
 	for g.budget > 0 { // the budget is a promise to write that many decisions
 		g.stmt(0, 1)
 	}
+	for decisions(g.b.String()) < 3 { // a program is worth running only with a few decisions
+		g.line(0, "if %s {", g.cond())
+		g.block(1, 1)
+		g.line(0, "}")
+	}
 	body := g.b.String()
 	var used strings.Builder
 	for _, l := range g.locals {
@@ -155,8 +166,13 @@ func Generate(seed int64, number int) Program {
 	for _, c := range g.collSinks {
 		fmt.Fprintf(&used, "\t_ = len(%s)\n", c)
 	}
-	p.Source = fmt.Sprintf("func %s(ctx workflow.Context, %s) error {\n\t_ = ctx\n%s%s\treturn nil\n}\n", p.Name, strings.Join(sig, ", "), body, used.String())
+	p.Source = fmt.Sprintf("%sfunc %s(ctx workflow.Context, %s) error {\n\t_ = ctx\n%s%s\treturn nil\n}\n", g.helperSource()+"\n", p.Name, strings.Join(sig, ", "), body, used.String())
 	return p
+}
+
+// decisions counts the ifs, switches and loops written so far.
+func decisions(src string) int {
+	return strings.Count(src, "if ") + strings.Count(src, "switch ") + strings.Count(src, "for ")
 }
 
 func (g *gen) line(depth int, format string, args ...any) {
@@ -249,6 +265,10 @@ func (g *gen) block(depth, minStmts int) {
 
 // action is a statement that is not a decision.
 func (g *gen) action(depth int) {
+	if len(g.helperCalls) > 0 && g.r.Intn(6) == 0 {
+		g.line(depth, "%s", g.helperCalls[g.r.Intn(len(g.helperCalls))])
+		return
+	}
 	switch g.r.Intn(9) {
 	case 0, 1:
 		v := g.anyVar()
@@ -306,7 +326,9 @@ func (g *gen) action(depth int) {
 
 // topDecl declares something new at the top level of the function.
 func (g *gen) topDecl() {
-	switch g.r.Intn(13) {
+	switch g.r.Intn(16) {
+	case 13, 14, 15: // a helper function and calls of it
+		g.helperProbe()
 	case 12: // a slice or map built here
 		g.declCollection()
 	case 11: // more of the same

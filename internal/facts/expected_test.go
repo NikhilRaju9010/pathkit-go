@@ -17,6 +17,13 @@ var wantClaims = map[string]map[string]Kind{
 		"J1.true J2.true J3.true J4.false J5.true|completed":    Contradictory,
 		"J1.true J2.true J3.true J4.true|completed":             Contradictory,
 	},
+	"ImpossibleHelperLocal": {
+		"J1.true|": ConstantCondition,
+	},
+	"ImpossibleKnownAcrossHelper": {
+		"J1.true J3.false J2.success J4.true|": Contradictory,
+		"J1.true J3.true J2.success J4.true|":  Contradictory,
+	},
 	"ImpossibleAppendedSlice": {
 		"J1.case float64|completed": ImpossibleType,
 		"J1.default|completed":      ImpossibleType,

@@ -32,6 +32,8 @@ Two escape hatches:
 
 Plain `if` statements that are not error checks (`if order.Amount <= 0`) are always junctions.
 
+**Error checks on a helper's result (milestone M4).** `err := charge(ctx, o)` where `charge` is a function of the same package that calls the Temporal SDK (D15): the check after it is a junction too. If the helper fails exactly when modelled Temporal calls fail (every error it returns is the error of such a call, or nil) the junction is labelled with those calls and the helper (`Charge (activity), via charge`); if its errors are not followed (a function value's error, a wrapped error), it is labelled `charge (helper)` and the error is *unknown*, no longer "no error"; a helper that never returns an error leaves the check transparent. When the helper's code is followed, the check is a real step of the path but has only the exit the helper's `return` allows (`return nil`: `success`; `return fmt.Errorf(...)`, or a variable an error check just found non-nil: `failure`); the other exit is not listed. A helper that never touches the Temporal API, however many `if`s it has, is ordinary code: its error check stays transparent.
+
 Second defence against explosion: `report`/`coverage` also print **branch coverage** (how many junction *exits* were taken at least once) next to path coverage. Branch coverage grows linearly, so it stays meaningful even when a workflow has thousands of paths. `maxPaths` is 2000. A workflow that reaches it gets a loud warning at the top of the text report, a banner in the HTML page and a `pathCapWarning` field in the JSON: its path list and classification are incomplete, paths beyond the cap are not listed (so never called stale), and the numbers for it are a lower bound.
 
 ### D3 — Which Temporal Go constructs become junctions
@@ -215,19 +217,19 @@ Some listed paths can never run (the same value tested twice with opposite answe
 
 - **One definitions list.** Every bucket, label and `//pathkit:...` comment is defined once, in `internal/classify/definitions.go`: buckets first, then labels grouped as condition logic, loops, Temporal guarantees, special tests, PathKit's own limits, manual. The text report, the HTML glossary and the tests all read it; a test fails if a printable label has no definition.
 - **Who decides, strongest first:** a config override (`mark_testable` / `mark_untestable`) > a `//pathkit:untestable` comment > a config rule > a detector > testable (the default). The first that applies is the main reason; the others are kept as extra reasons.
-- **Principles.** When unsure, a path stays testable or goes to needs-review, never to cannot-be-tested. A path a test ran is always testable, whatever was claimed. Every override and rule needs a reason. A detector's claim in a workflow that has a trace fitting no path is not trusted (needs-review, label `model-limit`).
+- **Principles.** When unsure, a path stays testable or goes to needs-review, never to cannot-be-tested. A path a test ran is always testable, whatever was claimed. Every override and rule needs a reason. A detector's claim in a workflow that has a trace fitting no path is not trusted (needs-review, label `model-limit`) when it rests on the step where that trace leaves the map or a later one (**local distrust**: the matcher knows how many steps of the trace fitted, `d-1`; a claim whose reasoning uses only steps before `d` keeps its label; one whose steps are not known is not trusted, as before). The unmatched-trace warning prints a ready-made `classification.explained_traces` entry with `"reason": "TODO"`; the config refuses a reason of `TODO`, because accepting a trace is a decision. A saved `stable_id` that no path has any more is reported as stale; when the workflow now follows helper functions, the warning lists the paths whose older id it was.
 - **Detectors** read only the facts the extractor attached to the junctions (`internal/model/facts*.go`), never source text, and never coverage. They return `certain` only when they are sure; anything less (`likely`) becomes needs-review. Each one is conservative: a near-miss it must not claim is tested next to every case it must claim.
 - **Coverage numbers.** Testable coverage is covered testable paths over testable paths (needs-review paths count as testable under the default policy `count_as_testable`, and are left out under `exclude`, except untrusted claims, which always count). Overall coverage is covered paths over all paths. Branch coverage is unchanged.
 - **The classification block** prints, in this order: the bucket counts with labels and where they came from, testable coverage, special-test coverage, overall coverage, and the basis `--fail-under` uses. With classification off the report is exactly the report without it.
 - **Additive output.** The JSON and HTML only gain fields; existing keys and values stay the same, and a test proves it.
 
-### Trace file format (schemaVersion 1)
+### Trace file format (schemaVersion 2)
 
 One JSON file per workflow run, written by the recorder that `pathkit test` adds to the package through the overlay. It lives in the trace folder (default `.pathkit/traces` in the folder `pathkit test` runs from, baked in as an absolute path) and is named `<workflow>.<12 random hex digits>.trace.json`. Example:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "tool": "pathkit-go",
   "workflow": "orders.OrderWorkflow",
   "functionHash": "3f9a1c0b7e2d4a51",
@@ -241,12 +243,12 @@ One JSON file per workflow run, written by the recorder that `pathkit test` adds
 
 | Field | Meaning |
 | --- | --- |
-| `schemaVersion` | Always `1` for this format. Any other value is reported as unsupported, never guessed at. |
+| `schemaVersion` | Always `2` for this format. Version 1 (before helper functions were followed, D15) is refused with "traces are from an older PathKit ... re-run `pathkit test`"; any other value is reported as unsupported. Never guessed at. |
 | `tool` | Always `pathkit-go`. |
 | `workflow` | The workflow's name as `analyze` prints it (`pkg.Func` or `pkg.Type.Method`). |
-| `functionHash` | 16 hex digits: the start of a SHA-256 of the workflow function's code, printed by `go/printer` without comments (so formatting and comments don't change it). Computed only by `model.FunctionHash`. A different hash means the function changed, and the trace is **stale**. |
+| `functionHash` | 16 hex digits: the start of a SHA-256 of the workflow function's code, printed by `go/printer` without comments (so formatting and comments don't change it). Computed only by `model.FunctionHash`; for a workflow whose graph follows declared helper functions (D15) it is `Graph.CodeHash`, which also covers their code (a workflow without helpers keeps exactly its `FunctionHash`). A different hash means the code changed, and the trace is **stale**. |
 | `status` | `complete` if the run **finished** a `return` of the workflow function, with all return values evaluated (a `return` that is reached but panics while computing its values is not complete, so the mark is set only after the values are evaluated). Otherwise `incomplete`: a panic (including one while computing a return value), the SDK stopping the run with `runtime.Goexit`, or a timeout. Only complete traces are matched. |
-| `steps` | The exit IDs the run passed, in order, exactly as `model` produced them (`J1.false`, …). Every string written here came from `Graph.ExitFor(...).String()` at instrument time. |
+| `steps` | The exit IDs the run passed, in order, exactly as `model` produced them (`J1.false`, …). Every string written here came from the model at instrument time (`Graph.ExitFor(...)`, or, for a decision inside a helper, the table `Graph.RecorderTable`). A run that goes through the code of a followed helper also records `>S1` when it enters the copy `S1` and `<S1` when it leaves it; the matcher takes the markers out, checks they nest and that each step was recorded in the copy the map has it in, and matches the rest. |
 | `workflowId`, `runId` | From `workflow.GetInfo`, for reference only. They are not used for matching. |
 | `recordedAt` | UTC time the file was written (RFC 3339). |
 
@@ -282,10 +284,30 @@ What is deliberately **not** in the file: the Go test name (the workflow runs on
 
 **How it is kept honest.** Shape fixtures with hand-written answers, a safety fixture for each forget rule, and `internal/soundness`: random programs, run for every input, fail the build if a path called impossible is ever taken.
 
+### D15 — Helper functions (milestone M4)
+
+**Problem.** A workflow usually calls its own package's helper functions (`o.charge(ctx)`, `reserve(ctx, items)`). Their activities, timers and branches are real steps of the workflow, but a call was one opaque step, so the decisions inside were not paths, the error check after the call was assumed to pass (a run in which a helper failed fit no path), and a trace through such a decision fit no path.
+
+**Choice.** The graph builder follows a call into the helper's code and builds **one copy of the helper per call** (a *site*, `model.Site`), at most three helpers deep, recursion followed once and stopped. Each copy has its own junctions, numbered after the call in source order, so the same helper called twice is two sets of decisions. The code of a helper returns to the code after the call: a `return` in the helper, or its end, continues at the caller (`Target` roads continue exactly as a selector callback's do); `return helper(ctx)` makes the helper's return the caller's end.
+
+*What is followed.* A function or method of the workflow's package (a method needs a receiver of a known concrete type, an interface method is not followed), or a local variable set exactly once to a function literal and called by name; whose code calls the Temporal SDK, or calls a helper that does (a helper with `if`s and no SDK call is ordinary code and stays one step); with a parameter of type `workflow.Context` that has a name; with no `goto`, Go `select`, `workflow.Selector` or type parameter. The call has to be a whole statement: `h(ctx)`, `x, err := h(ctx)`, `err = h(ctx)`, `var err = h(ctx)`, `return h(ctx)`; a call inside a bigger expression, a `go` or `defer` call, or one in the condition of an `if` is not followed (the old behaviour: one step). A call through an interface or a function value other than a once-set literal is opaque. Helpers in other packages are not followed.
+
+*The path cap.* Following helpers multiplies paths (a helper with an activity and its error check doubles the paths after it), and a map cut at the cap (D2, 2000 paths) is of little use for coverage. `model.Build` therefore builds the workflow with helpers followed, and if that passes the cap, builds it again with every helper call left as one step (the error summaries of D2 still apply) and says so (`Graph.HelperNote`, printed as a warning by every command that reads the workflow). This is per workflow, all or nothing: simple to explain, and the ids of a workflow do not depend on a limit it did not hit.
+
+*Ids.* The workflow function's own junctions keep their ids and stable ids exactly: a workflow that calls no helper that touches the Temporal API has the same `J` numbers, path ids, stable ids, function hash and report as before (one that calls such a helper PathKit cannot follow, or does not follow because of the path cap, still gets the new error check after the call, see D2). In a workflow that follows helpers, decisions inside a copy are numbered right after the call that leads to them; their stable text is the decision's text plus the way in, in words and without line numbers (`if n > 0 [in charge called as charge(ctx, 1)]`), made unique like any repeated text; an error check or loop that exists only because a helper is followed is new too. Printed paths mark such a decision `[in charge]`. `Path.LegacyStableIDs` computes the ids a path had before, so a saved override that points at a vanished id gets a warning that lists the paths that replace it.
+
+*Errors.* A helper's *error summary* says how it can fail: never, exactly when modelled calls fail (which), or not followed (unknown). The check after the call is a junction unless the helper never fails; when the helper's `return` decides it, that check has the one exit that return allows (`Target.Only`). The decision stays in the graph, and in the recorded steps, because the marked-up code of the check runs in every case.
+
+*How it is recorded.* `pathkit test` marks up the helper once (all workflows that use it share the marks). A followed call hands its site over through the context argument (`pathkitSite(pathkitRec, ctx, "c57:8")`); the helper's first line takes it (`pathkitH, ctx := pathkitEnter(ctx, key); defer pathkitH.exit()`; taking it out of the context keeps a call further down that is not followed from using it). The helper records its decisions under keys of its own (`line:column.label`); the recorder's table, written by the model (`Graph.RecorderTable`), turns them into the graph's exit ids, and records `>S1` and `<S1` around them. A helper entered from anywhere else records nothing. The trace format is therefore version 2.
+
+*The fact engine.* A copy's statements are part of the road, so the engine follows them. On entering a copy, everything known about the helper's own variables (parameters and locals) is forgotten, because a second call starts them again; the safety list is applied to helper bodies too (address taken, closure writes, goto, recover, unsafe). A value the caller passes in is not tracked into the helper.
+
+*Not claimed.* No fact is attached to a decision inside a helper by the older, structural extractors (`internal/model/facts*.go`); a claim there can only come from the engine.
+
 ## Non-goals for v1
 
 - **One package at a time for analysis.** `analyze` takes a file (analyzes the workflows in it, but type-checks its whole package, since Go needs that) or a package; `report` takes package patterns like `./...` and analyzes each package separately.
-- **No following calls into other packages or into child workflows.** A helper function in another package, or a child workflow started with `ExecuteChildWorkflow`, is shown as a single step.
+- **No following calls into other packages or into child workflows.** A helper function in another package, or a child workflow started with `ExecuteChildWorkflow`, is shown as a single step. (Helpers of the workflow's own package are followed, D15.)
 - No saga/`defer` junctions (see D3), no `workflow.Go` concurrency modelling, no Update/Query handler paths.
 - No replay of production histories (see D4 d3).
 - No non-determinism checking — that's `workflowcheck`'s job; users should run it too.

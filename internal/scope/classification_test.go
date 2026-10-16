@@ -140,6 +140,7 @@ func TestClassificationErrors(t *testing.T) {
 		{"explained trace with a blank reason", `{"classification": {"explained_traces": [{"workflow": "W", "steps_id": "t1:0123456789ab", "reason": " "}]}}`, `needs a "reason"`},
 		{"explained trace without an id", `{"classification": {"explained_traces": [{"workflow": "W", "reason": "r"}]}}`, `needs a "steps_id"`},
 		{"explained trace with a stable id", `{"classification": {"explained_traces": [{"workflow": "W", "steps_id": "s1:0123456789ab", "reason": "r"}]}}`, `needs a "steps_id" like "t1:`},
+		{"explained trace left at TODO", `{"classification": {"explained_traces": [{"workflow": "W", "steps_id": "t1:0123456789ab", "reason": "TODO"}]}}`, `still has the reason "TODO"`},
 		{"explained trace without a workflow", `{"classification": {"explained_traces": [{"steps_id": "t1:0123456789ab", "reason": "r"}]}}`, `needs a "workflow"`},
 		{"explained trace twice", `{"classification": {"explained_traces": [{"workflow": "W", "steps_id": "t1:0123456789ab", "reason": "r"}, {"workflow": "W", "steps_id": "t1:0123456789ab", "reason": "r"}]}}`, "is listed twice in classification.explained_traces"},
 		{"rule without a reason", rule(`"id": "r1", "workflow": "W", "label": "set-then-test", "when": ["a"], "impossible": true`), `rule "r1" needs a "reason"`},

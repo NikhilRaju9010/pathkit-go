@@ -25,7 +25,7 @@ func pilotWorkflow(t *testing.T, name string) Workflow {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return Workflow{Name: name, Graph: g, Hash: model.FunctionHash(wf.Pkg.Fset, wf.Func)}
+			return Workflow{Name: name, Graph: g, Hash: g.CodeHash()}
 		}
 	}
 	t.Fatalf("%s not found", name)

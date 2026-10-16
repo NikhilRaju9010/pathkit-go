@@ -149,6 +149,7 @@ func (e *ambiguousError) Error() string {
 //     a misspelled "without" entry would make the rule match MORE paths.
 func (e *Engine) AddGraph(workflow string, g *model.Graph) error {
 	on, _ := e.JSONConverterOn()
+	e.graphs[workflow] = g
 	e.facts[workflow] = facts.New(g, facts.Options{JSONDecode: on})
 	e.jsonRelevant = e.jsonRelevant || e.facts[workflow].JSONRelevant()
 	t := newDecisionTable(g)

@@ -288,7 +288,9 @@ func (g *gen) typeStmt(depth int) {
 					g.line(depth, "mutateS(%s)", s.name)
 				} else {
 					g.line(depth, "%s = append(%s, %s)", s.name, s.name, g.ifaceValue())
-					g.minLen[s.name]++
+					if depth == 0 { // inside an if or a switch case it may not run
+						g.minLen[s.name]++
+					}
 				}
 				return
 			}

@@ -263,10 +263,10 @@ If the rounded number would look the same as the threshold, PathKit prints more 
 | `incomplete` | The run never finished (panic, timeout, or stopped). | Look at that test. |
 | `excluded` | The workflow is out of scope. | Nothing (it's listed on purpose). |
 | `unknown workflow` | No such workflow in what you asked `coverage` about. | Point `coverage` at the right folder. |
-| `unreadable` | Not a valid trace file (or a different trace format version). | Delete it and re-record. |
+| `unreadable` | Not a valid trace file (or a different trace format version). Traces recorded by an older PathKit (trace format 1) are one warning for all of them: "traces are from an older PathKit ... re-run `pathkit test`". | Delete it and re-record (`pathkit test`). |
 
 **`--json`** prints one object:
-- `schemaVersion` (1) and `tool`;
+- `schemaVersion` (1) and `tool` (this is the version of the report, not of the trace files);
 - `workflows`: for each, `name`, `addedByConfig`, `paths` and `branches` (each `{total, covered, percent}`), `truncated`, and `pathList` (for each path: `number`, `id`, `text`, `steps`, `end`, `compensation`, `covered`, `traces`, `staleTrace`);
 - `excluded`: `[{name, reason}]`;
 - `total` and `branches`;
@@ -443,6 +443,19 @@ A misspelled detector name is an error that lists the real names. The fact engin
 
 **The assumption `default-json-converter`.** Claims about values Temporal decodes assume the default JSON converter (see the `impossible-type` row). PathKit searches every Go file of the module for `DataConverter`, `PayloadConverter`, `PayloadCodec`, `NewCodecDataConverter`, `NewCompositeDataConverter`, `converter.New`, `UseNumber` and `json.Number`; if it finds one, the rule is off for the whole run, and the text report (`Assumption default-json-converter: OFF, because ...`), the HTML glossary and the JSON (`assumptions`: name, on, why, claims) all say so. When it is on and claims rest on it, the same places say how many. To turn it off yourself: `"classification": { "assumptions": { "default_json_converter": "off" } }` (`"auto"`, the default, is on unless the search finds a hit).
 
+### Helper functions (the workflow's own package)
+
+A workflow often calls functions of its own package that start activities or wait on timers (`o.charge(ctx)`, `reserve(ctx, items)`). PathKit follows those calls: the decisions inside the helper are decisions of the workflow, one set for each call, and show in `analyze` and `coverage` as `Sleep (timer) [in reserve]`. The error check after the call (`if err != nil`) is a decision too, with only the exit the helper's `return` allows. A helper with no call into the Temporal SDK (a validation function with `if`s) stays ordinary code, one step, as before. What is and is not followed, and how deep, is in LIMITATIONS.md ("Helper functions of the workflow's own package").
+
+Following helpers can multiply the paths of a workflow (every helper with an activity and its error check doubles the paths after it). If that would pass the path cap (2000 paths), PathKit does not follow the helpers of **that** workflow: each call stays one step, as before, and a warning says so (`helper functions are not followed: ...`). The other workflows are not affected.
+
+What changes for you:
+
+- **Only workflows that call such helpers change**: their paths, `J` numbers and stable ids differ (a decision in a helper is numbered right after its call; the stable text names the helper and the call). A workflow that calls none keeps every id as it was. A `stable_id` in the config that no path has any more is reported as stale, and the warning lists the paths that replace it when helper functions are the reason.
+- **`pathkit test` marks up the helper code too** (in its copy, never in your files) and records the trace format version 2. Traces recorded by an older PathKit are refused with one message: run `pathkit test` again.
+- **After upgrading, do this:** run `pathkit test` again (old traces are not counted, and until you do, coverage reads 0% with one warning saying why); read the warnings for any workflow that says its helpers are not followed; for saved `stable_id` entries and baselines, look for "stale entry" warnings, which now name the paths that replace a vanished id. A `//pathkit:branch` you added on an error check after a helper is not needed any more when the helper is followed.
+- **Marks and rules work in a helper.** `//pathkit:untestable` on a decision in a helper marks that decision in every copy; a rule's `when` entry for it is written as `analyze` prints it.
+
 ### Two workflows with the same name in different folders
 
 If two folders each have a package called `dup` with a workflow `Work`, PathKit calls them `a/dup.Work` and `b/dup.Work` (the shortest unique end of the import path) everywhere: reports, JSON, traces, `include`, `exclude`, `--function` and classification overrides. A short name that fits both (`dup.Work`, `Work`) is an error that lists both. A workflow that is alone with its name keeps the plain name.
@@ -459,7 +472,7 @@ The page loads nothing and uses only links inside the page. With classification 
 
 **`--fail-under` and the basis.** Until classification is switched on, `--fail-under` checks overall coverage, exactly as before. With `--coverage-basis`, or with classification enabled in the config (then the default basis is `testable`), it checks the basis you chose, and the report and the exit-code message say which: `coverage 66.7% is below --fail-under 70% (basis: testable)`. The JSON always says (`coverageBasis`, `failUnder.basis`).
 
-**A trace that fits no path.** When a test run takes a road that PathKit's map of that workflow does not have (the stderr line says `fits no path`), the map is known to be incomplete, so PathKit does not trust a "cannot be tested" claim made by a detector or a config rule in **that workflow**: those paths are shown as `needs-review` (label `model-limit`), which counts as testable, so the number cannot go up. Your own decisions (`mark_untestable` entries and `//pathkit:untestable` comments) are kept, with a warning. To make the claims count again: fix the map (for example `//pathkit:branch` on the `if`), re-record, or accept the trace in the config. The report prints the trace's *steps id* (`t1:` and 12 hex digits):
+**A trace that fits no path.** When a test run takes a road that PathKit's map of that workflow does not have (the stderr line says `fits no path`), the map is known to be incomplete from the step where the run left it, so PathKit does not trust a "cannot be tested" claim made by a detector or a config rule in **that workflow** that rests on that step or a later one: those paths are shown as `needs-review` (label `model-limit`), which counts as testable, so the number cannot go up. A claim whose reasoning uses only steps the run did follow (the run went through the first three decisions as the map says, so a claim about decisions one and two stays) keeps its label; the message names the step. A claim made by a detector that does not say which steps it uses is not trusted whenever the workflow has such a trace. Your own decisions (`mark_untestable` entries and `//pathkit:untestable` comments) are kept, with a warning. To make the claims count again: fix the map (for example `//pathkit:branch` on the `if`), re-record, or accept the trace in the config. The report prints the trace's *steps id* (`t1:` and 12 hex digits):
 
 ```json
 "classification": {
@@ -471,7 +484,7 @@ The page loads nothing and uses only links inside the page. With classification 
 }
 ```
 
-A `reason` is required. The report keeps listing the trace, marked *acknowledged* with the reason (`unexplainedTraces` in `--json`, a line in the classification block and in the HTML). An entry that matches no unmatched trace in the current run is reported as stale. The steps id changes if the workflow's decisions are renumbered, so an acknowledgement belongs to one recording of one version of the code.
+A `reason` is required. The warning for a trace that fits no path prints a ready-made entry under it, with `"reason": "TODO"`; copy it into `explained_traces` and write the real reason. A reason of `TODO` is refused when the config is read, because accepting a trace is a decision and the reason is shown in every report. The report keeps listing the trace, marked *acknowledged* with the reason (`unexplainedTraces` in `--json`, a line in the classification block and in the HTML). An entry that matches no unmatched trace in the current run is reported as stale. The steps id changes if the workflow's decisions are renumbered, so an acknowledgement belongs to one recording of one version of the code.
 
 **`stableId`.** Each path has an `id` (unchanged: it is built from the junction numbers J1, J2, …, so it changes when a junction is added or removed) and a new `stableId` such as `s1:3fa94c0d17ab`. The `stableId` is built from the *words* of each decision and the exit taken, not from numbers, so adding or removing an unrelated junction does not change it. It is only unique inside one workflow, so always keep the workflow name next to it. Two junctions with exactly the same text are told apart by `#2`, `#3`. The `s1:` prefix is the version of the recipe. Editing the text of a condition does change the `stableId` of the paths through it.
 
