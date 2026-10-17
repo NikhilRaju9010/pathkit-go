@@ -30,6 +30,7 @@ const (
 	oNil                      // = nil
 	oStore                    // a value of a known type is put in an interface, slice or map
 	oJSON                     // a value decoded by Temporal's default JSON converter
+	oStdJSON                  // a value decoded by encoding/json in this function
 	oTypeAssert               // x.(T) is decided by the types x can hold
 	oElem                     // a value read from a slice or map
 	oLen                      // the length of a slice, map or string

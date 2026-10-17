@@ -43,6 +43,14 @@ type Analyzer struct {
 	// the variable they fill. Those addresses do not make a variable
 	// untracked: the call is the only place it is written through.
 	decode map[*ast.CallExpr]*types.Var
+	// decodeStd marks the calls in decode that encoding/json makes (json.Unmarshal,
+	// Decode on a decoder this function made and never switched to UseNumber).
+	decodeStd map[*ast.CallExpr]bool
+	// useNumber are the decoder variables UseNumber is called on.
+	useNumber map[*types.Var]bool
+	bodies    []*ast.FuncDecl
+	// useNumberUnknown: UseNumber is called on something that is not a plain variable.
+	useNumberUnknown bool
 	// addrTaken counts the & expressions on each variable.
 	addrTaken map[*types.Var]int
 	// jsonWrite: the function writes into some map[string]interface{} or
@@ -64,7 +72,7 @@ type Analyzer struct {
 // New prepares the engine for one workflow's graph.
 func New(g *model.Graph, opts ...Options) *Analyzer {
 	a := &Analyzer{g: g, info: g.TypesInfo(), fset: g.FileSet(), untracked: map[*types.Var]string{}, assignedIn: map[ast.Node]map[*types.Var]bool{}, calls: map[ast.Node]bool{},
-		escapes: map[*types.Var]string{}, ifaceEscapes: map[*types.Var]string{}, assertDerived: map[*types.Var]bool{}, inits: map[*types.Var][]ast.Expr{}, decode: map[*ast.CallExpr]*types.Var{}, addrTaken: map[*types.Var]int{}}
+		escapes: map[*types.Var]string{}, ifaceEscapes: map[*types.Var]string{}, assertDerived: map[*types.Var]bool{}, inits: map[*types.Var][]ast.Expr{}, decode: map[*ast.CallExpr]*types.Var{}, decodeStd: map[*ast.CallExpr]bool{}, useNumber: map[*types.Var]bool{}, addrTaken: map[*types.Var]int{}}
 	if len(opts) > 0 {
 		a.opts = opts[0]
 	}
@@ -149,8 +157,9 @@ func (a *Analyzer) markUntracked(e ast.Expr, why string) {
 // scan finds everything that makes the function unsuitable, and every
 // variable that must never be tracked (the safety list).
 func (a *Analyzer) scan(fns []*ast.FuncDecl) {
+	a.bodies = fns
 	var lits []*ast.FuncLit // the function literals around the node being visited
-	var cands []*ast.CallExpr
+	var cands, stdCands []*ast.CallExpr
 	var visit func(n ast.Node) bool
 	// writtenInClosure marks v untracked when the write happens inside a
 	// function literal that v is declared outside of.
@@ -198,6 +207,10 @@ func (a *Analyzer) scan(fns []*ast.FuncDecl) {
 			if len(lits) == 0 && a.isDecodeShape(x) {
 				cands = append(cands, x) // decided once the whole function has been read (see below)
 			}
+			if len(lits) == 0 && a.isStdDecodeShape(x) {
+				stdCands = append(stdCands, x)
+			}
+			a.noteUseNumber(x)
 		case *ast.SelectorExpr:
 			if id, ok := x.X.(*ast.Ident); ok {
 				if pn, ok := a.info.Uses[id].(*types.PkgName); ok && pn.Imported().Path() == "unsafe" {
@@ -325,6 +338,29 @@ func (a *Analyzer) scan(fns []*ast.FuncDecl) {
 			}
 			if v, ok := a.info.ObjectOf(id).(*types.Var); ok && decodable(v.Type()) {
 				a.decode[call] = v
+				decoded[v]++
+			}
+		}
+	}
+	// The same for encoding/json in this function: json.Unmarshal, and Decode
+	// on a decoder made here by json.NewDecoder that nothing hands on and
+	// nothing switches to UseNumber.
+	for _, call := range stdCands {
+		if !a.isStdDecodeCall(call) {
+			continue
+		}
+		for _, arg := range call.Args {
+			u, ok := ast.Unparen(arg).(*ast.UnaryExpr)
+			if !ok || u.Op != token.AND {
+				continue
+			}
+			id, ok := ast.Unparen(u.X).(*ast.Ident)
+			if !ok {
+				continue
+			}
+			if v, ok := a.info.ObjectOf(id).(*types.Var); ok && decodable(v.Type()) {
+				a.decode[call] = v
+				a.decodeStd[call] = true
 				decoded[v]++
 			}
 		}
@@ -660,4 +696,115 @@ func (a *Analyzer) payloadSource(e ast.Expr, depth int) bool {
 		}
 	}
 	return false
+}
+
+// jsonFunc reports whether call is a call of the function or method name of
+// the standard library's encoding/json (recv "" for a function, else the
+// type's name).
+func (a *Analyzer) jsonFunc(call *ast.CallExpr, recv, name string) bool {
+	var id *ast.Ident
+	switch f := ast.Unparen(call.Fun).(type) {
+	case *ast.SelectorExpr:
+		id = f.Sel
+	case *ast.Ident:
+		id = f
+	default:
+		return false
+	}
+	fn, ok := a.info.Uses[id].(*types.Func)
+	if !ok || fn.Pkg() == nil || fn.Pkg().Path() != "encoding/json" || fn.Name() != name {
+		return false
+	}
+	sig := fn.Type().(*types.Signature)
+	if recv == "" {
+		return sig.Recv() == nil
+	}
+	if sig.Recv() == nil {
+		return false
+	}
+	t := types.Unalias(sig.Recv().Type())
+	if p, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(p.Elem())
+	}
+	named, ok := t.(*types.Named)
+	return ok && named.Obj().Name() == recv
+}
+
+// isStdDecodeShape: json.Unmarshal(data, &v) or dec.Decode(&v).
+func (a *Analyzer) isStdDecodeShape(call *ast.CallExpr) bool {
+	return a.jsonFunc(call, "", "Unmarshal") || a.jsonFunc(call, "Decoder", "Decode")
+}
+
+// isStdDecodeCall: isStdDecodeShape, and nothing makes the result differ
+// from the standard library's rule (a decoder is one made here with
+// json.NewDecoder, that is only used through its own methods, and that
+// UseNumber is never called on).
+func (a *Analyzer) isStdDecodeCall(call *ast.CallExpr) bool {
+	if a.jsonFunc(call, "", "Unmarshal") {
+		return true
+	}
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := ast.Unparen(sel.X).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	v, ok := a.info.Uses[id].(*types.Var)
+	if !ok || a.useNumber[v] {
+		return false
+	}
+	init, ok := a.singleInit(v)
+	if !ok {
+		return false
+	}
+	nd, ok := ast.Unparen(init).(*ast.CallExpr)
+	if !ok || !a.jsonFunc(nd, "", "NewDecoder") {
+		return false
+	}
+	return a.onlyUsedAsReceiver(v)
+}
+
+// noteUseNumber remembers a call of UseNumber on a decoder variable. Any
+// other form (the decoder is not a plain variable) is remembered for every
+// decoder: nothing is then known about any of them.
+func (a *Analyzer) noteUseNumber(call *ast.CallExpr) {
+	if !a.jsonFunc(call, "Decoder", "UseNumber") {
+		return
+	}
+	if sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr); ok {
+		if id, ok := ast.Unparen(sel.X).(*ast.Ident); ok {
+			if v, ok := a.info.Uses[id].(*types.Var); ok {
+				a.useNumber[v] = true
+				return
+			}
+		}
+	}
+	a.useNumberUnknown = true
+}
+
+// onlyUsedAsReceiver: every use of v in the code the paths run is a method
+// call on it (dec.Decode(...)), so nothing else can change the decoder.
+func (a *Analyzer) onlyUsedAsReceiver(v *types.Var) bool {
+	if a.useNumberUnknown {
+		return false
+	}
+	total, recv := 0, 0
+	for _, fn := range a.bodies {
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.Ident:
+				if a.info.Uses[x] == v {
+					total++
+				}
+			case *ast.SelectorExpr:
+				if id, ok := x.X.(*ast.Ident); ok && a.info.Uses[id] == v {
+					recv++
+				}
+			}
+			return true
+		})
+	}
+	return total == recv
 }

@@ -197,14 +197,27 @@ func TestConverterScanTurnsTheRuleOff(t *testing.T) {
 		t.Errorf("text report lacks the assumption line:\n%s", text)
 	}
 
+	// A mention in a comment, and a decoder elsewhere that uses UseNumber, do
+	// not switch the rule off: neither touches a value Temporal decoded.
+	if err := os.WriteFile(filepath.Join(mod, "typeswitch", "other.go"), []byte("package typeswitch\n\n// the worker may use a DataConverter one day\n\nimport \"encoding/json\"\n\nfunc numbers(d *json.Decoder) { d.UseNumber() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ = run(t, "coverage", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--json")
+	if a := decode(t, out)["assumptions"].([]any)[0].(map[string]any); a["on"] != true || a["claims"].(float64) != 1 {
+		t.Errorf("a comment and an unrelated UseNumber switched the rule off: %v", a)
+	}
+	if err := os.Remove(filepath.Join(mod, "typeswitch", "other.go")); err != nil {
+		t.Fatal(err)
+	}
+
 	// The module now sets its own data converter.
-	if err := os.WriteFile(filepath.Join(mod, "typeswitch", "conv.go"), []byte("package typeswitch\n\n// the worker uses a DataConverter of our own\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(mod, "typeswitch", "conv.go"), []byte("package typeswitch\n\ntype workerOptions struct{ DataConverter any }\n\nvar _ = workerOptions{DataConverter: nil}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, _, _ = run(t, "coverage", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--json")
 	m = decode(t, out)
 	a = m["assumptions"].([]any)[0].(map[string]any)
-	if a["on"] != false || !strings.Contains(a["why"].(string), "typeswitch/conv.go:3") {
+	if a["on"] != false || !strings.Contains(a["why"].(string), "typeswitch/conv.go:5") {
 		t.Errorf("off: %v", a)
 	}
 	for _, p := range m["workflows"].([]any)[0].(map[string]any)["pathList"].([]any) {
@@ -213,7 +226,7 @@ func TestConverterScanTurnsTheRuleOff(t *testing.T) {
 		}
 	}
 	text, _, _ = run(t, "report", mod+"/typeswitch", "--config", cfg, "--traces", traces)
-	if !strings.Contains(text, "Assumption default-json-converter: OFF") || !strings.Contains(text, "typeswitch/conv.go:3") {
+	if !strings.Contains(text, "Assumption default-json-converter: OFF") || !strings.Contains(text, "typeswitch/conv.go:5") {
 		t.Errorf("text report lacks the OFF line:\n%s", text)
 	}
 	page := filepath.Join(t.TempDir(), "r.html")

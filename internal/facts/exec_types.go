@@ -483,7 +483,7 @@ func (s *state) assertedJSONContainer(e ast.Expr) ([]spec, bool) {
 // jsonContainerFacts: x.(T) where x holds decoded values and T is a
 // container type: its elements are decoded values again.
 func (s *state) jsonContainerFacts(ta *ast.TypeAssertExpr) []spec {
-	if !s.a.opts.JSONDecode || s.a.jsonWrite {
+	if s.a.jsonWrite {
 		return nil
 	}
 	T := s.a.info.TypeOf(ta.Type)
@@ -497,12 +497,16 @@ func (s *state) jsonContainerFacts(ta *ast.TypeAssertExpr) []spec {
 		}
 	}
 	ts, used, ok := s.valueTypes(ta.X)
-	if !ok || !ts.json {
+	if !ok || !ts.json || !(ts.std || s.a.opts.JSONDecode) {
 		return nil
 	}
-	set := s.jsonSet(ta.Pos(), key{})
-	d := &datum{op: dElem, ts: set, why: s.newWhy(oJSON, ta.Pos(), key{}, func() string {
-		return "was found inside a value decoded by Temporal's default JSON converter, so its elements are decoded values too"
+	set := s.jsonSetOf(ta.Pos(), key{}, ts.std)
+	origin, how := oJSON, "Temporal's default JSON converter"
+	if ts.std {
+		origin, how = oStdJSON, "encoding/json"
+	}
+	d := &datum{op: dElem, ts: set, why: s.newWhy(origin, ta.Pos(), key{}, func() string {
+		return "was found inside a value decoded by " + how + ", so its elements are decoded values too"
 	})}
 	for _, u := range used {
 		d.why.parents = append(d.why.parents, datumWhys(u)...)
@@ -510,12 +514,15 @@ func (s *state) jsonContainerFacts(ta *ast.TypeAssertExpr) []spec {
 	return []spec{{d: *d}}
 }
 
-// jsonSet is the type set of a decoded value (assumption default-json-converter).
-func (s *state) jsonSet(pos token.Pos, k key) *typeSet {
-	w := s.newWhy(oJSON, pos, k, func() string {
-		return "is decoded by Temporal's default JSON converter, so it holds only a `string`, `float64`, `bool`, `[]interface{}`, `map[string]interface{}` or nil (assumption default-json-converter)"
-	})
-	ts := &typeSet{json: true}
+// jsonSetOf is the type set of a decoded value: by encoding/json in this
+// function (std, no assumption), or by Temporal's default JSON converter.
+func (s *state) jsonSetOf(pos token.Pos, k key, std bool) *typeSet {
+	origin, text := oJSON, "is decoded by Temporal's default JSON converter, so it holds only a `string`, `float64`, `bool`, `[]interface{}`, `map[string]interface{}` or nil (assumption default-json-converter)"
+	if std {
+		origin, text = oStdJSON, "is decoded by encoding/json (without UseNumber), so it holds only a `string`, `float64`, `bool`, `[]interface{}`, `map[string]interface{}` or nil"
+	}
+	w := s.newWhy(origin, pos, k, func() string { return text })
+	ts := &typeSet{json: true, std: std}
 	for _, t := range jsonTypes() {
 		ts.add(t, w)
 	}
@@ -541,19 +548,19 @@ func (s *state) initParams() {
 			if v == nil || !s.a.trackable(v) {
 				continue
 			}
-			s.decoded(key{v: v}, v.Type(), name.Pos())
+			s.decoded(key{v: v}, v.Type(), name.Pos(), false)
 		}
 	}
 }
 
 // decoded records what a value Temporal's JSON decoder wrote into k can be.
-func (s *state) decoded(k key, t types.Type, pos token.Pos) {
+func (s *state) decoded(k key, t types.Type, pos token.Pos, std bool) {
 	switch {
 	case isEmptyInterface(t):
-		ts := s.jsonSet(pos, k)
+		ts := s.jsonSetOf(pos, k, std)
 		s.add(k, &datum{op: dTypes, ts: ts, why: ts.ents[0].w})
 	case isJSONContainer(t) && !s.a.jsonWrite && s.a.escapes[k.v] == "":
-		ts := s.jsonSet(pos, k)
+		ts := s.jsonSetOf(pos, k, std)
 		s.add(k, &datum{op: dElem, ts: ts, why: ts.ents[0].w})
 	}
 }
@@ -580,8 +587,9 @@ func (s *state) decodeEffects(n ast.Node) {
 					}
 				}
 				s.killKey(k)
-				if wasNil && s.a.opts.JSONDecode {
-					s.decoded(k, v.Type(), x.Pos())
+				std := s.a.decodeStd[x]
+				if wasNil && (std || s.a.opts.JSONDecode) {
+					s.decoded(k, v.Type(), x.Pos(), std)
 				}
 			}
 		}

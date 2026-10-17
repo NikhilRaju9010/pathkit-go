@@ -13,6 +13,8 @@ func File(programs []Program) string {
 package progs
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -20,6 +22,8 @@ import (
 )
 
 var _ = errors.New
+var _ = bytes.NewReader
+var _ json.Number
 var _ = time.Second
 
 func noop() {}

@@ -23,6 +23,12 @@ type typeSet struct {
 	// list is the fixed one for decoded values (see jsonTypes). Containers
 	// found inside such a value hold the same list again.
 	json bool
+	// std: those values were decoded by encoding/json in this function
+	// (json.Unmarshal, or Decode on a decoder that never calls UseNumber), a
+	// rule of the standard library that needs no assumption about Temporal.
+	// False for values Temporal decoded, which rest on the assumption
+	// default-json-converter.
+	std bool
 }
 
 func (ts *typeSet) clone() *typeSet {
@@ -62,6 +68,7 @@ func (ts *typeSet) union(o *typeSet) {
 	}
 	// json stays false unless both are decoded values; a fresh set starts false.
 	ts.json = ts.json && o.json
+	ts.std = ts.std && o.std
 }
 
 // whys lists the reasons behind every entry (and the nil, if any).

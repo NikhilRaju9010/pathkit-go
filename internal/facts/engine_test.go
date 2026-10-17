@@ -22,6 +22,7 @@ type found struct {
 	paths    []string
 	proofs   map[string][]ProofStep
 	off      string
+	assumed  map[string][]string // path key -> assumptions the claim rests on
 }
 
 func analyzeFixture(t *testing.T, dir string) map[string]found {
@@ -41,7 +42,7 @@ func analyzeFixtureWith(t *testing.T, dir string, opts Options) map[string]found
 			t.Fatalf("%s: %v", wf.Name, err)
 		}
 		a := New(g, opts)
-		f := found{claims: map[string]Kind{}, proofs: map[string][]ProofStep{}, off: a.Off()}
+		f := found{claims: map[string]Kind{}, proofs: map[string][]ProofStep{}, assumed: map[string][]string{}, off: a.Off()}
 		for _, p := range g.Paths(model.DefaultMaxPaths).List {
 			text := p.Key()
 			f.paths = append(f.paths, text)
@@ -49,6 +50,7 @@ func analyzeFixtureWith(t *testing.T, dir string, opts Options) map[string]found
 			if r.Claim != nil {
 				f.claims[text] = r.Claim.Kind
 				f.proofs[text] = r.Claim.Proof
+				f.assumed[text] = r.Claim.Assumptions
 			}
 			if r.Suspect != nil {
 				f.suspects = append(f.suspects, text)
@@ -251,5 +253,32 @@ func TestProofTextForTheTypeSwitchShape(t *testing.T) {
 	}
 	if len(got) < 4 || !strings.Contains(strings.Join(got, "\n"), "takes `case int`. [step 1,") || !strings.Contains(strings.Join(got, "\n"), "`string`, `*string`") {
 		t.Errorf("proof:\n%s\n(for reference, the shape of a good proof:\n%s)", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// What encoding/json decodes in the workflow follows from the standard
+// library, not from an assumption about Temporal: the claims stay with the
+// default-json-converter rule off, and name no assumption. A value Temporal
+// decoded needs the rule.
+func TestStdJSONNeedsNoAssumption(t *testing.T) {
+	off := analyzeFixtureWith(t, engineDir, Options{JSONDecode: false})
+	on := analyzeFixtureWith(t, engineDir, Options{JSONDecode: true})
+	for _, name := range []string{"ImpossibleStdUnmarshal", "ImpossibleStdDecoder", "ImpossibleStdUnmarshalDespiteOtherUseNumber"} {
+		for _, f := range []found{off[name], on[name]} {
+			if len(f.claims) == 0 {
+				t.Errorf("%s: no claim (rule on or off)", name)
+			}
+			for key, as := range f.assumed {
+				if len(as) != 0 {
+					t.Errorf("%s %s: rests on %v, want no assumption", name, key, as)
+				}
+			}
+		}
+	}
+	if n := len(off["ImpossibleJSONGet"].claims); n != 0 {
+		t.Errorf("ImpossibleJSONGet: %d claims with the rule off, want 0", n)
+	}
+	if n := len(on["ImpossibleJSONGet"].claims); n == 0 {
+		t.Error("ImpossibleJSONGet: no claim with the rule on")
 	}
 }

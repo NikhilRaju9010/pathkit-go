@@ -36,16 +36,21 @@ func TestModuleRoot(t *testing.T) {
 	}
 }
 
-// A module that sets its own data converter, payload codec or number decoding
-// is found; a clean one, a vendored copy and testdata are not.
+// A module that sets its own data converter or payload codec is found; a
+// clean one, a vendored copy, testdata, and text that only mentions the names
+// are not. UseNumber and json.Number do not count here: they concern the
+// decoder that produced one value.
 func TestCustomConverterUse(t *testing.T) {
-	cases := map[string]string{
-		"data converter": "package w\nvar _ = client.Options{DataConverter: x}\n",
-		"payload codec":  "package w\nvar _ = converter.NewCodecDataConverter(a, b)\n",
-		"use number":     "package w\nfunc f(d *json.Decoder) { d.UseNumber() }\n",
-		"json number":    "package w\nvar _ json.Number\n",
+	found := map[string]string{
+		"data converter option": "package w\nvar _ = client.Options{DataConverter: x}\n",
+		"data converter set":    "package w\nfunc f(o *client.Options) { o.DataConverter = x }\n",
+		"payload codec":         "package w\nvar _ = converter.NewCodecDataConverter(a, b)\n",
+		"composite converter":   "package w\nvar _ = converter.NewCompositeDataConverter(a)\n",
+		"payload converter":     "package w\ntype C struct{}\nfunc (C) ToPayload(v any) {}\nfunc (C) FromPayload(p any) {}\n",
+		"data converter type":   "package w\ntype C struct{}\nfunc (*C) ToPayloads(v any) {}\nfunc (*C) FromPayloads(p any) {}\n",
+		"codec type":            "package w\ntype C struct{}\nfunc (C) Encode(p []*common.Payload) {}\nfunc (C) Decode(p []*common.Payload) {}\n",
 	}
-	for name, src := range cases {
+	for name, src := range found {
 		root := t.TempDir()
 		write(t, root, "go.mod", "module example.com/m\n")
 		write(t, root, "w/w.go", src)
@@ -54,11 +59,28 @@ func TestCustomConverterUse(t *testing.T) {
 			t.Errorf("%s: hits = %v", name, hits)
 		}
 	}
+	notFound := map[string]string{
+		"use number":           "package w\nfunc f(d *json.Decoder) { d.UseNumber() }\n",
+		"json number":          "package w\nvar _ json.Number\n",
+		"in a comment":         "package w\n// DataConverter: x  NewCodecDataConverter\nfunc F() {}\n",
+		"in a string":          "package w\nvar s = \"DataConverter\"\n",
+		"half an interface":    "package w\ntype C struct{}\nfunc (C) ToPayload(v any) {}\n",
+		"Encode and Decode":    "package w\ntype C struct{}\nfunc (C) Encode(s string) {}\nfunc (C) Decode(s string) {}\n",
+		"methods of two types": "package w\ntype A struct{}\ntype B struct{}\nfunc (A) ToPayload(v any) {}\nfunc (B) FromPayload(p any) {}\n",
+	}
+	for name, src := range notFound {
+		root := t.TempDir()
+		write(t, root, "go.mod", "module example.com/m\n")
+		write(t, root, "w/w.go", src)
+		if hits := CustomConverterUse(root); len(hits) != 0 {
+			t.Errorf("%s: hits = %v, want none", name, hits)
+		}
+	}
 	clean := t.TempDir()
 	write(t, clean, "go.mod", "module example.com/m\n")
 	write(t, clean, "w/w.go", "package w\nfunc F() {}\n")
-	write(t, clean, "vendor/x/x.go", "package x\nvar _ = DataConverter\n")
-	write(t, clean, "testdata/y.go", "package y\nvar _ = DataConverter\n")
+	write(t, clean, "vendor/x/x.go", "package x\nvar _ = Options{DataConverter: x}\n")
+	write(t, clean, "testdata/y.go", "package y\nvar _ = Options{DataConverter: x}\n")
 	write(t, clean, "w/notes.txt", "DataConverter\n")
 	if hits := CustomConverterUse(clean); len(hits) != 0 {
 		t.Errorf("a clean module: hits = %v", hits)

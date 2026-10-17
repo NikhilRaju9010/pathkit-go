@@ -39,6 +39,12 @@ Some paths can never run (a loop the code always enters, the same value tested t
 - **Tests:** fixtures `helpers`, `helperrun` (runs for real, with 21 recorded runs checked end to end), `clashhelper`, helper cases for the fact engine, and helper programs in the soundness generator (function with and without error results, branches, loops, up to three deep, reused with other arguments, closures and pointers that write the caller's variables, methods).
 - **In the fixtures:** the loops of `ImpossibleLoopKeepsOthers` and `SuspectLoopBetween` no longer call a helper that uses the Temporal API, which would make them loops with a decision in them; they call an ordinary function, so they still test a plain loop.
 
+### Changed: where the JSON rule applies
+
+- **`default-json-converter` switches off only for what can affect it.** It is off for the whole module when the code sets its own converter (a `DataConverter` option, a codec constructor, or a type with a converter's methods). `UseNumber` and `json.Number` elsewhere no longer switch it off: they change only the values that decoder produces. Comments and strings no longer count either.
+- **New:** values the workflow decodes itself with `json.Unmarshal`, or with `Decode` on a decoder made by `json.NewDecoder` in the same function that is never handed on and never calls `UseNumber`, are followed like decoded values, with no assumption (the standard library's rule).
+- **Duplicate stable ids:** a test now fails if two paths of any workflow share a stable id (run on the pilot, every fixture and shape fixture, and any folders in `PATHKIT_UNIQUE_STABLE_DIRS`). None did.
+
 ### Added: proofs for automatic claims
 
 - **Claim proofs.** Every claim an automatic detector makes now carries its reasoning as an ordered list of plain sentences: one for each decision on the path that matters (with its step number and line of code), then a closing sentence. This includes the needs-review claims of the closed-channel and history-size detectors; a claim PathKit no longer trusts (because a trace fits no path) has no proof. `pathkit explain` prints it as a numbered `Proof:` block, and `--json` has a new `proof` key on those paths only. Nothing else in any output changed.

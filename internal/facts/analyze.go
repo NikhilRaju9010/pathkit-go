@@ -490,7 +490,7 @@ func collect(used []*datum, extra ...*why) []*why {
 // sentence is the plain-words line for one reason.
 func (s *state) sentence(w *why) string {
 	switch w.origin {
-	case oDecl, oConst, oNil, oNonNil, oStore, oJSON, oLen:
+	case oDecl, oConst, oNil, oNonNil, oStore, oJSON, oStdJSON, oLen:
 		if w.key.v == nil {
 			return ensurePeriod(capitalize(w.text()))
 		}

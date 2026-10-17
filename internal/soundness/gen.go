@@ -326,7 +326,9 @@ func (g *gen) action(depth int) {
 
 // topDecl declares something new at the top level of the function.
 func (g *gen) topDecl() {
-	switch g.r.Intn(16) {
+	switch g.r.Intn(18) {
+	case 16, 17: // a value encoding/json decodes here
+		g.jsonProbe()
 	case 13, 14, 15: // a helper function and calls of it
 		g.helperProbe()
 	case 12: // a slice or map built here

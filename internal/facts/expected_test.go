@@ -24,6 +24,15 @@ var wantClaims = map[string]map[string]Kind{
 		"J1.true J3.false J2.success J4.true|": Contradictory,
 		"J1.true J3.true J2.success J4.true|":  Contradictory,
 	},
+	"ImpossibleStdDecoder": {
+		"J1.true|": ImpossibleType,
+	},
+	"ImpossibleStdUnmarshal": {
+		"J1.case int|": ImpossibleType,
+	},
+	"ImpossibleStdUnmarshalDespiteOtherUseNumber": {
+		"J1.true|": ImpossibleType,
+	},
 	"ImpossibleAppendedSlice": {
 		"J1.case float64|completed": ImpossibleType,
 		"J1.default|completed":      ImpossibleType,
