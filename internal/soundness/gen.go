@@ -46,25 +46,33 @@ type Program struct {
 }
 
 type gen struct {
-	r        *rand.Rand
-	b        strings.Builder
-	vars     []variable // variables usable now (top-level declarations and parameters)
-	locals   []variable // top-level declared locals, to be "used" at the end
-	budget   int        // decisions still to write
-	next     int
-	hasLoop  bool
-	closures []string // names of closures that can be called
-	sinks    []string // other names that only need "_ = name" at the end
-	strParam []string
+	r         *rand.Rand
+	b         strings.Builder
+	vars      []variable // variables usable now (top-level declarations and parameters)
+	locals    []variable // top-level declared locals, to be "used" at the end
+	budget    int        // decisions still to write
+	next      int
+	hasLoop   bool
+	closures  []string // names of closures that can be called
+	sinks     []string // other names that only need "_ = name" at the end
+	collSinks []string // maps and slices that only need a harmless use (len) at the end
+	name      string   // the program's function name
+	helpers   []string // helper functions the program declares (see gen_helpers.go)
+	// helperCalls are statements that call a helper, to be written anywhere
+	// (inside an if or a loop, say).
+	helperCalls []string
+	strParam    []string
+	minLen      map[string]int // slices built here: how many elements they certainly have
 }
 
 // Generate writes the program numbered number of the given seed.
 func Generate(seed int64, number int) Program {
-	g := &gen{r: rand.New(rand.NewSource(seed*1_000_003 + int64(number)))}
+	g := &gen{r: rand.New(rand.NewSource(seed*1_000_003 + int64(number))), minLen: map[string]int{}}
 	p := Program{Seed: seed, Number: number, Name: fmt.Sprintf("Prog%04d", number)}
 	if seed != 0 {
 		p.Name = fmt.Sprintf("Prog%d_%04d", seed, number)
 	}
+	g.name = p.Name
 
 	// Parameters: two or three kinds, each with a small set of values.
 	domains := map[string][]string{
@@ -72,11 +80,13 @@ func Generate(seed int64, number int) Program {
 		kInt:    {`0`, `1`},
 		kBool:   {`false`, `true`},
 		kPtr:    {`nil`, `sp("x")`},
-		kIface:  {`nil`, `"a"`, `float64(1)`, `true`}, // what the JSON data converter hands an interface{} (a number is a float64)
+		kIface:  {`nil`, `"a"`, `float64(1)`, `map[string]interface{}{"a": "x"}`}, // what the JSON data converter hands an interface{} (a number is a float64, an object a map)
 		kFlag:   {`Flagged(false)`, `Flagged(true)`},
 		kStruct: {`Rec{}`, `Rec{A: "a", B: 1}`, `Rec{C: true}`},
+		kImap:   {`nil`, `map[string]interface{}{"a": "x"}`, `map[string]interface{}{"a": 2.5, "b": true}`},
+		kIslice: {`nil`, `[]interface{}{"x"}`, `[]interface{}{2.5, true, nil}`},
 	}
-	order := []string{kString, kInt, kBool, kPtr, kIface, kFlag, kStruct}
+	order := []string{kString, kInt, kBool, kPtr, kIface, kFlag, kStruct, kImap, kIslice}
 	g.r.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 	nparams := 2 + g.r.Intn(3)
 	var params []variable
@@ -84,11 +94,24 @@ func Generate(seed int64, number int) Program {
 	for i := 0; i < nparams; i++ {
 		k := order[i]
 		counts[k]++
-		short := map[string]string{kString: "s", kInt: "n", kBool: "b", kPtr: "p", kIface: "i", kFlag: "f", kStruct: "r"}[k]
+		short := map[string]string{kString: "s", kInt: "n", kBool: "b", kPtr: "p", kIface: "i", kFlag: "f", kStruct: "r", kImap: "im", kIslice: "is"}[k]
 		params = append(params, variable{fmt.Sprintf("%s%d", short, counts[k]), k})
 		if k == kString {
 			g.strParam = append(g.strParam, params[len(params)-1].name)
 		}
+	}
+	// anyVar needs something to pick: at least one plain value.
+	plain := false
+	for _, pr := range params {
+		switch pr.kind {
+		case kString, kInt, kBool, kPtr, kIface, kFlag:
+			plain = true
+		}
+	}
+	if !plain {
+		params = append(params, variable{"s1", kString})
+		g.strParam = append(g.strParam, "s1")
+		domains[kString] = domains[kString][:2]
 	}
 	for _, pr := range params {
 		g.declare(pr.name, pr.kind)
@@ -118,16 +141,38 @@ func Generate(seed int64, number int) Program {
 	for g.budget > 0 { // the budget is a promise to write that many decisions
 		g.stmt(0, 1)
 	}
+	for decisions(g.b.String()) < 3 { // a program is worth running only with a few decisions
+		g.line(0, "if %s {", g.cond())
+		g.block(1, 1)
+		g.line(0, "}")
+	}
 	body := g.b.String()
 	var used strings.Builder
 	for _, l := range g.locals {
+		if l.kind == kImap || l.kind == kIslice {
+			// len() is a use that lets something else reach the map or slice
+			// no more than the engine allows; "_ = m" would count as copying it.
+			fmt.Fprintf(&used, "\t_ = len(%s)\n", l.name)
+			continue
+		}
 		fmt.Fprintf(&used, "\t_ = %s\n", l.name)
 	}
-	for _, c := range append(append([]string{}, g.closures...), g.sinks...) {
+	for _, c := range g.closures {
 		fmt.Fprintf(&used, "\t_ = %s\n", c)
 	}
-	p.Source = fmt.Sprintf("func %s(ctx workflow.Context, %s) error {\n\t_ = ctx\n%s%s\treturn nil\n}\n", p.Name, strings.Join(sig, ", "), body, used.String())
+	for _, c := range g.sinks {
+		fmt.Fprintf(&used, "\t_ = %s\n", c)
+	}
+	for _, c := range g.collSinks {
+		fmt.Fprintf(&used, "\t_ = len(%s)\n", c)
+	}
+	p.Source = fmt.Sprintf("%sfunc %s(ctx workflow.Context, %s) error {\n\t_ = ctx\n%s%s\treturn nil\n}\n", g.helperSource()+"\n", p.Name, strings.Join(sig, ", "), body, used.String())
 	return p
+}
+
+// decisions counts the ifs, switches and loops written so far.
+func decisions(src string) int {
+	return strings.Count(src, "if ") + strings.Count(src, "switch ") + strings.Count(src, "for ")
 }
 
 func (g *gen) line(depth int, format string, args ...any) {
@@ -157,7 +202,7 @@ func (g *gen) pick(kind string) (variable, bool) {
 // the loop run forever).
 func (g *gen) anyVar() variable {
 	for {
-		if v := g.vars[g.r.Intn(len(g.vars))]; v.name != "" && v.kind != kStruct {
+		if v := g.vars[g.r.Intn(len(g.vars))]; v.name != "" && v.kind != kStruct && v.kind != kImap && v.kind != kIslice {
 			return v
 		}
 	}
@@ -220,6 +265,10 @@ func (g *gen) block(depth, minStmts int) {
 
 // action is a statement that is not a decision.
 func (g *gen) action(depth int) {
+	if len(g.helperCalls) > 0 && g.r.Intn(6) == 0 {
+		g.line(depth, "%s", g.helperCalls[g.r.Intn(len(g.helperCalls))])
+		return
+	}
 	switch g.r.Intn(9) {
 	case 0, 1:
 		v := g.anyVar()
@@ -277,7 +326,15 @@ func (g *gen) action(depth int) {
 
 // topDecl declares something new at the top level of the function.
 func (g *gen) topDecl() {
-	switch g.r.Intn(11) {
+	switch g.r.Intn(18) {
+	case 16, 17: // a value encoding/json decodes here
+		g.jsonProbe()
+	case 13, 14, 15: // a helper function and calls of it
+		g.helperProbe()
+	case 12: // a slice or map built here
+		g.declCollection()
+	case 11: // more of the same
+		g.declCollection()
 	case 10: // a zero value that is stored only under a condition, then checked
 		g.storeProbe()
 	case 9: // a struct and its ok flag from a map lookup (comma-ok form)
@@ -292,7 +349,7 @@ func (g *gen) topDecl() {
 			g.line(0, "%s := map[string]Rec{}", mp)
 		}
 		g.line(0, "%s, %s := %s[%s]", rc, ok, mp, key)
-		g.sinks = append(g.sinks, mp)
+		g.collSinks = append(g.collSinks, mp)
 		g.addLocal(rc, kStruct)
 		g.addLocal(ok, kBool)
 		// The probe that once found a false claim: the zero value is only
@@ -401,6 +458,10 @@ func (g *gen) stmt(depth, i int) {
 	}
 	if g.budget <= 0 || depth >= 3 {
 		g.action(depth)
+		return
+	}
+	if depth <= 1 && g.r.Intn(4) == 0 {
+		g.typeStmt(depth)
 		return
 	}
 	switch g.r.Intn(10) {

@@ -71,6 +71,17 @@ type Classification struct {
 	// plain words. Empty for a plain testable path and for a claim a
 	// person made (config override, comment, rule).
 	Proof []ProofStep
+	// Assumptions are the named assumptions the claim rests on
+	// ("default-json-converter"); empty for most claims.
+	Assumptions []string
+	// SuspectExit and Group are set for unknown-input-type: the edge id of
+	// the type switch case the path takes, and the switch ("file:line").
+	SuspectExit string
+	Group       string
+	// UsesStep is the last step of the path (1-based) the claim's reasoning
+	// depends on; 0 when it is not known. Local distrust of a trace that
+	// leaves the map uses it (DowngradeUnexplained).
+	UsesStep int
 }
 
 // Origin is the written-down source of a classification.

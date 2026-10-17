@@ -125,6 +125,8 @@ type (
 		// Added with claim proofs: the steps behind a detector's claim;
 		// left out when the path has none.
 		Proof []jsonProofStep `json:"proof,omitempty"`
+		// Added with the type facts: the named assumptions the claim rests on.
+		Assumptions []string `json:"assumptions,omitempty"`
 		// With --hints only, on testable paths no test ran.
 		HowToCover []string `json:"howToCover,omitempty"`
 	}
@@ -209,6 +211,15 @@ type (
 		// Added with the path-cap warning; absent when no workflow reached
 		// the cap.
 		PathCap *jsonPathCap `json:"pathCapWarning,omitempty"`
+		// Added with the type facts: assumptions that are off, or that
+		// claims rest on; absent when there is nothing to say.
+		Assumptions []jsonAssumption `json:"assumptions,omitempty"`
+	}
+	jsonAssumption struct {
+		Name   string  `json:"name"`
+		On     bool    `json:"on"`
+		Why    *string `json:"why"` // why it is off; null when on
+		Claims int     `json:"claims"`
 	}
 	jsonPathCap struct {
 		Limit     int      `json:"limit"`
@@ -231,11 +242,12 @@ type (
 
 // basisInfo is the coverage basis, for the JSON and the HTML page.
 type basisInfo struct {
-	basis coverage.Basis
-	shown bool // the classification block is printed (see measured.showClass)
+	basis       coverage.Basis
+	shown       bool // the classification block is printed (see measured.showClass)
+	assumptions []classify.AssumptionStatus
 }
 
-func (m *measured) basisInfo() basisInfo { return basisInfo{m.basis, m.showClass} }
+func (m *measured) basisInfo() basisInfo { return basisInfo{m.basis, m.showClass, m.assumptions} }
 
 func classificationJSON(b coverage.Breakdown) jsonClassification {
 	var c jsonClassification
@@ -286,7 +298,7 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 			jw.PathList = append(jw.PathList, jsonPath{Number: p.Number, ID: p.Path.ID(), Text: render.PathText(p.Path), Steps: steps,
 				End: string(p.Path.End), Compensation: p.Path.Compensation, Covered: p.Covered, Traces: p.Traces, StaleTrace: p.StaleTrace,
 				StableID: p.StableID, Bucket: string(p.Class.Bucket), Label: optional(p.Class.Label), Source: string(p.Class.Source),
-				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons, Proof: proofJSON(p.Class.Proof)})
+				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons, Proof: proofJSON(p.Class.Proof), Assumptions: p.Class.Assumptions})
 		}
 		for _, u := range w.Unexplained {
 			jw.UnexplainedTraces = append(jw.UnexplainedTraces, jsonUnexplained{StepsID: u.StepsID, Steps: u.Steps, Count: u.Count, Mismatch: u.Mismatch,
@@ -296,6 +308,14 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 	}
 	for _, e := range res.Excluded {
 		out.Excluded = append(out.Excluded, jsonExcluded{e.Name, e.Reason})
+	}
+	for _, a := range bi.assumptions {
+		ja := jsonAssumption{Name: a.Name, On: a.On, Claims: a.Claims}
+		if !a.On {
+			why := a.Why
+			ja.Why = &why
+		}
+		out.Assumptions = append(out.Assumptions, ja)
 	}
 	if threshold != nil {
 		c := res.Breakdown.For(bi.basis)

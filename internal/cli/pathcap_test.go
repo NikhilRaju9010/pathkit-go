@@ -13,7 +13,7 @@ import (
 func TestPathCapWarning(t *testing.T) {
 	rules := absPath(t, fixtures+"/rules/...")
 	traces := t.TempDir()
-	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
+	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
 
 	for _, cmd := range []string{"report", "coverage"} {
 		out, stderr, code := run(t, cmd, rules, "--include", "TwelveIfs", "--traces", traces, "--summary")
@@ -60,7 +60,7 @@ func TestPathCapWarning(t *testing.T) {
 // Nothing is added when no workflow reaches the cap.
 func TestNoPathCapWarningUnderTheCap(t *testing.T) {
 	traces := t.TempDir()
-	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
+	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
 	out, stderr, code := run(t, "report", pilot+"/orders", "--traces", traces, "--json")
 	if code != ExitOK {
 		t.Fatalf("%d %s", code, stderr)

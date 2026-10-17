@@ -211,6 +211,31 @@
 {{- end}}
 </details>
 {{- end}}
+{{- if .Groups}}
+<h3 id="unknown-input-groups">Paths by type switch (unknown-input-type)</h3>
+<div class="tablebox">
+<table class="summary-table">
+<thead><tr><th scope="col">Type switch</th><th scope="col">Paths</th></tr></thead>
+<tbody>
+{{- range .Groups}}
+<tr><td><code>{{.Switch}}</code></td><td>{{.Paths}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
+{{- range .Assumptions}}
+<article class="def" id="def-{{.Name}}" data-assumption="{{.Name}}">
+<h3>Assumption: {{.Name}}</h3>
+<dl>
+<dt>Status</dt><dd>{{.Status}}</dd>
+<dt>Claims resting on it</dt><dd>{{.Claims}}</dd>
+<dt>What it means</dt><dd>{{.Meaning}}</dd>
+<dt>Why</dt><dd>{{.Why}}</dd>
+<dt>What to do</dt><dd>{{.WhatToDo}}</dd>
+</dl>
+</article>
+{{- end}}
 <p class="footer">Definitions version {{.Version}}</p>
 </section>
 

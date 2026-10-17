@@ -24,6 +24,11 @@ func (g *Graph) assignStable() {
 	seen := map[string]int{}
 	for _, j := range g.Junctions {
 		d := strings.Join(strings.Fields(j.Label), " ")
+		if j.Site != nil {
+			// A decision in a helper is told apart by the helper and the call
+			// it was reached by, in words (no line numbers).
+			d += " " + j.Site.Words()
+		}
 		seen[d]++
 		if n := seen[d]; n > 1 {
 			d += fmt.Sprintf(" #%d", n)
@@ -71,3 +76,27 @@ func (p Path) Decisions() []string {
 // and as a rule's "when" writes it, with " #2", " #3" added to repeated
 // texts of one workflow (see assignStable).
 func (j *Junction) StableText() string { return j.stable }
+
+// LegacyStableIDs are the stable IDs the path had before PathKit followed
+// helper functions: its steps without the decisions inside helpers, without
+// the error checks and loops that exist only because a helper is followed,
+// and with whatever end kind (an older PathKit could not tell how a path
+// that returns a helper's result ended). A path with none of those has its
+// own ID among them. A saved override that points at an ID that has vanished
+// is looked up in these.
+func (p Path) LegacyStableIDs() []string {
+	var parts []string
+	for _, s := range p.Steps {
+		if s.Junction.Site != nil || s.Junction.viaHelper {
+			continue
+		}
+		parts = append(parts, s.Junction.stable+"\x1f"+strings.Join(strings.Fields(s.Exit.Label), " "))
+	}
+	var out []string
+	for _, end := range []EndKind{EndCompleted, EndFailed, EndContinuedAsNew, EndUnknown} {
+		key := strings.Join(parts, "\n") + "|" + string(end)
+		sum := sha256.Sum256([]byte(StableIDVersion + "\n" + key))
+		out = append(out, StableIDVersion+":"+hex.EncodeToString(sum[:])[:12])
+	}
+	return out
+}

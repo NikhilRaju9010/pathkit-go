@@ -323,7 +323,7 @@ func writeUntestableTraces(t *testing.T, runs ...[]string) string {
 	}
 	dir := t.TempDir()
 	for i, steps := range runs {
-		writeTrace(t, dir, string(rune('a'+i)), map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "untestable.Checkout",
+		writeTrace(t, dir, string(rune('a'+i)), map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "untestable.Checkout",
 			"functionHash": hash, "status": "complete", "steps": steps})
 	}
 	return dir
@@ -403,7 +403,7 @@ func TestUntestableCommentEndToEnd(t *testing.T) {
 func TestBadUntestableCommentStopsCoverage(t *testing.T) {
 	bad := absPath(t, "../../testdata/fixtures/untestablebad")
 	traces := t.TempDir()
-	writeTrace(t, traces, "a", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "untestablebad.NoReason", "functionHash": "x", "status": "complete", "steps": []string{}})
+	writeTrace(t, traces, "a", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "untestablebad.NoReason", "functionHash": "x", "status": "complete", "steps": []string{}})
 	_, stderr, code := run(t, "coverage", bad, "--traces", traces)
 	if code != ExitError || !strings.Contains(stderr, "in scope but not analyzable: ") ||
 		!strings.Contains(stderr, `untestablebad.NoReason: //pathkit:untestable at untestablebad.go:19: it needs a reason, like reason="the carrier never sends this"`) {
@@ -526,7 +526,11 @@ func writeTracesFor(t *testing.T, folder, workflow string, runs ...[]string) str
 	var hash string
 	for _, wf := range discover.All(res.Packages) {
 		if wf.Workflow.Name == workflow {
-			hash = model.FunctionHash(wf.Workflow.Pkg.Fset, wf.Workflow.Func)
+			g, err := model.Build(wf.Workflow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hash = g.CodeHash()
 		}
 	}
 	if hash == "" {
@@ -534,7 +538,7 @@ func writeTracesFor(t *testing.T, folder, workflow string, runs ...[]string) str
 	}
 	dir := t.TempDir()
 	for i, steps := range runs {
-		writeTrace(t, dir, string(rune('a'+i)), map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": workflow,
+		writeTrace(t, dir, string(rune('a'+i)), map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": workflow,
 			"functionHash": hash, "status": "complete", "steps": steps})
 	}
 	return dir

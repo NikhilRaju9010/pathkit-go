@@ -87,7 +87,7 @@ func ordersTraces(t *testing.T) string {
 	hash := model.FunctionHash(wf.Pkg.Fset, wf.Func)
 	dir := t.TempDir()
 	for name, steps := range map[string][]string{"a": {"J1.true"}, "b": {"J1.false", "J2.failure"}} {
-		data, _ := json.Marshal(map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
+		data, _ := json.Marshal(map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
 			"functionHash": hash, "status": "complete", "steps": steps})
 		if err := os.WriteFile(filepath.Join(dir, name+".trace.json"), data, 0o644); err != nil {
 			t.Fatal(err)

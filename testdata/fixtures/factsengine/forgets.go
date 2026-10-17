@@ -132,7 +132,7 @@ func ImpossibleLoopKeepsOthers(ctx workflow.Context, items []string) error {
 	var fixed string
 	count := 0
 	for range items {
-		_ = act(ctx)
+		_ = unknownString("x") // not a workflow call: the loop stays a plain loop
 		count++
 	}
 	if fixed != "" {
@@ -282,8 +282,9 @@ func PossibleCommaOkBroken(ctx workflow.Context, raw interface{}) error {
 	return nil
 }
 
-// A copy of an interface from a pointer is not nil even if the pointer is.
-func PossibleTypedNil(ctx workflow.Context) error {
+// An interface that holds a pointer is not nil even if the pointer is: the
+// typed-nil rule (impossible-nil).
+func ImpossibleTypedNil(ctx workflow.Context) error {
 	var p *Input
 	var v interface{} = p
 	if v == nil {
@@ -300,7 +301,7 @@ func SuspectLoopBetween(ctx workflow.Context, items []string, x string) error {
 	}
 	for _, it := range items {
 		x = it
-		_ = act(ctx)
+		_ = unknownString(it) // not a workflow call: the loop stays a plain loop
 	}
 	if x == "b" {
 		_ = act(ctx)
@@ -352,7 +353,8 @@ func PossibleCommaOkFieldAppended(ctx workflow.Context, m map[string]Rec) error 
 	return nil
 }
 
-func MixedCommaOkNestedFieldWritten(ctx workflow.Context, raw interface{}) error {
+func MixedCommaOkNestedFieldWritten(ctx workflow.Context, s string) error {
+	raw := unknownIface(s)
 	v, ok := raw.(Rec)
 	v.In.ID = "x"
 	if !ok {

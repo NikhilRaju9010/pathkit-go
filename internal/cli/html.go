@@ -102,7 +102,7 @@ func reportHTML(cmd *cobra.Command, m *measured, path string) func() error {
 		runs = htmlreport.AddRun(runs, htmlreport.Run{Time: t.UTC(), Paths: m.res.Paths, Covered: m.res.Covered,
 			InScope: len(inScope), Excluded: len(excluded), Scope: htmlreport.Fingerprint(inScope, excluded)})
 		page, err := htmlreport.Report(htmlreport.ReportInput{
-			Header: header(t, m.sc), Result: m.res, Threshold: m.threshold, ExcludedBy: m.excludedBy, Trend: runs, Classification: m.classView(), CustomLabels: m.customLabels,
+			Header: header(t, m.sc), Result: m.res, Threshold: m.threshold, ExcludedBy: m.excludedBy, Trend: runs, Classification: m.classView(), CustomLabels: m.customLabels, Assumptions: m.assumptions,
 		})
 		if err != nil {
 			return err

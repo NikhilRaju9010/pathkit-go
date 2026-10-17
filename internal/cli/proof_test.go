@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -137,5 +139,211 @@ func TestExplainAnEngineClaim(t *testing.T) {
 	out, _, _ = run(t, "coverage", folder, "--config", on, "--include", "ContradictionThroughAssign", "--traces", traces, "--json")
 	if b := decode(t, out)["classification"].(map[string]any)["buckets"].(map[string]any)["cannotBeTested"].(map[string]any)["paths"].(float64); b != 1 {
 		t.Errorf("engine on: %v cannot-be-tested paths, want 1", b)
+	}
+}
+
+// copyShape copies the typeswitch shape fixture into a throw-away module.
+func copyShape(t *testing.T) string {
+	t.Helper()
+	src := absPath(t, "../../testdata/shapes")
+	dst := t.TempDir()
+	for _, f := range []string{"go.mod", "go.sum", "typeswitch/typeswitch.go"} {
+		data, err := os.ReadFile(filepath.Join(src, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dst, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, f), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dst
+}
+
+// The assumption default-json-converter: claims rest on it and say so; when
+// the module sets its own data converter the rule turns itself off, the claim
+// goes, and the JSON, the text report and the HTML all say so.
+func TestConverterScanTurnsTheRuleOff(t *testing.T) {
+	mod := copyShape(t)
+	cfg := writeConfig(t, `{"packages": [`+jsonString(mod+"/typeswitch")+`], "workflows": {"include": ["SwitchOnDecodedInput"]}, "classification": {"enabled": true}}`)
+	traces := writeTracesFor(t, "../../testdata/shapes/typeswitch", "typeswitch.SwitchOnDecodedInput", []string{"J1.case string"})
+
+	out, stderr, code := run(t, "coverage", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--json")
+	if code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+	m := decode(t, out)
+	as := m["assumptions"].([]any)
+	if len(as) != 1 {
+		t.Fatalf("assumptions: %v", as)
+	}
+	a := as[0].(map[string]any)
+	if a["name"] != "default-json-converter" || a["on"] != true || a["claims"].(float64) != 1 {
+		t.Errorf("on: %v", a)
+	}
+	var claimed map[string]any
+	for _, p := range m["workflows"].([]any)[0].(map[string]any)["pathList"].([]any) {
+		if pp := p.(map[string]any); pp["bucket"] == "cannot-be-tested" {
+			claimed = pp
+		}
+	}
+	if claimed == nil || claimed["label"] != "impossible-type" || claimed["assumptions"].([]any)[0] != "default-json-converter" {
+		t.Errorf("the claim: %v", claimed)
+	}
+	text, _, _ := run(t, "report", mod+"/typeswitch", "--config", cfg, "--traces", traces)
+	if !strings.Contains(text, "Assumption default-json-converter: on; 1 claim rests on it") {
+		t.Errorf("text report lacks the assumption line:\n%s", text)
+	}
+
+	// A mention in a comment, and a decoder elsewhere that uses UseNumber, do
+	// not switch the rule off: neither touches a value Temporal decoded.
+	if err := os.WriteFile(filepath.Join(mod, "typeswitch", "other.go"), []byte("package typeswitch\n\n// the worker may use a DataConverter one day\n\nimport \"encoding/json\"\n\nfunc numbers(d *json.Decoder) { d.UseNumber() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ = run(t, "coverage", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--json")
+	if a := decode(t, out)["assumptions"].([]any)[0].(map[string]any); a["on"] != true || a["claims"].(float64) != 1 {
+		t.Errorf("a comment and an unrelated UseNumber switched the rule off: %v", a)
+	}
+	if err := os.Remove(filepath.Join(mod, "typeswitch", "other.go")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The module now sets its own data converter.
+	if err := os.WriteFile(filepath.Join(mod, "typeswitch", "conv.go"), []byte("package typeswitch\n\ntype workerOptions struct{ DataConverter any }\n\nvar _ = workerOptions{DataConverter: nil}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ = run(t, "coverage", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--json")
+	m = decode(t, out)
+	a = m["assumptions"].([]any)[0].(map[string]any)
+	if a["on"] != false || !strings.Contains(a["why"].(string), "typeswitch/conv.go:5") {
+		t.Errorf("off: %v", a)
+	}
+	for _, p := range m["workflows"].([]any)[0].(map[string]any)["pathList"].([]any) {
+		if pp := p.(map[string]any); pp["bucket"] == "cannot-be-tested" {
+			t.Errorf("a claim about a decoded value with the rule off: %v", pp)
+		}
+	}
+	text, _, _ = run(t, "report", mod+"/typeswitch", "--config", cfg, "--traces", traces)
+	if !strings.Contains(text, "Assumption default-json-converter: OFF") || !strings.Contains(text, "typeswitch/conv.go:5") {
+		t.Errorf("text report lacks the OFF line:\n%s", text)
+	}
+	page := filepath.Join(t.TempDir(), "r.html")
+	run(t, "report", mod+"/typeswitch", "--config", cfg, "--traces", traces, "--html="+page)
+	html, err := os.ReadFile(page)
+	if err != nil || !strings.Contains(string(html), "Assumption: default-json-converter") || !strings.Contains(string(html), "OFF: the module sets its own data converter") {
+		t.Errorf("the HTML lacks the assumption (err %v)", err)
+	}
+}
+
+// copyActivityArg copies the activityarg fixture into a throw-away module.
+func copyActivityArg(t *testing.T) string {
+	t.Helper()
+	src := absPath(t, "../../testdata/fixtures")
+	dst := t.TempDir()
+	for _, f := range []string{"go.mod", "go.sum", "activityarg/activityarg.go"} {
+		data, err := os.ReadFile(filepath.Join(src, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dst, f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, f), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dst
+}
+
+// The assumption no-custom-interceptor: a map handed to an activity keeps its
+// facts (the SDK encodes it at the call) and the claim says what it rests on;
+// a local activity never does; when the module registers an interceptor the
+// rule turns itself off, and the JSON, the text report and the HTML say so.
+func TestInterceptorScanTurnsTheRelaxationOff(t *testing.T) {
+	mod := copyActivityArg(t)
+	cfg := writeConfig(t, `{"packages": [`+jsonString(mod+"/activityarg")+`], "classification": {"enabled": true}}`)
+	traces := writeTracesFor(t, "../../testdata/fixtures/activityarg", "activityarg.MapToActivity", []string{"J1.success", "J2.case string"})
+
+	claims := func(m map[string]any) map[string][]any {
+		out := map[string][]any{}
+		for _, w := range m["workflows"].([]any) {
+			ww := w.(map[string]any)
+			for _, p := range ww["pathList"].([]any) {
+				if pp := p.(map[string]any); pp["bucket"] == "cannot-be-tested" {
+					a, _ := pp["assumptions"].([]any)
+					out[ww["name"].(string)] = append(out[ww["name"].(string)], a)
+				}
+			}
+		}
+		return out
+	}
+	out, stderr, code := run(t, "coverage", mod+"/activityarg", "--config", cfg, "--traces", traces, "--json")
+	if code != ExitOK {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+	m := decode(t, out)
+	got := claims(m)
+	// the int case, and the default (the value is a string, which the first case takes)
+	if len(got["activityarg.MapToActivity"]) != 2 || len(got["activityarg.MapToLocalActivity"]) != 0 {
+		t.Fatalf("claims by workflow: %v (want two for MapToActivity, none for the local activity)", got)
+	}
+	for _, c := range got["activityarg.MapToActivity"] {
+		if as := c.([]any); len(as) != 1 || as[0] != "no-custom-interceptor" {
+			t.Errorf("the claim rests on %v", as)
+		}
+	}
+	var a map[string]any
+	for _, x := range m["assumptions"].([]any) {
+		if x.(map[string]any)["name"] == "no-custom-interceptor" {
+			a = x.(map[string]any)
+		}
+	}
+	if a == nil || a["on"] != true || a["claims"].(float64) != 2 {
+		t.Errorf("assumption: %v", a)
+	}
+	text, _, _ := run(t, "report", mod+"/activityarg", "--config", cfg, "--traces", traces)
+	if !strings.Contains(text, "Assumption no-custom-interceptor: on; 2 claims rest on it") {
+		t.Errorf("text report lacks the assumption line:\n%s", text)
+	}
+
+	// The module registers an interceptor.
+	if err := os.WriteFile(filepath.Join(mod, "activityarg", "worker.go"), []byte("package activityarg\n\ntype workerOptions struct{ Interceptors []any }\n\nvar _ = workerOptions{Interceptors: nil}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, _ = run(t, "coverage", mod+"/activityarg", "--config", cfg, "--traces", traces, "--json")
+	m = decode(t, out)
+	if got := claims(m); len(got) != 0 {
+		t.Errorf("claims with a custom interceptor registered: %v", got)
+	}
+	a = nil
+	for _, x := range m["assumptions"].([]any) {
+		if x.(map[string]any)["name"] == "no-custom-interceptor" {
+			a = x.(map[string]any)
+		}
+	}
+	if a == nil || a["on"] != false || !strings.Contains(a["why"].(string), "activityarg/worker.go:5") {
+		t.Errorf("off: %v", a)
+	}
+	text, _, _ = run(t, "report", mod+"/activityarg", "--config", cfg, "--traces", traces)
+	if !strings.Contains(text, "Assumption no-custom-interceptor: OFF") || !strings.Contains(text, "activityarg/worker.go:5") {
+		t.Errorf("text report lacks the OFF line:\n%s", text)
+	}
+	page := filepath.Join(t.TempDir(), "r.html")
+	run(t, "report", mod+"/activityarg", "--config", cfg, "--traces", traces, "--html="+page)
+	html, err := os.ReadFile(page)
+	if err != nil || !strings.Contains(string(html), "Assumption: no-custom-interceptor") {
+		t.Errorf("the HTML lacks the assumption (err %v)", err)
+	}
+
+	// Turned off in the config: no relaxation, and the report says so.
+	if err := os.Remove(filepath.Join(mod, "activityarg", "worker.go")); err != nil {
+		t.Fatal(err)
+	}
+	cfgOff := writeConfig(t, `{"packages": [`+jsonString(mod+"/activityarg")+`], "classification": {"enabled": true, "assumptions": {"no_custom_interceptor": "off"}}}`)
+	out, _, _ = run(t, "coverage", mod+"/activityarg", "--config", cfgOff, "--traces", traces, "--json")
+	if got := claims(decode(t, out)); len(got) != 0 {
+		t.Errorf("claims with the assumption turned off in the config: %v", got)
 	}
 }

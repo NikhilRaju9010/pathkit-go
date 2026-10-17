@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"go/ast"
 	"go/token"
 	"path/filepath"
 	"regexp"
@@ -51,9 +52,34 @@ var unescape = strings.NewReplacer(`\"`, `"`, `\\`, `\`)
 // function and attaches each to its decision. g's junctions are numbered
 // and have their exits by now.
 func (b *builder) attachMarks(g *Graph) error {
-	for _, cg := range b.wf.File.Comments {
+	// The workflow function, and the declared helpers whose code the graph
+	// follows into: a comment on a decision in a helper marks that decision in
+	// every copy of the helper.
+	type region struct {
+		file     *ast.File
+		from, to token.Pos
+	}
+	regions := []region{{b.wf.File, b.wf.Func.Pos(), b.wf.Func.End()}}
+	seen := map[*ast.FuncDecl]bool{}
+	for _, s := range g.sites {
+		if s.Decl != nil && !seen[s.Decl] {
+			seen[s.Decl] = true
+			regions = append(regions, region{s.File, s.Decl.Pos(), s.Decl.End()})
+		}
+	}
+	for _, rg := range regions {
+		if err := b.attachMarksIn(g, rg.file, rg.from, rg.to); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// attachMarksIn reads the comments of one function.
+func (b *builder) attachMarksIn(g *Graph, file *ast.File, from, to token.Pos) error {
+	for _, cg := range file.Comments {
 		for _, c := range cg.List {
-			if c.Pos() < b.wf.Func.Pos() || c.End() > b.wf.Func.End() {
+			if c.Pos() < from || c.End() > to {
 				continue
 			}
 			pos := b.fset.Position(c.Slash)
@@ -97,41 +123,48 @@ func (b *builder) attachMarks(g *Graph) error {
 				return fail(`it needs the exit it marks, like exit="false" (as "pathkit analyze" prints it)`)
 			}
 
-			j, err := b.markedJunction(g, pos.Line)
+			copies, err := b.markedJunctions(g, pos)
 			if err != nil {
 				return fail("%v", err)
 			}
-			var exit *Exit
-			var labels []string
-			for _, e := range j.Exits {
-				labels = append(labels, e.Label)
-				if e.Label == attrs["exit"] {
-					exit = e
+			for _, j := range copies {
+				var exit *Exit
+				var labels []string
+				for _, e := range j.Exits {
+					labels = append(labels, e.Label)
+					if e.Label == attrs["exit"] {
+						exit = e
+					}
 				}
+				if exit == nil {
+					return fail("%s has no exit %q; its exits are: %s", j.Label, attrs["exit"], strings.Join(labels, ", "))
+				}
+				g.Marks = append(g.Marks, Mark{Junction: j, Exit: exit, Reason: attrs["reason"], Pos: pos})
 			}
-			if exit == nil {
-				return fail("%s has no exit %q; its exits are: %s", j.Label, attrs["exit"], strings.Join(labels, ", "))
-			}
-			g.Marks = append(g.Marks, Mark{Junction: j, Exit: exit, Reason: attrs["reason"], Pos: pos})
 		}
 	}
 	return nil
 }
 
-// markedJunction finds the decision a comment on line belongs to: one on
-// the same line, else one on the next line.
-func (b *builder) markedJunction(g *Graph, line int) (*Junction, error) {
-	for _, l := range []int{line, line + 1} {
-		var found []*Junction
+// markedJunctions finds the decision a comment at pos belongs to: one on
+// the same line, else one on the next line. Inside a helper there is one copy
+// of the decision for every call that was followed; all of them are returned.
+func (b *builder) markedJunctions(g *Graph, pos token.Position) ([]*Junction, error) {
+	for _, l := range []int{pos.Line, pos.Line + 1} {
+		byStmt := map[ast.Node][]*Junction{}
+		var order []ast.Node
 		for _, j := range g.Junctions {
-			if j.Pos.Line == l {
-				found = append(found, j)
+			if j.Pos.Line == l && j.Pos.Filename == pos.Filename {
+				if byStmt[j.Stmt] == nil {
+					order = append(order, j.Stmt)
+				}
+				byStmt[j.Stmt] = append(byStmt[j.Stmt], j)
 			}
 		}
-		switch len(found) {
+		switch len(order) {
 		case 0:
 		case 1:
-			return found[0], nil
+			return byStmt[order[0]], nil
 		default:
 			return nil, fmt.Errorf("more than one decision starts on line %d; put the comment where only one does", l)
 		}

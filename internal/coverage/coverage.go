@@ -18,6 +18,7 @@ package coverage
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -128,6 +129,10 @@ type Warning struct {
 	Workflow string
 	Kind     trace.Kind
 	Message  string
+	// Entry, for a trace that fits no path, is the ready-made
+	// classification.explained_traces entry that would accept it, with the
+	// reason "TODO" that the config refuses until a person replaces it.
+	Entry string
 }
 
 // Counts sorts every trace file read.
@@ -334,9 +339,27 @@ func Compute(in Input) Result {
 	warn := func(tf TraceFile, kind trace.Kind, format string, args ...any) {
 		res.Warnings = append(res.Warnings, Warning{File: filepath.Base(tf.Path), Workflow: tf.File.Workflow, Kind: kind, Message: fmt.Sprintf(format, args...)})
 	}
+	olderSeen := 0
+	for _, tf := range in.Traces {
+		var older *trace.OlderFormatError
+		if errors.As(tf.ReadErr, &older) {
+			olderSeen++
+		}
+	}
+	olderTold := false
 	for _, tf := range in.Traces {
 		res.Counts.Read++
 		name := filepath.Base(tf.Path)
+		var older *trace.OlderFormatError
+		if errors.As(tf.ReadErr, &older) {
+			// One message for all of them: they were all recorded the same way.
+			res.Counts.Unreadable++
+			if !olderTold {
+				olderTold = true
+				warn(tf, "unreadable", "%v (%s, one of %d trace files like it; none of them is counted)", older, name, olderSeen)
+			}
+			continue
+		}
 		if tf.ReadErr != nil {
 			res.Counts.Unreadable++
 			warn(tf, "unreadable", "could not read trace %s: %v; delete the file, or run \"pathkit clean\" and then \"pathkit test\" again", name, tf.ReadErr)
@@ -384,8 +407,9 @@ func Compute(in Input) Result {
 			if stale {
 				how = " (a stale trace, allowed by --allow-stale)"
 			}
-			warn(tf, trace.Unmatched, "trace %s (%s)%s fits no path: %s (\"pathkit report --unmatched\" shows the likely cause)", name, f.Workflow, how, out.Reason)
 			id := StepsID(f.Steps)
+			warn(tf, trace.Unmatched, "trace %s (%s)%s fits no path: %s (\"pathkit report --unmatched\" shows the likely cause)", name, f.Workflow, how, out.Reason)
+			res.Warnings[len(res.Warnings)-1].Entry = fmt.Sprintf("{\"workflow\": %q, \"steps_id\": %q, \"reason\": \"TODO\"}", f.Workflow, id)
 			if u := st.unexp[id]; u != nil {
 				u.Count++
 			} else {
@@ -452,10 +476,17 @@ func Compute(in Input) Result {
 			if pr.Class.Bucket == "" {
 				pr.Class.Bucket = classify.Testable // never leave a path without a bucket
 			}
-			if why != "" && !pr.Covered {
-				if c, changed := classify.DowngradeUnexplained(pr.Class, why); changed {
-					pr.Class = c
+			if len(unacknowledged) > 0 && !pr.Covered && pr.Class.Bucket == classify.CannotBeTested {
+				if w := distrustWhy(pr.Class, unacknowledged); w != "" {
+					if c, changed := classify.DowngradeUnexplained(pr.Class, w); changed {
+						pr.Class = c
+					}
 				}
+			}
+			if pr.Class.Label == "unknown-input-type" && (pr.Covered || st.branches[pr.Class.SuspectExit]) {
+				// Only for a case no test has taken: this one was run (by this
+				// path or another), so it is an ordinary path.
+				pr.Class = classify.DefaultTestable()
 			}
 			if pr.Covered && pr.Class.Label == "possible-correlation" {
 				// A suspect is only for paths no test ran; a run settled this
@@ -500,7 +531,7 @@ func Compute(in Input) Result {
 					manual++
 				}
 			}
-			msg := fmt.Sprintf("%s: %s. Its map may be incomplete, so cannot-be-tested claims by detectors and rules in this workflow are shown as needs-review until the trace is explained (fix the map, re-record, or accept it under classification.explained_traces with a reason)", st.wf.Name, why)
+			msg := fmt.Sprintf("%s: %s. Its map may be incomplete from the step where the trace leaves it, so cannot-be-tested claims by detectors and rules that rest on that step or a later one are shown as needs-review until the trace is explained (fix the map, re-record, or accept it under classification.explained_traces with a reason)", st.wf.Name, why)
 			if manual > 0 {
 				msg += fmt.Sprintf("; %s marked by a person %s kept", plural(manual, "path"), map[bool]string{true: "is", false: "are"}[manual == 1])
 			}
@@ -552,4 +583,51 @@ func plural(n int, word string) string {
 		return fmt.Sprintf("1 %s", word)
 	}
 	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// divergence is the 1-based step of a path where a trace that fits no path
+// leaves the map: the first step the map could not follow. Everything the
+// trace did before it (steps 1 to divergence-1) fitted.
+func (u *Unexplained) divergence() int {
+	if u.Detail == nil {
+		return 1
+	}
+	return len(u.Detail.Followed) + 1
+}
+
+// distrustWhy says why a cannot-be-tested claim of a detector or rule is not
+// trusted because of these traces ("" when it is). A claim whose reasoning
+// stays before the point where every one of the traces leaves the map keeps
+// its label; one that rests on that step or a later one, or whose steps are
+// not known, does not.
+func distrustWhy(c classify.Classification, traces []*Unexplained) string {
+	uses := c.UsesStep
+	if uses == 0 {
+		for _, p := range c.Proof {
+			uses = max(uses, p.Step)
+		}
+	}
+	var hit []*Unexplained
+	count, first := 0, 0
+	for _, u := range traces {
+		if uses == 0 || uses >= u.divergence() {
+			hit = append(hit, u)
+			count += u.Count
+			if first == 0 || u.divergence() < first {
+				first = u.divergence()
+			}
+		}
+	}
+	if len(hit) == 0 {
+		return ""
+	}
+	ids := make([]string, len(hit))
+	for i, u := range hit {
+		ids[i] = u.StepsID
+	}
+	where := ""
+	if uses > 0 {
+		where = fmt.Sprintf("; the claim rests on step %d, and the map stops fitting at step %d", uses, first)
+	}
+	return fmt.Sprintf("this workflow has %s that fit%s no path (%s)%s", plural(count, "trace"), map[bool]string{true: "s", false: ""}[count == 1], strings.Join(ids, ", "), where)
 }

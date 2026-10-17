@@ -3,6 +3,7 @@ package classify
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -44,8 +45,23 @@ type Engine struct {
 	// facts is the fact engine's analyzer for each workflow (see AddGraph);
 	// engineOff is true when the config turns the engine off.
 	facts     map[string]*facts.Analyzer
+	graphs    map[string]*model.Graph
 	engineOff bool
-	explained []scope.ExplainedTrace
+	// jsonMode is classification.assumptions.default_json_converter; jsonHits
+	// are the places a custom data converter was found in the module (the
+	// assumption is then off).
+	jsonMode string
+	jsonHits []string
+	// jsonRelevant: some workflow has a value the assumption is about.
+	jsonRelevant bool
+	// icptMode is classification.assumptions.no_custom_interceptor; icptHits are
+	// the places a custom interceptor is registered in the module (the
+	// assumption is then off); icptRelevant: some workflow hands a slice or map
+	// to a call that encodes its arguments.
+	icptMode     string
+	icptHits     []string
+	icptRelevant bool
+	explained    []scope.ExplainedTrace
 	// extraWarnings are config warnings found while resolving rules.
 	extraWarnings []string
 	// anchors are where each numbered ("#n") rule entry points, for the
@@ -88,7 +104,7 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{},
-		facts: map[string]*facts.Analyzer{}, engineOff: c.EngineOff}
+		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter, icptMode: c.NoCustomInterceptor}
 	if c.Policy == string(Exclude) {
 		e.policy = Exclude
 	}
@@ -270,8 +286,8 @@ func (e *Engine) Findings(measured []string, truncated map[string]bool) []string
 				o.Workflow, o.StableID, o.Reason, cap(o.Workflow)))
 			continue
 		}
-		out = append(out, fmt.Sprintf("classification: stale entry: %s %s (%s) matches no path of the current code; check the id with \"pathkit coverage --json\" (stableId), or remove the entry",
-			o.Workflow, o.StableID, o.Reason))
+		out = append(out, fmt.Sprintf("classification: stale entry: %s %s (%s) matches no path of the current code; check the id with \"pathkit coverage --json\" (stableId), or remove the entry%s",
+			o.Workflow, o.StableID, o.Reason, e.replacements(o.Workflow, o.StableID)))
 	}
 	for _, r := range e.allRules {
 		if !in[r.Workflow] || r.matched > 0 || r.off {
@@ -281,7 +297,11 @@ func (e *Engine) Findings(measured []string, truncated map[string]bool) []string
 			out = append(out, fmt.Sprintf("classification: rule %q matches none of the listed paths of %s; %s", r.ID, r.Workflow, cap(r.Workflow)))
 			continue
 		}
-		out = append(out, fmt.Sprintf("classification: stale rule %q: no path of %s takes all of its \"when\" decisions; write them as \"pathkit analyze\" prints them, like \"if x > 0 --true\"", r.ID, r.Workflow))
+		hint := ""
+		if g := e.graphs[r.Workflow]; g != nil && g.UsesHelpers() {
+			hint = fmt.Sprintf(". %s follows helper functions now: a decision inside one has its own text, with the helper and the call named (\"pathkit analyze\" prints it)", r.Workflow)
+		}
+		out = append(out, fmt.Sprintf("classification: stale rule %q: no path of %s takes all of its \"when\" decisions; write them as \"pathkit analyze\" prints them, like \"if x > 0 --true\"%s", r.ID, r.Workflow, hint))
 	}
 	return out
 }
@@ -348,6 +368,8 @@ func (e *Engine) Notes(final []Classification, measured []string) []string {
 	for _, d := range e.disabled {
 		out = append(out, fmt.Sprintf("Detector %s is turned off in the config: %s", d.Name, d.Reason))
 	}
+	out = append(out, groupNotes(final)...)
+	out = append(out, e.assumptionNotes(final)...)
 	return out
 }
 
@@ -356,4 +378,62 @@ func pathsN(n int) string {
 		return "1 path"
 	}
 	return fmt.Sprintf("%d paths", n)
+}
+
+// SetConverterScan tells the engine where the module sets its own Temporal
+// data converter (see load.CustomConverterUse). Any hit turns the assumption
+// default-json-converter off. Call it before AddGraph.
+func (e *Engine) SetConverterScan(hits []string) { e.jsonHits = hits }
+
+// JSONConverterOn reports whether claims may rest on Temporal's default JSON
+// converter, and when not, why.
+func (e *Engine) JSONConverterOn() (on bool, why string) {
+	switch {
+	case e.engineOff:
+		return false, "the fact engine is off"
+	case e.jsonMode == "off":
+		return false, "turned off in the config (classification.assumptions.default_json_converter)"
+	case len(e.jsonHits) > 0:
+		return false, "the module sets its own data converter or decodes numbers specially (" + e.jsonHits[0] + ")"
+	}
+	return true, ""
+}
+
+// replacements says, for a saved stableId that no path has any more, which
+// paths took its place when PathKit started following helper functions: the
+// ones whose older ID it was. "" when there are none.
+func (e *Engine) replacements(workflow, stableID string) string {
+	g := e.graphs[workflow]
+	if g == nil || !g.UsesHelpers() {
+		return ""
+	}
+	var ids []string
+	for _, p := range g.Paths(model.DefaultMaxPaths).List {
+		if slices.Contains(p.LegacyStableIDs(), stableID) {
+			ids = append(ids, p.StableID())
+		}
+	}
+	if len(ids) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(". %s follows helper functions now, and this path was split by what happens inside them: the paths that replace it are %s; mark the ones you mean under their new ids", workflow, strings.Join(ids, ", "))
+}
+
+// SetInterceptorScan tells the engine where the module registers a custom
+// interceptor (see load.CustomInterceptorUse). Any hit turns the assumption
+// no-custom-interceptor off. Call it before AddGraph.
+func (e *Engine) SetInterceptorScan(hits []string) { e.icptHits = hits }
+
+// InterceptorOn reports whether facts about a slice or map may be kept across
+// a call that encodes its arguments, and when not, why.
+func (e *Engine) InterceptorOn() (on bool, why string) {
+	switch {
+	case e.engineOff:
+		return false, "the fact engine is off"
+	case e.icptMode == "off":
+		return false, "turned off in the config (classification.assumptions.no_custom_interceptor)"
+	case len(e.icptHits) > 0:
+		return false, "the module registers a custom interceptor (" + e.icptHits[0] + ")"
+	}
+	return true, ""
 }

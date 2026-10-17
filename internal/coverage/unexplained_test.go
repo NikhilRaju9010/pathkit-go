@@ -205,3 +205,70 @@ func TestUnexplainedListEmptyWithoutClassification(t *testing.T) {
 		t.Errorf("%+v", res.Workflows[0].Unexplained)
 	}
 }
+
+// A trace that fits the map for its first steps and then leaves it puts only
+// the claims that rest on the step it leaves at, or a later one, under review.
+// A claim whose reasoning stays before that step keeps its label.
+func TestLocalDistrust(t *testing.T) {
+	w := pilotWorkflow(t, "orders.OrderWorkflow")
+	// The trace follows J1.false, then does something the map does not draw.
+	bad := tf("bad", w, "complete", "J1.false", "J9.nowhere")
+	usesLast := func(_ string, p model.Path) classify.Classification {
+		c := classify.DefaultTestable()
+		c.Bucket, c.Label, c.Source, c.PossibleInProduction = classify.CannotBeTested, "value-flow", classify.SourceAuto, false
+		c.Detector, c.Explanation = "value-flow", "the last step is impossible."
+		c.UsesStep = len(p.Steps) // the claim rests on the whole path
+		return c
+	}
+	res := Compute(Input{Workflows: []Workflow{w}, Traces: []TraceFile{bad}, Classifier: usesLast})
+	wf := res.Workflows[0]
+	if len(wf.Unexplained) != 1 || wf.Unexplained[0].divergence() != 2 {
+		t.Fatalf("unexplained = %+v, divergence %d, want the trace to leave the map at step 2", wf.Unexplained, wf.Unexplained[0].divergence())
+	}
+	for _, p := range wf.Paths {
+		steps := len(p.Path.Steps)
+		switch {
+		case steps == 1 && p.Class.Bucket != classify.CannotBeTested:
+			t.Errorf("a claim resting on step 1 only must keep its label: %+v", p.Class)
+		case steps == 2 && (p.Class.Bucket != classify.NeedsReview || p.Class.Label != "model-limit" || !strings.Contains(p.Class.Explanation, "rests on step 2")):
+			t.Errorf("a claim resting on step 2 must go under review, naming the step: %+v", p.Class)
+		}
+	}
+
+	// A claim whose steps are not known is not trusted, as before.
+	unknown := func(w string, p model.Path) classify.Classification {
+		c := usesLast(w, p)
+		c.UsesStep = 0
+		return c
+	}
+	res = Compute(Input{Workflows: []Workflow{w}, Traces: []TraceFile{bad}, Classifier: unknown})
+	for _, p := range res.Workflows[0].Paths {
+		if p.Class.Bucket != classify.NeedsReview {
+			t.Errorf("a claim with no known step must go under review: %+v", p.Class)
+		}
+	}
+}
+
+// The unmatched-trace warning carries the ready-made explained_traces entry,
+// with the reason "TODO", for the trace.
+func TestUnmatchedWarningHasReadyMadeEntry(t *testing.T) {
+	w := pilotWorkflow(t, "orders.OrderWorkflow")
+	res := Compute(Input{Workflows: []Workflow{w}, Traces: []TraceFile{tf("bad", w, "complete", "J1.false", "J9.nowhere")}})
+	id := StepsID([]string{"J1.false", "J9.nowhere"})
+	found := false
+	for _, x := range res.Warnings {
+		if x.Kind == trace.Unmatched {
+			found = true
+			want := `{"workflow": "orders.OrderWorkflow", "steps_id": "` + id + `", "reason": "TODO"}`
+			if x.Entry != want {
+				t.Errorf("entry %q, want %q", x.Entry, want)
+			}
+			if strings.Contains(x.Message, "TODO") {
+				t.Errorf("the existing message must not change: %s", x.Message)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no unmatched-trace warning: %+v", res.Warnings)
+	}
+}

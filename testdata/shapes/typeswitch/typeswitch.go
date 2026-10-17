@@ -30,13 +30,31 @@ func SwitchOnLocalMap(ctx workflow.Context, key string, name string, alias *stri
 	return nil
 }
 
-// NEAR-MISS: the map also gets a value from unknown code (an input of
-// interface type), so any type is possible.
-func SwitchWithUnknownValue(ctx workflow.Context, name string, extra interface{}) error {
+// NEAR-MISS: the map also gets a value from a call PathKit cannot see into,
+// so any type is possible.
+func SwitchWithUnknownValue(ctx workflow.Context, name string) error {
 	vals := map[string]interface{}{}
 	vals["name"] = name
-	vals["extra"] = extra
+	vals["extra"] = lookup(name)
 	switch vals["extra"].(type) {
+	case string:
+		_ = act(ctx)
+	case int:
+		_ = act(ctx)
+	default:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+func lookup(s string) interface{} { return s }
+
+// CATCH under the assumption default-json-converter: a workflow input of
+// type interface{} is filled by Temporal's decoder, which gives a string, a
+// float64, a bool, nil, a []interface{} or a map[string]interface{}; never an
+// int. (If the module sets its own data converter, the rule turns itself off.)
+func SwitchOnDecodedInput(ctx workflow.Context, extra interface{}) error {
+	switch extra.(type) {
 	case string:
 		_ = act(ctx)
 	case int:

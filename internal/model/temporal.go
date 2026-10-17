@@ -76,28 +76,32 @@ func (b *builder) isTemporalCall(call *ast.CallExpr) bool {
 // errSource describes where an error variable's value came from, using its
 // nearest assignment before pos. temporal is true when that is one of the
 // Temporal calls whose error check is a junction (docs/DESIGN.md D2).
-func (b *builder) errSource(obj types.Object, ifs *ast.IfStmt) (label string, temporal bool) {
+func (b *builder) errSource(obj types.Object, ifs *ast.IfStmt) (label string, temporal, helper bool) {
 	rhs, _, ok := b.nearestAssign(obj, ifs.Cond.Pos())
 	if !ok {
-		return "error (call)", false
+		return "error (call)", false, false
 	}
 	call, ok := ast.Unparen(rhs).(*ast.CallExpr)
 	if !ok {
-		return "error (call)", false
+		return "error (call)", false, false
 	}
 	f := b.calledFunc(call)
 	switch {
 	case isSDKMethod(f, []string{"Future"}, "Get"):
 		sel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
-		return b.futureLabel(sel.X, call, 0), true
+		return b.futureLabel(sel.X, call, 0), true, false
 	case isPkgFunc(f, workflowPkg, "Sleep"):
-		return "Sleep (timer)", true
+		return "Sleep (timer)", true, false
 	case isPkgFunc(f, workflowPkg, "Await", "AwaitWithTimeout"):
-		return f.Name() + " (wait)", true
-	case f != nil:
-		return f.Name() + " (call)", false
+		return f.Name() + " (wait)", true, false
 	}
-	return "error (call)", false
+	if label, junction := b.helperErrLabel(call); junction {
+		return label, true, true
+	}
+	if f != nil {
+		return f.Name() + " (call)", false, false
+	}
+	return "error (call)", false, false
 }
 
 // futureLabel names the Temporal call that produced a future: the activity

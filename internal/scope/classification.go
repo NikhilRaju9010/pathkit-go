@@ -32,6 +32,14 @@ type Classification struct {
 	// EngineOff is true when the config turns the fact engine off
 	// (classification.engine.enabled: false). The default is on.
 	EngineOff bool
+	// JSONConverter is classification.assumptions.default_json_converter:
+	// "auto" (the default: on unless the module sets a custom data
+	// converter) or "off".
+	JSONConverter string
+	// NoCustomInterceptor is classification.assumptions.no_custom_interceptor:
+	// "auto" (the default; on unless the module registers a custom interceptor)
+	// or "off".
+	NoCustomInterceptor string
 }
 
 // CISettings is classification.ci.
@@ -103,6 +111,12 @@ type classificationPart struct {
 	ExplainedTraces    []json.RawMessage `json:"explained_traces"`
 	CI                 json.RawMessage   `json:"ci"`
 	Engine             *enginePart       `json:"engine"`
+	Assumptions        *assumptionsPart  `json:"assumptions"`
+}
+
+type assumptionsPart struct {
+	DefaultJSONConverter *string `json:"default_json_converter"`
+	NoCustomInterceptor  *string `json:"no_custom_interceptor"`
 }
 
 type enginePart struct {
@@ -311,6 +325,24 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 	if p.Engine != nil && p.Engine.Enabled != nil && !*p.Engine.Enabled {
 		c.EngineOff = true
 	}
+	c.JSONConverter = "auto"
+	if p.Assumptions != nil && p.Assumptions.DefaultJSONConverter != nil {
+		switch v := *p.Assumptions.DefaultJSONConverter; v {
+		case "auto", "off":
+			c.JSONConverter = v
+		default:
+			return c, fail(`classification.assumptions.default_json_converter must be "auto" or "off", got %q`, v)
+		}
+	}
+	c.NoCustomInterceptor = "auto"
+	if p.Assumptions != nil && p.Assumptions.NoCustomInterceptor != nil {
+		switch v := *p.Assumptions.NoCustomInterceptor; v {
+		case "auto", "off":
+			c.NoCustomInterceptor = v
+		default:
+			return c, fail(`classification.assumptions.no_custom_interceptor must be "auto" or "off", got %q`, v)
+		}
+	}
 
 	if p.Detectors != nil {
 		seenDet := map[string]bool{}
@@ -350,6 +382,9 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 		}
 		if blank(e.Reason) {
 			return c, fail(`%s (%s %s) needs a "reason": accepting a trace that fits no path is a decision, and the reason is shown in every report`, where, strings.TrimSpace(*e.Workflow), *e.StepsID)
+		}
+		if strings.EqualFold(strings.TrimSpace(*e.Reason), "TODO") {
+			return c, fail(`%s (%s %s) still has the reason "TODO" that PathKit prints in its ready-made entry: replace it with why this run takes a road PathKit does not draw (the reason is shown in every report)`, where, strings.TrimSpace(*e.Workflow), *e.StepsID)
 		}
 		key := strings.TrimSpace(*e.Workflow) + "|" + *e.StepsID
 		if seenTrace[key] {

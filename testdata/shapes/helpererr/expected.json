@@ -5,8 +5,14 @@
     "helpererr.HelperWrapsActivity": {
       "today": [
         {
-          "key": "|completed",
-          "text": "End (completed)",
+          "key": "J1.failure|failed",
+          "text": "Charge (activity), via charge --failure--> End (failed)",
+          "bucket": "testable",
+          "label": ""
+        },
+        {
+          "key": "J1.success|completed",
+          "text": "Charge (activity), via charge --success--> End (completed)",
           "bucket": "testable",
           "label": ""
         }
@@ -14,25 +20,23 @@
       "v2": [
         {
           "key": "J1.failure|failed",
-          "text": "if err != nil --failure--> End (failed)",
-          "provisional": true,
+          "text": "Charge (activity), via charge --failure--> End (failed)",
           "v2": {
             "bucket": "testable",
             "label": ""
           },
-          "status": "today: missed",
-          "note": "v2 follows the helper: its error is the error of the Charge activity, so the check is a real two-way step. The keys are provisional names."
+          "status": "today: correct",
+          "note": "the helper returns the error of the Charge activity, so the check after it is a real two-way step"
         },
         {
           "key": "J1.success|completed",
-          "text": "if err != nil --success--> End (completed)",
-          "provisional": true,
+          "text": "Charge (activity), via charge --success--> End (completed)",
           "v2": {
             "bucket": "testable",
             "label": ""
           },
-          "status": "today: missed",
-          "note": "v2 follows the helper: its error is the error of the Charge activity, so the check is a real two-way step. The keys are provisional names."
+          "status": "today: correct",
+          "note": "the helper returns the error of the Charge activity, so the check after it is a real two-way step"
         }
       ]
     }

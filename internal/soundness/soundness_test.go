@@ -51,6 +51,8 @@ type observed struct {
 	unmatch  []string                                      // traces that fit no path
 	claims   map[string]map[string]classify.Classification // workflow -> path key -> claim
 	eng      *classify.Engine                              // the classifier the claims came from (graphs added)
+	// helperPaths counts the paths a run took through a followed helper's code.
+	helperPaths int
 }
 
 // runBatch writes the programs into a throw-away module, records the paths
@@ -111,7 +113,7 @@ func runBatch(t *testing.T, programs []Program) *observed {
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", wf.Name, err, byName[wf.Name].Source)
 		}
-		graphs[wf.Name], hashes[wf.Name] = g, model.FunctionHash(wf.Pkg.Fset, wf.Func)
+		graphs[wf.Name], hashes[wf.Name] = g, g.CodeHash()
 		targets = append(targets, instrument.Target{Workflow: wf, Graph: g})
 		if err := eng.AddGraph(wf.Name, g); err != nil {
 			t.Fatal(err)
@@ -165,6 +167,12 @@ func runBatch(t *testing.T, programs []Program) *observed {
 				obs.reached[tf.Workflow] = map[string]bool{}
 			}
 			obs.reached[tf.Workflow][out.Path.Key()] = true
+			for _, st := range out.Path.Steps {
+				if st.Junction.Site != nil {
+					obs.helperPaths++
+					break
+				}
+			}
 		default:
 			obs.unmatch = append(obs.unmatch, fmt.Sprintf("%s: %v (%s)", tf.Workflow, tf.Steps, out.Reason))
 		}
@@ -173,7 +181,12 @@ func runBatch(t *testing.T, programs []Program) *observed {
 }
 
 func firstLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
+	var lines []string
+	for _, l := range strings.Split(s, "\n") {
+		if !strings.Contains(l, " DEBUG ") { // the Temporal test log drowns the real message
+			lines = append(lines, l)
+		}
+	}
 	if len(lines) > n {
 		lines = append(lines[:n], "...")
 	}
@@ -234,7 +247,7 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		}
 	}
 
-	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount int
+	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths int
 	for start := 0; start < len(all); start += batchSize {
 		end := min(start+batchSize, len(all))
 		obs := runBatch(t, all[start:end])
@@ -245,10 +258,14 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 			falseCount++
 			t.Error(f)
 		}
+		helperPaths += obs.helperPaths
 		p, ps, r, c := obs.stats()
 		totalPrograms, totalPaths, totalReached, totalClaimed = totalPrograms+p, totalPaths+ps, totalReached+r, totalClaimed+c
 	}
-	t.Logf("SOUNDNESS: %d programs run, %d paths listed, %d paths really taken, %d paths claimed cannot-be-tested, %d false claims", totalPrograms, totalPaths, totalReached, totalClaimed, falseCount)
+	t.Logf("SOUNDNESS: %d programs run, %d paths listed, %d paths really taken, %d paths claimed cannot-be-tested, %d false claims (%d runs went through helper code)", totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths)
+	if helperPaths == 0 {
+		t.Error("no run went through the code of a helper function: the helper probes were not exercised")
+	}
 	if totalReached == 0 {
 		t.Error("no path was recorded as taken: the harness checked nothing")
 	}

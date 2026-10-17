@@ -58,14 +58,26 @@ type Junction struct {
 	// it is not chosen at the loop's head: the end of the body leads to it.
 	Retry *Exit
 
+	// Site is the copy of a helper's code this junction is in (see Site);
+	// nil for a decision in the workflow function itself.
+	Site *Site
+
 	// order is where the decision starts in the source, for numbering:
 	// Stmt's position, except for a Selector, which starts at its first
 	// Add… call (so it comes before any junction inside its callbacks).
-	order token.Pos
+	// A decision inside a helper starts with the positions of the calls
+	// that lead to it, so it is numbered right after its call site.
+	order []token.Pos
 
 	// Facts are notes the extractor stuck on this junction (see facts.go).
 	// They never change the junction, its exits, or any ID.
 	Facts []Fact
+
+	// viaHelper: the junction exists only because PathKit follows a helper
+	// function (the error check on a helper's result, or a loop with a call
+	// of a helper in it). Before helpers were followed it was not one, so
+	// path IDs from then do not have it (see Path.LegacyStableIDs).
+	viaHelper bool
 
 	// stable is the junction's description for stable path IDs (see
 	// assignStable): its label, made unique within the workflow.
@@ -125,6 +137,13 @@ type Target struct {
 	// in a path depends on them. A SkipMark among them says the walk
 	// assumed one side of an if or a loop that it did not decide.
 	Nodes []ast.Node
+	// Only, when set on a target at a junction, says the road can take just
+	// this one exit there: the code before it already decided (a helper
+	// that returned nil, so the caller's "if err != nil" cannot be true).
+	// The step is still recorded and still a step of the path. It belongs
+	// to the target, not to the junction: the same junction (one decision in
+	// the code) can be reached by a road that decided it and by one that did not.
+	Only *Exit
 }
 
 // SkipMark is a pseudo node in Target.Nodes: the walk passes an if that is
@@ -138,6 +157,16 @@ type SkipMark struct{ Stmt ast.Stmt }
 // Pos and End make SkipMark an ast.Node; it covers its statement.
 func (m SkipMark) Pos() token.Pos { return m.Stmt.Pos() }
 func (m SkipMark) End() token.Pos { return m.Stmt.End() }
+
+// EnterMark is a pseudo node in Target.Nodes: the walk goes into the copy of
+// a helper's code at Site. Every variable declared in that code (its
+// parameters and locals) starts new there, whatever an earlier copy left
+// in them.
+type EnterMark struct{ Site *Site }
+
+// Pos and End make EnterMark an ast.Node; it covers the helper.
+func (m EnterMark) Pos() token.Pos { return m.Site.Body.Pos() }
+func (m EnterMark) End() token.Pos { return m.Site.Body.End() }
 
 // Dead reports a road that ends in a panic or os.Exit: not a path at all.
 func (t Target) Dead() bool { return t.Junction == nil && t.Retry == nil && t.End == endDead }
@@ -153,13 +182,17 @@ type Graph struct {
 	// Marks are the //pathkit:untestable comments in the function.
 	Marks []Mark
 
-	byStmt map[ast.Node]*Junction
+	byStmt map[ast.Node]*Junction // the workflow function's own junctions
 	byID   map[string]*Exit
+	sites  []*Site
+	// helperNote is set when helpers are not followed because of the path cap.
+	helperNote string
 
 	// info, fn and fset are what the fact engine needs to read the code.
 	info *types.Info
 	fn   *ast.FuncDecl
 	fset *token.FileSet
+	pkg  *types.Package
 
 	trusted func(ast.Expr) bool
 }
@@ -176,6 +209,9 @@ func (g *Graph) TypesInfo() *types.Info { return g.info }
 
 // Func is the workflow function.
 func (g *Graph) Func() *ast.FuncDecl { return g.fn }
+
+// Types is the workflow's package, for writing type names.
+func (g *Graph) Types() *types.Package { return g.pkg }
 
 // FileSet is the file set the workflow's positions belong to.
 func (g *Graph) FileSet() *token.FileSet { return g.fset }

@@ -29,7 +29,25 @@ const (
 	// ValueFlow: the answer follows from earlier decisions, assignments,
 	// copies or early returns.
 	ValueFlow Kind = "value-flow"
+	// ImpossibleType: a type switch case, or a type assertion, that no type
+	// the value can hold takes.
+	ImpossibleType Kind = "impossible-type"
+	// ImpossibleNil: "v == nil" for an interface that holds a typed value
+	// (a typed pointer, even a nil one, is never a nil interface).
+	ImpossibleNil Kind = "impossible-nil"
+	// LoopExit: leaving a loop before its first round, when the loop always
+	// has one.
+	LoopExit Kind = "impossible-loop-exit"
 )
+
+// AssumptionJSON names the assumption a claim rests on when it relies on
+// Temporal's default JSON converter.
+const AssumptionJSON = "default-json-converter"
+
+// AssumptionInterceptor names the assumption a claim rests on when it keeps
+// facts about a slice or map across a call that encodes its arguments:
+// no workflow interceptor in the module sees the original value.
+const AssumptionInterceptor = "no-custom-interceptor"
 
 // ProofStep is one plain sentence of a proof. Step is the 1-based step of
 // the path the sentence is about (0 when it is about code between steps or
@@ -49,6 +67,14 @@ type Claim struct {
 	Kind        Kind
 	Explanation string
 	Proof       []ProofStep
+	// Assumptions are the named assumptions the claim rests on.
+	Assumptions []string
+	// Uses is the last step of the path the claim's reasoning depends on:
+	// its own decision, the decisions its facts were learned from, and the
+	// road after the last step done when each fact was learned. Local
+	// distrust of a trace that leaves the map after step d-1 applies to a
+	// claim only when Uses >= d.
+	Uses int
 }
 
 // Suspect says an uncovered path asks two questions about the same value
@@ -59,10 +85,19 @@ type Suspect struct {
 	Detail        string // which two steps, and why PathKit lost track
 	Explanation   string // Detail plus what it means; also the last proof sentence
 	Proof         []ProofStep
+	// Exit and Group are set for an unknown-input-type suspect: the edge id
+	// of the type switch case the path takes, and the switch ("file:line")
+	// it belongs to.
+	Exit      string
+	Group     string
+	GroupLine int
 }
 
 // Result is what the engine found on one path. Both are nil for most paths.
 type Result struct {
 	Claim   *Claim
 	Suspect *Suspect
+	// Unknown: the path takes a type switch case on a value whose origin
+	// PathKit cannot follow (a candidate for unknown-input-type).
+	Unknown *Suspect
 }

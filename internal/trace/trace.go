@@ -1,5 +1,5 @@
 // Package trace reads, lists and clears trace files (format: docs/DESIGN.md,
-// "Trace file format (schemaVersion 1)") and checks each one against the
+// "Trace file format (schemaVersion 2)") and checks each one against the
 // model's graph.
 package trace
 
@@ -17,8 +17,18 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
 
-// SchemaVersion is the only trace format this version understands.
-const SchemaVersion = 1
+// SchemaVersion is the only trace format this version understands. Version 2
+// adds the markers a run records when it goes into and out of the copy of a
+// helper's code (docs/DESIGN.md D15).
+const SchemaVersion = 2
+
+// OlderFormatError means a trace was recorded by an older PathKit: its steps
+// cannot be matched against this version's map, so it is not read.
+type OlderFormatError struct{ Version int }
+
+func (e *OlderFormatError) Error() string {
+	return fmt.Sprintf("traces are from an older PathKit (trace format %d, this PathKit reads %d): re-run \"pathkit test\" to record them again", e.Version, SchemaVersion)
+}
 
 // Suffix ends every trace file name. Clearing deletes only such files.
 const Suffix = ".trace.json"
@@ -72,6 +82,9 @@ func Read(path string) (File, error) {
 	var f File
 	if err := json.Unmarshal(data, &f); err != nil {
 		return File{}, fmt.Errorf("not a valid trace file: %v", err)
+	}
+	if f.SchemaVersion >= 1 && f.SchemaVersion < SchemaVersion {
+		return File{}, &OlderFormatError{Version: f.SchemaVersion}
 	}
 	if f.SchemaVersion != SchemaVersion {
 		return File{}, fmt.Errorf("unsupported trace schemaVersion %d (this pathkit reads %d); re-record it", f.SchemaVersion, SchemaVersion)

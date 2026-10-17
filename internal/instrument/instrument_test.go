@@ -51,7 +51,7 @@ func targets(t *testing.T, arg string) []instrument.Target {
 func allTargets(t *testing.T) []instrument.Target {
 	t.Helper()
 	var out []instrument.Target
-	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", fixtures + "/loops", fixtures + "/waits", fixtures + "/saga", fixtures + "/unnamedctx", pilot + "/..."} {
+	for _, arg := range []string{fixtures + "/rules", fixtures + "/switches", fixtures + "/loops", fixtures + "/waits", fixtures + "/saga", fixtures + "/unnamedctx", fixtures + "/helpers", fixtures + "/helperrun", pilot + "/..."} {
 		out = append(out, targets(t, arg)...)
 	}
 	return out
@@ -77,6 +77,8 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 		{fixtures, fixtures + "/waits"},
 		{fixtures, fixtures + "/saga"},
 		{fixtures, fixtures + "/unnamedctx"},
+		{fixtures, fixtures + "/helpers"},
+		{fixtures, fixtures + "/helperrun"},
 		{fixtures, fixtures + "/loopfirstnamed"},
 		{fixtures, fixtures + "/namedboolloop"},
 		{pilot, pilot + "/..."},
@@ -161,6 +163,9 @@ func TestEveryExitRecordedOnce(t *testing.T) {
 
 		var want []string
 		for _, j := range tg.Graph.Junctions {
+			if j.Site != nil {
+				continue // the exits in helper code are checked in TestHelperCodeRecordedOnce
+			}
 			for _, e := range j.Exits {
 				want = append(want, e.ID.String())
 			}
@@ -193,6 +198,7 @@ func TestNameClashes(t *testing.T) {
 		fixtures + "/clashvar":    `it already uses the name "pathkitRec"`,
 		fixtures + "/clashctx":    `it already uses the name "pathkitRec" or "pathkitCtx"`,
 		fixtures + "/clashctxpkg": `the package already declares "pathkitCtx"`,
+		fixtures + "/clashhelper": `the helper sleepy already uses the name "pathkitH"`,
 	} {
 		_, err := instrument.Instrument(targets(t, arg), "/tmp/x")
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -369,5 +375,46 @@ func TestUnnamedContextParameterIsNamed(t *testing.T) {
 	_, err = instrument.Instrument(targets(t, fixtures+"/unnamedparams"), "/tmp/x")
 	if err == nil || !strings.Contains(err.Error(), "its parameters have no names") {
 		t.Errorf("fully unnamed parameters: err = %v", err)
+	}
+}
+
+// The code of helpers is marked up once, however many calls and workflows
+// use it: each decision's exit is recorded by one hit() with a key of its
+// own, the key is in every using workflow's lookup table, and every call that
+// is followed is wrapped.
+func TestHelperCodeRecordedOnce(t *testing.T) {
+	ts := targets(t, fixtures+"/helpers")
+	res := instrumentAll(t, ts)
+	byFile := map[string]string{}
+	for p, src := range res.Files {
+		byFile[p] = string(src)
+	}
+	any := false
+	for _, tg := range ts {
+		if len(tg.Graph.Sites()) == 0 {
+			continue
+		}
+		any = true
+		table := tg.Graph.RecorderTable()
+		for _, se := range tg.Graph.SiteExits() {
+			if got := table[model.TableKey(se.Site.ID, se.LocalKey)]; got != se.ID.String() {
+				t.Errorf("%s: table says %q for %s, want %s", tg.Workflow.Name, got, se.LocalKey, se.ID)
+			}
+			file := byFile[tg.Workflow.Filename]
+			if n := strings.Count(file, strconv.Quote(se.LocalKey)); n != 1 {
+				t.Errorf("%s: %q is recorded %d times in the helper code, want once", tg.Workflow.Name, se.LocalKey, n)
+			}
+		}
+		for _, s := range tg.Graph.Sites() {
+			if !strings.Contains(byFile[tg.Workflow.Filename], strconv.Quote(tg.Graph.CallKey(s.Call))) {
+				t.Errorf("%s: the call %s is not wrapped", tg.Workflow.Name, s.Helper)
+			}
+			if !strings.Contains(byFile[tg.Workflow.Filename], "pathkitEnter(") {
+				t.Errorf("%s: no helper takes the site over", tg.Workflow.Name)
+			}
+		}
+	}
+	if !any {
+		t.Fatal("no workflow of the fixture has helper code")
 	}
 }

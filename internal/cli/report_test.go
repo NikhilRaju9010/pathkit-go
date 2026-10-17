@@ -178,7 +178,7 @@ func TestReportExcludedLine(t *testing.T) {
 func TestReportAddedByConfig(t *testing.T) {
 	cfg := absPath(t, "../../testdata/scopes/added/.pathkitrc.json")
 	traces := t.TempDir()
-	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "scope.lowerFlow",
+	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "scope.lowerFlow",
 		"functionHash": "0000000000000000", "status": "complete", "steps": []string{}})
 	stdout, _, code := run(t, "report", "--config", cfg, "--traces", traces, "--summary")
 	if code != ExitOK || !strings.Contains(stdout, "scope.lowerFlow (added by config)  ") {

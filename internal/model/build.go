@@ -31,29 +31,81 @@ type builder struct {
 	wf        discover.Workflow
 	info      *types.Info
 	fset      *token.FileSet
-	pragmas   map[int]string // line -> "ignore" / "branch"
+	pragmas   map[pragmaAt]string // line -> "ignore" / "branch"
 	memo      map[*cfg.Block]Target
 	busy      map[*cfg.Block]bool
-	junctions map[ast.Node]*Junction
+	junctions map[jkey]*Junction
 	switchOf  map[*ast.CaseClause]ast.Stmt // case clause -> its switch
 	loopHeads map[*cfg.Block]*loopInfo     // a loop's head block -> the loop
 	selectAt  map[ast.Stmt]*selectorInfo   // a checked Select statement -> its selector
 	// contOf marks the blocks of a selector callback: a return in the
 	// callback, or its end, goes on to the code after the Select call.
-	contOf map[*cfg.Block]func() Target
+	contOf map[*cfg.Block]func(retKind) Target
 	memoAt map[blockPos]Target // roads that start in the middle of a block
 	err    error
+	decls  map[*types.Func]*helperFn // see helperDecls
+
+	// noFollow: helper functions are never followed (see Build).
+	noFollow bool
+	// cur is the copy of helper code being walked (nil for the workflow
+	// function); siteOf says which copy each block of a go/cfg graph is in.
+	cur    *Site
+	siteOf map[*cfg.Block]*Site
+	sites  map[siteKey]*Site
+	// worth remembers worthInlining per helper body; worthBusy guards a cycle.
+	worth       map[*ast.BlockStmt]bool
+	worthBusy   map[*ast.BlockStmt]bool
+	worthCycles int
+	// siteList is every site, in the order they were made.
+	siteList []*Site
 }
+
+// jkey names a junction: a decision in the code, in one copy of it.
+type jkey struct {
+	site *Site
+	node ast.Node
+}
+
+// siteKey names a site: a call, inside one copy of code.
+type siteKey struct {
+	parent *Site
+	call   *ast.CallExpr
+}
+
+// key is the junction key of stmt in the code being walked.
+func (b *builder) key(stmt ast.Node) jkey { return jkey{b.cur, stmt} }
 
 // blockPos is a place inside a block: before its node i.
 type blockPos struct {
 	blk *cfg.Block
 	i   int
+	det determined
 }
 
 // Build makes the junction map of one workflow.
+//
+// Helper functions of the workflow's package are followed (docs/DESIGN.md
+// D15). If following them gives the workflow more paths than the path cap
+// lists, they are not followed instead (each call stays one step, as before),
+// and the graph says so (HelperNote): a map cut at the cap is no use for
+// coverage, and a workflow without that blow-up should not pay for it.
 func Build(wf discover.Workflow) (*Graph, error) {
+	g, err := build(wf, true)
+	if err != nil || !g.UsesHelpers() || !g.Paths(DefaultMaxPaths).Truncated {
+		return g, err
+	}
+	plain, err := build(wf, false)
+	if err != nil {
+		return g, nil
+	}
+	plain.helperNote = fmt.Sprintf("%s: helper functions are not followed: following them gives more than the %d paths PathKit lists (the path cap), so each call stays one step and what happens inside the helpers is not on the map", wf.Name, DefaultMaxPaths)
+	return plain, nil
+}
+
+// build is Build with the choice of following helpers made by the caller.
+func build(wf discover.Workflow, follow bool) (*Graph, error) {
 	b := newBuilder(wf)
+	b.noFollow = !follow
 	if u := b.findUnsupported(); u != nil {
 		return nil, u
 	}
@@ -79,11 +131,15 @@ func newBuilder(wf discover.Workflow) *builder {
 		fset:      wf.Pkg.Fset,
 		memo:      map[*cfg.Block]Target{},
 		busy:      map[*cfg.Block]bool{},
-		junctions: map[ast.Node]*Junction{},
+		junctions: map[jkey]*Junction{},
+		siteOf:    map[*cfg.Block]*Site{},
+		sites:     map[siteKey]*Site{},
+		worth:     map[*ast.BlockStmt]bool{},
+		worthBusy: map[*ast.BlockStmt]bool{},
 		switchOf:  map[*ast.CaseClause]ast.Stmt{},
 		loopHeads: map[*cfg.Block]*loopInfo{},
 		selectAt:  map[ast.Stmt]*selectorInfo{},
-		contOf:    map[*cfg.Block]func() Target{},
+		contOf:    map[*cfg.Block]func(retKind) Target{},
 		memoAt:    map[blockPos]Target{},
 	}
 	b.pragmas = b.readPragmas()
@@ -93,12 +149,15 @@ func newBuilder(wf discover.Workflow) *builder {
 
 // finish numbers the junctions in source order and assigns every ID.
 func (b *builder) finish(start Target) *Graph {
-	g := &Graph{Workflow: b.wf.Name, Start: start, byStmt: b.junctions, byID: map[string]*Exit{}, info: b.info, fn: b.wf.Func, fset: b.fset,
+	g := &Graph{Workflow: b.wf.Name, Start: start, byStmt: map[ast.Node]*Junction{}, byID: map[string]*Exit{}, info: b.info, fn: b.wf.Func, fset: b.fset, pkg: b.wf.Pkg.Types,
 		trusted: func(e ast.Expr) bool { return b.trustedConstant(e, map[types.Object]bool{}) }}
 	for _, j := range b.junctions {
 		g.Junctions = append(g.Junctions, j)
+		if j.Site == nil {
+			g.byStmt[j.Stmt] = j
+		}
 	}
-	sort.Slice(g.Junctions, func(i, k int) bool { return g.Junctions[i].order < g.Junctions[k].order })
+	sort.SliceStable(g.Junctions, func(i, k int) bool { return lessOrder(g.Junctions[i].order, g.Junctions[k].order) })
 	for i, j := range g.Junctions {
 		j.ID = fmt.Sprintf("J%d", i+1)
 		exits := j.Exits
@@ -110,8 +169,37 @@ func (b *builder) finish(start Target) *Graph {
 			g.byID[e.ID.s] = e
 		}
 	}
+	// Every site made while building is kept: a call is followed once, so a site is never abandoned.
+	g.sites = append([]*Site(nil), b.siteList...)
+	sort.SliceStable(g.sites, func(i, k int) bool { return lessOrder(g.sites[i].order, g.sites[k].order) })
+	for i, s := range g.sites {
+		s.ID = fmt.Sprintf("S%d", i+1)
+	}
 	g.assignStable()
 	return g
+}
+
+// lessOrder compares two numbering keys (see Junction.order).
+func lessOrder(a, b []token.Pos) bool {
+	for i := range a {
+		if i >= len(b) {
+			return false
+		}
+		if a[i] != b[i] {
+			return a[i] < b[i]
+		}
+	}
+	return len(a) < len(b)
+}
+
+// orderAt is the numbering key of a decision that starts at pos in the
+// code being walked.
+func (b *builder) orderAt(pos token.Pos) []token.Pos {
+	var base []token.Pos
+	if b.cur != nil {
+		base = b.cur.order
+	}
+	return append(base[:len(base):len(base)], pos)
 }
 
 // road returns where execution goes from the start of blk.
@@ -119,6 +207,7 @@ func (b *builder) road(blk *cfg.Block) Target {
 	if t, ok := b.memo[blk]; ok {
 		return t
 	}
+	defer b.enterBlock(blk)()
 	if l := b.loopHeads[blk]; l != nil {
 		return b.loopRoad(l)
 	}
@@ -138,25 +227,40 @@ func (b *builder) road(blk *cfg.Block) Target {
 
 // roadFrom returns where execution goes from before node i of blk.
 func (b *builder) roadFrom(blk *cfg.Block, i int) Target {
-	if i == 0 {
+	return b.roadFromDet(blk, i, determined{})
+}
+
+// roadFromDet is roadFrom for a road that comes back from a helper that
+// already decided the caller's error check (see determined).
+func (b *builder) roadFromDet(blk *cfg.Block, i int, det determined) Target {
+	if i == 0 && det.obj == nil {
 		return b.road(blk)
 	}
-	at := blockPos{blk, i}
+	at := blockPos{blk, i, det}
 	if t, ok := b.memoAt[at]; ok {
 		return t
 	}
-	t := b.computeRoadFrom(blk, i)
+	t := b.computeRoadFrom(blk, i, det)
 	b.memoAt[at] = t
 	return t
 }
 
-func (b *builder) computeRoad(blk *cfg.Block) Target { return b.computeRoadFrom(blk, 0) }
+// enterBlock makes the code of blk the code being walked, and returns the
+// call that puts the previous one back.
+func (b *builder) enterBlock(blk *cfg.Block) func() {
+	prev := b.cur
+	b.cur = b.siteOf[blk]
+	return func() { b.cur = prev }
+}
+
+func (b *builder) computeRoad(blk *cfg.Block) Target { return b.computeRoadFrom(blk, 0, determined{}) }
 
 // computeRoadFrom is where execution goes from before node from of blk.
 // A road that passes a saga compensation defer carries the note (docs/DESIGN.md
 // D3: noted, never a branch).
-func (b *builder) computeRoadFrom(blk *cfg.Block, from int) Target {
-	t, passed, upto := b.roadThrough(blk, from)
+func (b *builder) computeRoadFrom(blk *cfg.Block, from int, det determined) Target {
+	defer b.enterBlock(blk)()
+	t, passed, upto := b.roadThrough(blk, from, det)
 	if passed {
 		t.Compensation = true
 	}
@@ -171,8 +275,8 @@ func (b *builder) computeRoadFrom(blk *cfg.Block, from int) Target {
 // how far into blk.Nodes the road runs before its target (the nodes
 // from..upto-1 are executed; a Select call is the junction, not a node
 // that is run before it).
-func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool, upto int) {
-	cont := b.contOf[blk] // set inside a selector callback
+func (b *builder) roadThrough(blk *cfg.Block, from int, det determined) (t Target, passed bool, upto int) {
+	cont := b.contOf[blk] // set inside a selector callback or a helper
 	for i, n := range blk.Nodes[from:] {
 		// A defer in a selector callback runs when the callback ends, not
 		// when the workflow does: only the workflow's own defers count.
@@ -180,19 +284,25 @@ func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool, 
 			passed = true
 		}
 		if ret, ok := n.(*ast.ReturnStmt); ok {
+			if ic := b.inlineAt(n); ic != nil {
+				return b.intoHelper(ic, blk, from+i), passed, from + i + 1
+			}
 			if cont != nil {
-				return cont(), passed, from + i + 1 // returns from the callback, not the workflow
+				return cont(b.returnedKind(blk, ret)), passed, from + i + 1 // returns from the callback or helper, not the workflow
 			}
 			return Target{End: b.endKind(ret)}, passed, from + i + 1
 		}
 		if s, ok := n.(ast.Stmt); ok && b.selectAt[s] != nil {
 			return b.selectorJunction(b.selectAt[s], blk, from+i), passed, from + i
 		}
+		if ic := b.inlineAt(n); ic != nil {
+			return b.intoHelper(ic, blk, from+i), passed, from + i + 1
+		}
 	}
 	switch len(blk.Succs) {
 	case 0:
 		if cont != nil && !b.endsInNoReturn(blk) {
-			return cont(), passed, len(blk.Nodes) // the callback's end
+			return cont(b.returnedKind(blk, nil)), passed, len(blk.Nodes) // the callback's or helper's end
 		}
 		return Target{End: endDead}, passed, len(blk.Nodes) // a panic, os.Exit, ...
 	case 1:
@@ -200,7 +310,7 @@ func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool, 
 	}
 	then, other := blk.Succs[0], blk.Succs[1]
 	if ifs, ok := then.Stmt.(*ast.IfStmt); ok && then.Kind == cfg.KindIfThen {
-		return b.decide(ifs, then, other), passed, len(blk.Nodes)
+		return b.decide(ifs, then, other, det), passed, len(blk.Nodes)
 	}
 	if clause, ok := then.Stmt.(*ast.CaseClause); ok && then.Kind == cfg.KindSwitchCaseBody {
 		if sw := b.switchOf[clause]; sw != nil {
@@ -213,32 +323,47 @@ func (b *builder) roadThrough(blk *cfg.Block, from int) (t Target, passed bool, 
 
 // decide turns one if statement into a junction, or walks straight
 // through it when it is transparent or ignored (docs/DESIGN.md D2).
-func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
+func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block, det determined) Target {
 	pragma := b.ifPragma(ifs)
 	if obj, neq, isErrForm := b.errForm(ifs.Cond); isErrForm {
-		label, temporal := b.errSource(obj, ifs)
+		label, temporal, viaHelper := b.errSource(obj, ifs)
 		noErrorIsThen := !neq
 		if pragma == "ignore" || (!temporal && pragma != "branch") {
 			return b.transparent(ifs, noErrorIsThen, then, other)
 		}
-		j := b.newJunction(ifs, ErrCheck, label)
-		failure, success := then, other
-		failureRoad, successRoad := ast.Stmt(ifs.Body), ifs.Else
-		if !neq {
-			failure, success = other, then
-			failureRoad, successRoad = ifs.Else, ifs.Body
+		j := b.junctions[b.key(ifs)]
+		if j == nil {
+			j = b.newJunction(ifs, ErrCheck, label)
+			j.viaHelper = viaHelper
+			failure, success := then, other
+			failureRoad, successRoad := ast.Stmt(ifs.Body), ifs.Else
+			if !neq {
+				failure, success = other, then
+				failureRoad, successRoad = ifs.Else, ifs.Body
+			}
+			j.Exits = []*Exit{
+				{Label: "failure", Junction: j, Road: failureRoad},
+				{Label: "success", Junction: j, Road: successRoad},
+			}
+			j.Exits[0].To = b.road(failure)
+			j.Exits[1].To = b.road(success)
 		}
-		j.Exits = []*Exit{
-			{Label: "failure", Junction: j, Road: failureRoad},
-			{Label: "success", Junction: j, Road: successRoad},
+		t := Target{Junction: j}
+		if det.obj == obj {
+			// A helper just returned, and which error it returned is known.
+			t.Only = j.Exits[1]
+			if det.fails {
+				t.Only = j.Exits[0]
+			}
 		}
-		j.Exits[0].To = b.road(failure)
-		j.Exits[1].To = b.road(success)
-		return Target{Junction: j}
+		return t
 	}
 
 	if pragma == "ignore" {
 		return b.transparent(ifs, false, then, other) // assume a defensive check doesn't fire
+	}
+	if j := b.junctions[b.key(ifs)]; j != nil {
+		return Target{Junction: j} // reached again by another road (see determined)
 	}
 	if name, arrivedIsTrue, ok := b.waitResult(ifs.Cond); ok {
 		arrived, missed := "received", "not received"
@@ -273,10 +398,11 @@ func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block) Target {
 // ifPragma returns "ignore" or "branch" when that pragma is on the if's
 // own line or the line above, else "".
 func (b *builder) ifPragma(ifs *ast.IfStmt) string {
-	if p := b.pragmas[b.line(ifs)]; p != "" {
-		return p
+	p := b.fset.Position(ifs.Pos())
+	if s := b.pragmas[pragmaAt{p.Filename, p.Line}]; s != "" {
+		return s
 	}
-	return b.pragmas[b.line(ifs)-1]
+	return b.pragmas[pragmaAt{p.Filename, p.Line - 1}]
 }
 
 // ifIsJunction reports whether decide makes ifs a junction, without
@@ -287,7 +413,7 @@ func (b *builder) ifIsJunction(ifs *ast.IfStmt) bool {
 		return false
 	}
 	if obj, _, isErrForm := b.errForm(ifs.Cond); isErrForm {
-		_, temporal := b.errSource(obj, ifs)
+		_, temporal, _ := b.errSource(obj, ifs)
 		return temporal || pragma == "branch"
 	}
 	return true
@@ -306,8 +432,8 @@ func (b *builder) transparent(ifs *ast.IfStmt, takeThen bool, then, other *cfg.B
 }
 
 func (b *builder) newJunction(stmt ast.Node, kind JunctionKind, label string) *Junction {
-	j := &Junction{Kind: kind, Label: label, Stmt: stmt, Pos: b.fset.Position(stmt.Pos()), order: stmt.Pos()}
-	b.junctions[stmt] = j
+	j := &Junction{Kind: kind, Label: label, Stmt: stmt, Pos: b.fset.Position(stmt.Pos()), order: b.orderAt(stmt.Pos()), Site: b.cur}
+	b.junctions[b.key(stmt)] = j
 	return j
 }
 
@@ -391,8 +517,9 @@ func (b *builder) nearestAssign(obj types.Object, pos token.Pos) (rhs ast.Expr, 
 // bodiesAround lists the bodies of the functions pos is inside: the
 // innermost function literal first, the workflow function last.
 func (b *builder) bodiesAround(pos token.Pos) []*ast.BlockStmt {
-	out := []*ast.BlockStmt{b.wf.Func.Body}
-	ast.Inspect(b.wf.Func.Body, func(n ast.Node) bool {
+	root := b.rootBody(pos)
+	out := []*ast.BlockStmt{root}
+	ast.Inspect(root, func(n ast.Node) bool {
 		if n == nil || pos < n.Pos() || pos >= n.End() {
 			return false
 		}
@@ -402,6 +529,20 @@ func (b *builder) bodiesAround(pos token.Pos) []*ast.BlockStmt {
 		return true
 	})
 	return out
+}
+
+// rootBody is the body of the function declaration pos is inside: the
+// workflow function, or a helper of its package.
+func (b *builder) rootBody(pos token.Pos) *ast.BlockStmt {
+	if pos >= b.wf.Func.Pos() && pos < b.wf.Func.End() {
+		return b.wf.Func.Body
+	}
+	for _, h := range b.helperDecls() {
+		if h.body.Pos() <= pos && pos < h.body.End() {
+			return h.body
+		}
+	}
+	return b.wf.Func.Body
 }
 
 // endKind works out how a return statement ends the workflow.
@@ -435,7 +576,12 @@ func (b *builder) endKind(ret *ast.ReturnStmt) EndKind {
 // knownNonNil reports whether ret sits on the "error" side of an if that
 // checks obj against nil.
 func (b *builder) knownNonNil(obj types.Object, ret *ast.ReturnStmt) bool {
-	path, _ := astutil.PathEnclosingInterval(b.wf.File, ret.Pos(), ret.End())
+	return b.knownNonNilFile(b.wf.File, obj, ret)
+}
+
+// knownNonNilFile is knownNonNil for a return statement in file.
+func (b *builder) knownNonNilFile(file *ast.File, obj types.Object, ret *ast.ReturnStmt) bool {
+	path, _ := astutil.PathEnclosingInterval(file, ret.Pos(), ret.End())
 	for i := 1; i < len(path); i++ {
 		ifs, ok := path[i].(*ast.IfStmt)
 		if !ok {
@@ -480,23 +626,29 @@ func (b *builder) mayReturn(call *ast.CallExpr) bool {
 	return !isPkgFunc(f, "os", "Exit") && !isPkgFunc(f, "log", "Fatal", "Fatalf", "Fatalln", "Panic", "Panicf", "Panicln")
 }
 
-func (b *builder) readPragmas() map[int]string {
-	m := map[int]string{}
-	for _, cg := range b.wf.File.Comments {
-		for _, c := range cg.List {
-			line := b.fset.Position(c.Slash).Line
-			switch {
-			case strings.HasPrefix(c.Text, "//pathkit:ignore"):
-				m[line] = "ignore"
-			case strings.HasPrefix(c.Text, "//pathkit:branch"):
-				m[line] = "branch"
+func (b *builder) readPragmas() map[pragmaAt]string {
+	m := map[pragmaAt]string{}
+	for _, f := range b.wf.Pkg.Syntax {
+		for _, cg := range f.Comments {
+			for _, c := range cg.List {
+				p := b.fset.Position(c.Slash)
+				switch {
+				case strings.HasPrefix(c.Text, "//pathkit:ignore"):
+					m[pragmaAt{p.Filename, p.Line}] = "ignore"
+				case strings.HasPrefix(c.Text, "//pathkit:branch"):
+					m[pragmaAt{p.Filename, p.Line}] = "branch"
+				}
 			}
 		}
 	}
 	return m
 }
 
-func (b *builder) line(n ast.Node) int { return b.fset.Position(n.Pos()).Line }
+// pragmaAt is a line of a source file.
+type pragmaAt struct {
+	file string
+	line int
+}
 
 func (b *builder) fail(err error) {
 	if b.err == nil {

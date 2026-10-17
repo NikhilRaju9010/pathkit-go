@@ -11,8 +11,11 @@ import (
 
 // indexSwitches records which switch each case clause belongs to, so a
 // branch go/cfg makes for a case test can be traced back to its switch.
-func (b *builder) indexSwitches() {
-	ast.Inspect(b.wf.Func.Body, func(n ast.Node) bool {
+func (b *builder) indexSwitches() { b.indexSwitchesIn(b.wf.Func.Body) }
+
+// indexSwitchesIn is indexSwitches for the switches in one function body.
+func (b *builder) indexSwitchesIn(body *ast.BlockStmt) {
+	ast.Inspect(body, func(n ast.Node) bool {
 		if body := switchBody(n); body != nil {
 			for _, c := range body.List {
 				b.switchOf[c.(*ast.CaseClause)] = n.(ast.Stmt)
@@ -41,7 +44,7 @@ func switchBody(n ast.Node) *ast.BlockStmt {
 // the first test. The block the chain ends in is where execution goes
 // when no case matches: the default's code, or the code after the switch.
 func (b *builder) switchJunction(sw ast.Stmt, first *cfg.Block) Target {
-	if j, ok := b.junctions[sw]; ok {
+	if j, ok := b.junctions[b.key(sw)]; ok {
 		return Target{Junction: j}
 	}
 	bodies := map[*ast.CaseClause]*cfg.Block{}

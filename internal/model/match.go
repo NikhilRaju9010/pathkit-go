@@ -42,7 +42,12 @@ func FunctionHash(fset *token.FileSet, fn *ast.FuncDecl) string {
 		}
 		toks = append(toks, lit)
 	}
-	sum := sha256.Sum256([]byte(strings.Join(toks, " ")))
+	return hashText(strings.Join(toks, " "))
+}
+
+// hashText is the short hash FunctionHash and CodeHash are written in.
+func hashText(s string) string {
+	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
 }
 
@@ -73,7 +78,11 @@ func (m *Mismatch) Error() string { return m.Reason }
 // dropped, including the steps of loops nested inside it, and the walk
 // carries on from the new "iterate". Only the last trip through the body
 // is kept. The number of trips is never counted.
-func (g *Graph) Match(steps []string) (Path, *Mismatch) {
+func (g *Graph) Match(raw []string) (Path, *Mismatch) {
+	steps, inSite, bad := g.splitMarkers(raw)
+	if bad != "" {
+		return Path{}, &Mismatch{Step: 0, Reason: bad, At: g.Start}
+	}
 	at := g.Start
 	var path Path
 	iterateAt := map[*Junction]int{} // loop -> index of its kept "iterate" step
@@ -98,6 +107,9 @@ func (g *Graph) Match(steps []string) (Path, *Mismatch) {
 		if !ok {
 			return fail(n, fmt.Sprintf("step %d %q is not a junction exit in %s", n, s, g.Workflow))
 		}
+		if want := siteID(exit.Junction.Site); inSite[i] != want {
+			return fail(n, fmt.Sprintf("step %d %q was recorded %s, but the map has %s %s", n, s, where(inSite[i]), exit.Junction.ID, where(want)))
+		}
 		if r := at.Retry; r != nil {
 			if exit != r {
 				return fail(n, fmt.Sprintf("step %d %q does not fit: the path goes round loop %s (%s) next, so %s comes first", n, s, r.Junction.ID, r.Junction.Label, r.ID))
@@ -110,6 +122,9 @@ func (g *Graph) Match(steps []string) (Path, *Mismatch) {
 		// body leads to it (handled above).
 		if exit.Junction != at.Junction || exit == exit.Junction.Retry {
 			return fail(n, fmt.Sprintf("step %d %q does not fit: the path is at %s (%s)", n, s, at.Junction.ID, at.Junction.Label))
+		}
+		if at.Only != nil && exit != at.Only {
+			return fail(n, fmt.Sprintf("step %d %q does not fit: at %s (%s) the code before it already decided, and the map expects %s", n, s, at.Junction.ID, at.Junction.Label, at.Only.ID))
 		}
 		if j := exit.Junction; j.Kind == Loop && exit.Label == "iterate" {
 			if k, again := iterateAt[j]; again {
@@ -136,4 +151,56 @@ func (g *Graph) Match(steps []string) (Path, *Mismatch) {
 	path.End = at.End
 	path.Compensation = g.compensationOn(path.Steps)
 	return path, nil
+}
+
+// siteID is the ID of a site, "" for the workflow function.
+func siteID(s *Site) string {
+	if s == nil {
+		return ""
+	}
+	return s.ID
+}
+
+func where(site string) string {
+	if site == "" {
+		return "in the workflow function"
+	}
+	return "in helper copy " + site
+}
+
+// splitMarkers takes the enter and exit markers (">S1", "<S1") out of a
+// recorded trace. It returns the steps without them, the site each step was
+// recorded in, and a reason when the markers do not fit each other or the
+// graph (a helper left that was not entered, or never left).
+func (g *Graph) splitMarkers(raw []string) (steps, inSite []string, bad string) {
+	var stack []string
+	known := map[string]bool{}
+	for _, s := range g.sites {
+		known[s.ID] = true
+	}
+	for _, s := range raw {
+		switch {
+		case len(s) > 1 && s[0] == '>':
+			if !known[s[1:]] {
+				return nil, nil, fmt.Sprintf("the trace enters %q, a copy of helper code that is not in %s", s[1:], g.Workflow)
+			}
+			stack = append(stack, s[1:])
+		case len(s) > 1 && s[0] == '<':
+			if len(stack) == 0 || stack[len(stack)-1] != s[1:] {
+				return nil, nil, fmt.Sprintf("the trace leaves %q, which it is not in", s[1:])
+			}
+			stack = stack[:len(stack)-1]
+		default:
+			top := ""
+			if len(stack) > 0 {
+				top = stack[len(stack)-1]
+			}
+			steps = append(steps, s)
+			inSite = append(inSite, top)
+		}
+	}
+	if len(stack) > 0 {
+		return nil, nil, fmt.Sprintf("the trace enters %q and never leaves it", stack[len(stack)-1])
+	}
+	return steps, inSite, ""
 }

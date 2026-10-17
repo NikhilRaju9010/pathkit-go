@@ -14,6 +14,9 @@ const (
 	KindBucket  DefinitionKind = "bucket"
 	KindLabel   DefinitionKind = "label"
 	KindComment DefinitionKind = "comment" // a //pathkit:... comment in the user's code
+	// KindAssumption: something a claim rests on that PathKit does not check
+	// by itself (and turns off when it sees it does not hold).
+	KindAssumption DefinitionKind = "assumption"
 )
 
 // Definition explains one bucket, reason label or comment. This list is
@@ -138,6 +141,16 @@ var definitions = []Definition{
 		"If nothing changed the value, the two answers could not both happen. PathKit cannot tell whether something did, so it does not call the path impossible.", "A value is checked, then a loop that may change it runs, then it is checked again.", "yes",
 		"Check whether the value can change in between. If it cannot, mark the path untestable in the config with that reason; if it can, write a test."),
 
+	label("impossible-type", CannotBeTested, "certain", "A type switch case, or a type assertion, that no type the value can hold takes.",
+		"PathKit followed what is stored in the interface, slice or map (or what Temporal's decoder puts in it), so it knows the list of types it can hold. A case for a type not in the list can never be taken.", "A map that only ever received a string and a *string, then a type switch with case int.", "no",
+		"Nothing, once you have read the proof (pathkit explain) and agree. If a type can reach the value another way that PathKit cannot see, mark the path testable in the config (classification.paths.mark_testable, with a reason)."),
+	label("impossible-nil", CannotBeTested, "certain", "v == nil taken true, for an interface that holds a typed value: even a nil pointer inside an interface makes it non-nil.",
+		"An interface value is nil only when it holds no type at all. A *string that is nil, stored in an interface{}, makes a non-nil interface.", "var v interface{} = note, where note is a *string, then if v == nil.", "no",
+		"Nothing, once you have read the proof (pathkit explain). If the code means \"the pointer is nil\", compare the pointer, not the interface."),
+	label("unknown-input-type", NeedsReview, "likely", "An untested path takes a type switch case on a value PathKit cannot follow, and no test has ever taken that case.",
+		"PathKit does not know where the value comes from, so it does not know which types it can hold. The case may be one the input never has, or one nobody has tried.", "A type switch on a value passed in by a helper, with case int, when no test ever sent an int.", "yes",
+		"Check what the input can hold. If the case can happen, write a test that sends it; if it cannot, mark the path untestable in the config with that reason."),
+
 	// B. loops.
 	label("same-list-loops", CannotBeTested, "certain", "Two loops over the same collection must run the same number of times.",
 		"One loop running zero times while the other runs once can't happen.", "Two range loops over the same slice.", "no", "Nothing."),
@@ -180,6 +193,17 @@ var definitions = []Definition{
 		"A person knows something PathKit can't see.", "mark_untestable with a reason.", "as chosen", "Keep the reason up to date."),
 	label("needs-review", NeedsReview, "likely", "PathKit is not sure, or the label is unknown.",
 		"The safe place for anything unrecognized.", "A custom label with no definition.", "unknown", "Review it."),
+
+	// Assumptions.
+	{Kind: KindAssumption, Name: AssumptionJSON, Meaning: "a value Temporal decodes into an interface{} holds only a string, float64, bool, nil, []interface{} or map[string]interface{}",
+		Why:                  "Temporal's default data converter decodes JSON that way. The claims named impossible-type rest on it for workflow inputs, activity results, signal payloads and SideEffect results that land in an interface{}.",
+		Example:              "A workflow input of type map[string]interface{}: a type switch on one of its values has no int case that can run.",
+		PossibleInProduction: "not applicable", DecidedBy: "PathKit", WhatToDo: "PathKit turns this off by itself when the module sets its own DataConverter (a client or worker option), a payload codec, or a type that is a data converter, payload converter or payload codec, and says so in every report. A decoder that uses json.Number or UseNumber elsewhere does not switch it off: it only changes the values that decoder produces. Values that encoding/json decodes in the workflow itself (json.Unmarshal, or Decode on a decoder that never calls UseNumber) follow from the standard library and need no assumption. To turn it off yourself: classification.assumptions.default_json_converter = \"off\"."},
+
+	{Kind: KindAssumption, Name: AssumptionInterceptor, Meaning: "no workflow interceptor in the module sees the original arguments of an activity, child workflow or signal call, so a slice or map handed to one is not changed by it",
+		Why:                  "The SDK encodes the arguments of workflow.ExecuteActivity, ExecuteChildWorkflow and SignalExternalWorkflow when the call is made, so the callee gets a copy. Only an interceptor, which sees the arguments before that, could keep or change the original. Claims that keep facts about a map or slice across such a call rest on this.",
+		Example:              "m := map[string]interface{}{\"k\": \"x\"}, then ExecuteActivity(ctx, Fetch, m), then a type switch on m[\"k\"]: the int case cannot run, because the activity cannot change m. (ExecuteLocalActivity does not encode its arguments and is never treated this way.)",
+		PossibleInProduction: "not applicable", DecidedBy: "PathKit", WhatToDo: "PathKit turns this off by itself when the module registers a custom interceptor (an Interceptors option, a type built on the SDK's interceptor base types, or an InterceptWorkflow method) and says so in every report. To turn it off yourself: classification.assumptions.no_custom_interceptor = \"off\"."},
 
 	// Comments in the user's code.
 	{Kind: KindComment, Name: "//pathkit:ignore", Meaning: "On an if (same line, or the line above): this if is never a junction. It is NOT the same as //pathkit:untestable.",

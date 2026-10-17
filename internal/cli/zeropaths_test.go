@@ -11,7 +11,7 @@ import (
 func TestZeroPathWarning(t *testing.T) {
 	zp := absPath(t, fixtures+"/zeropaths/...")
 	traces := t.TempDir()
-	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
+	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
 	const headline = "WARNING: PathKit found no decision points to measure in 1 workflow, which has no paths: zeropaths.Spin"
 
 	out, stderr, code := run(t, "analyze", zp)

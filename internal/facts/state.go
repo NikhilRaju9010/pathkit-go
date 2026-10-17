@@ -1,6 +1,7 @@
 package facts
 
 import (
+	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"go/ast"
 	"go/constant"
 	"go/token"
@@ -20,13 +21,19 @@ func (k key) String() string { return k.v.Name() + k.path }
 type origin int
 
 const (
-	oDecl    origin = iota // var x T: the zero value
-	oConst                 // x = <constant>
-	oBranch                // a decision on the path
-	oCommaOk               // v, ok := ...; ok is false, so v is the zero value
-	oCopy                  // y := x
-	oNonNil                // &T{}, new, make, composite literal
-	oNil                   // = nil
+	oDecl       origin = iota // var x T: the zero value
+	oConst                    // x = <constant>
+	oBranch                   // a decision on the path
+	oCommaOk                  // v, ok := ...; ok is false, so v is the zero value
+	oCopy                     // y := x
+	oNonNil                   // &T{}, new, make, composite literal
+	oNil                      // = nil
+	oStore                    // a value of a known type is put in an interface, slice or map
+	oJSON                     // a value decoded by Temporal's default JSON converter
+	oStdJSON                  // a value decoded by encoding/json in this function
+	oTypeAssert               // x.(T) is decided by the types x can hold
+	oElem                     // a value read from a slice or map
+	oLen                      // the length of a slice, map or string
 )
 
 // why is where a fact came from.
@@ -51,13 +58,20 @@ const (
 	dNe
 	dNil
 	dNonNil
+	dTypes      // an interface value holds one of ts (see typeSet)
+	dElem       // the elements of a slice or map hold ts
+	dLenZero    // a slice or map is empty
+	dLenNonZero // a slice or map has an element
+	dKeys       // these constant keys are in the map
 )
 
 // datum is one thing known about one value.
 type datum struct {
-	op  dop
-	val constant.Value
-	why *why
+	op   dop
+	val  constant.Value
+	ts   *typeSet         // dTypes, dElem
+	keys []constant.Value // dKeys
+	why  *why
 	// soft is "" while the fact is trusted. When PathKit has to forget the
 	// value (a loop may change it, its address is taken, ...) the fact
 	// stays here with the reason, only for the possible-correlation check;
@@ -82,6 +96,8 @@ type state struct {
 	seq       int
 	stepsDone int
 	suspect   *Suspect
+	unknown   *Suspect
+	seenLoop  map[*model.Junction]bool
 	// taken records the decisions already walked, for proofs that mention
 	// code a decision skipped.
 	taken []takenStep
@@ -94,7 +110,7 @@ type takenStep struct {
 }
 
 func newState(a *Analyzer) *state {
-	return &state{a: a, d: map[key][]*datum{}, links: map[key]link{}}
+	return &state{a: a, d: map[key][]*datum{}, links: map[key]link{}, seenLoop: map[*model.Junction]bool{}}
 }
 
 func (s *state) newWhy(o origin, pos token.Pos, k key, text func() string, parents ...*why) *why {
@@ -166,6 +182,12 @@ func underPath(p, q string) bool { return p == q || strings.HasPrefix(p, q+".") 
 // add records a fact about k. Facts about a value the engine never trusts
 // (see Analyzer.trackable) are born soft.
 func (s *state) add(k key, d *datum) {
+	switch d.op {
+	case dElem, dLenZero, dLenNonZero, dKeys:
+		if s.a.escapes[k.v] != "" {
+			return // something else can reach its contents
+		}
+	}
 	if !s.a.trackable(k.v) {
 		reason := s.a.untracked[k.v]
 		if reason == "" {
@@ -185,6 +207,12 @@ func (s *state) add(k key, d *datum) {
 			}
 		}
 		s.d[k] = append(keep, d)
+		return
+	case dTypes, dElem, dKeys:
+		s.d[k] = append(withoutOp(s.d[k], d.op), d)
+		return
+	case dLenZero, dLenNonZero:
+		s.d[k] = append(withoutOp(withoutOp(s.d[k], dLenZero), dLenNonZero), d)
 		return
 	case dNe:
 		active := 0

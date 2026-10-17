@@ -164,7 +164,7 @@ func TestHistorySurvivesCleanup(t *testing.T) {
 		t.Fatalf("--clean left %d traces", len(files))
 	}
 	before := readFile(t, hist)
-	writeTrace(t, traces, "again", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
+	writeTrace(t, traces, "again", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
 	for _, args := range [][]string{{"clean", "--traces", traces}, {"clean", "--traces", traces, "--older-than", "1m"}} {
 		if _, stderr, code := run(t, args...); code != ExitOK {
 			t.Fatalf("%v: code=%d %s", args, code, stderr)
@@ -285,7 +285,7 @@ func TestHTMLTruncated(t *testing.T) {
 	rules := absPath(t, fixtures+"/rules/...")
 	dir := t.TempDir()
 	traces := t.TempDir()
-	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
+	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
 	a, r := filepath.Join(dir, "a.html"), filepath.Join(dir, "r.html")
 	if _, stderr, code := run(t, "analyze", rules, "--include", "TwelveIfs", "--summary", "--html="+a); code != ExitOK {
 		t.Fatalf("analyze: %d %s", code, stderr)
@@ -315,7 +315,7 @@ func TestHTMLEscapesUserCode(t *testing.T) {
 	reason := `<script>alert("x")</script> & 'quotes'`
 	cfg := writeConfig(t, `{"packages": [`+jsonString(pkg)+`], "workflows": {"exclude": [{"name": "OtherWorkflow", "reason": `+jsonString(reason)+`}]}}`)
 	traces := t.TempDir()
-	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
+	writeTrace(t, traces, "x", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "x.Y", "status": "complete"})
 	dir := t.TempDir()
 	a, r := filepath.Join(dir, "a.html"), filepath.Join(dir, "r.html")
 
@@ -363,7 +363,7 @@ func TestHTMLEscapesUserCode(t *testing.T) {
 // trace from an older version of the code counts with it, not without.
 func TestAllowStaleConfigKey(t *testing.T) {
 	traces := t.TempDir()
-	writeTrace(t, traces, "old", map[string]any{"schemaVersion": 1, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
+	writeTrace(t, traces, "old", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "orders.OrderWorkflow",
 		"functionHash": "0000000000000000", "status": "complete", "steps": []string{"J1.true"}})
 	on, off := writeConfig(t, `{"allowStale": true}`), writeConfig(t, `{"allowStale": false}`)
 	for _, command := range []string{"coverage", "report"} {

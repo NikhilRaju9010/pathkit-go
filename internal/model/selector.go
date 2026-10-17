@@ -243,12 +243,12 @@ func parentOf(file *ast.File, n ast.Node) ast.Node {
 // go/cfg graph); a return in the callback, or its end, goes on to the
 // code after the Select call (node i+1 of blk).
 func (b *builder) selectorJunction(info *selectorInfo, blk *cfg.Block, i int) Target {
-	if j, ok := b.junctions[info.stmt]; ok {
+	if j, ok := b.junctions[b.key(info.stmt)]; ok {
 		return Target{Junction: j}
 	}
 	j := b.newJunction(info.stmt, Selector, "select (Selector)")
-	j.order = info.adds[0].Pos() // numbered where its exits are set up
-	after := func() Target { return b.roadFrom(blk, i+1) }
+	j.order = b.orderAt(info.adds[0].Pos()) // numbered where its exits are set up
+	after := func(retKind) Target { return b.roadFrom(blk, i+1) }
 	for _, add := range info.adds {
 		lit := ast.Unparen(add.Args[callbackArg[methodName(add)]]).(*ast.FuncLit)
 		e := addExit(j, b.selectorExitLabel(add), lit.Body)
@@ -256,6 +256,7 @@ func (b *builder) selectorJunction(info *selectorInfo, blk *cfg.Block, i int) Ta
 		b.indexLoops(c)
 		for _, cb := range c.Blocks {
 			b.contOf[cb] = after
+			b.siteOf[cb] = b.cur
 		}
 		e.To = b.road(c.Blocks[0])
 	}
