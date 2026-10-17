@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -94,6 +95,10 @@ func runCoverage(cmd *cobra.Command, target string, opt coverageOptions) error {
 	return finish(cmd, "coverage", m, output, output, opt.out, opt.clean, nil)
 }
 
+// maxPrunedJSON is how many pruned groups the JSON lists (the biggest ones);
+// the text and the page give the total.
+const maxPrunedJSON = 100
+
 // The --json shape (schemaVersion 1), documented in SETUP-GUIDE.md.
 type (
 	jsonCount struct {
@@ -162,6 +167,58 @@ type (
 		// Added with the unexplained-trace check; absent when every trace
 		// of the workflow fits a path.
 		UnexplainedTraces []jsonUnexplained `json:"unexplainedTraces,omitempty"`
+		// Added with exact counts and stages. pathCountExact is the exact
+		// number of paths as a decimal string (it can have hundreds of
+		// digits). These keys are there when the workflow has several stages or
+		// more paths than the list holds; prunedGroups when parts of the map were
+		// left out of the list as impossible.
+		PathCountExact string       `json:"pathCountExact,omitempty"`
+		PathsListed    int          `json:"pathsListed,omitempty"`
+		Stages         []jsonStage  `json:"stages,omitempty"`
+		PrunedGroups   []jsonPruned `json:"prunedGroups,omitempty"`
+		// PrunedGroupsTotal is how many groups there are when prunedGroups holds only
+		// the biggest ones.
+		PrunedGroupsTotal int `json:"prunedGroupsTotal,omitempty"`
+		// PrunedScope says what the groups cover: only the part of the map the
+		// list reached, not every impossible part of the map.
+		PrunedScope string     `json:"prunedScope,omitempty"`
+		BranchesAll *jsonCount `json:"branchesAll,omitempty"`
+	}
+	jsonStage struct {
+		Index          int        `json:"index"`
+		Paths          string     `json:"paths"` // exact, a decimal string
+		TooBigToList   bool       `json:"tooBigToList"`
+		Covered        int        `json:"covered"`
+		Testable       int        `json:"testable"`
+		CannotBeTested int        `json:"cannotBeTested"`
+		NeedsReview    int        `json:"needsReview"`
+		Branches       jsonCount  `json:"branches"`
+		Contexts       int        `json:"contexts"`
+		CutOff         bool       `json:"contextsCutOff"`
+		PathList       []jsonSPth `json:"pathList,omitempty"`
+	}
+	jsonSPth struct {
+		ID      string   `json:"id"`
+		Covered bool     `json:"covered"`
+		Traces  int      `json:"traces"`
+		Bucket  string   `json:"bucket"`
+		Label   *string  `json:"label"`
+		End     string   `json:"end"` // how the workflow ends, or "continues" into the next stage
+		Steps   []string `json:"steps"`
+		// Why PathKit put the stage path outside testable, with its proof; absent
+		// for a testable one.
+		Explanation string          `json:"explanation,omitempty"`
+		Proof       []jsonProofStep `json:"proof,omitempty"`
+	}
+	jsonPruned struct {
+		Paths       string          `json:"paths"`
+		Prefix      []string        `json:"prefix"`
+		Bucket      string          `json:"bucket"`
+		Label       *string         `json:"label"`
+		Explanation string          `json:"explanation"`
+		UnderReview bool            `json:"underReview"`
+		Proof       []jsonProofStep `json:"proof,omitempty"`
+		Assumptions []string        `json:"assumptions,omitempty"`
 	}
 	jsonUnexplained struct {
 		StepsID      string   `json:"stepsId"`
@@ -185,6 +242,9 @@ type (
 		Unknown    int `json:"unknownWorkflow"`
 		Unreadable int `json:"unreadable"`
 		Other      int `json:"otherWorkflows"`
+		// Added with exact counts: traces that fit the whole map but run a path
+		// that is not among the listed ones. They are counted, not unmatched.
+		BeyondCap int `json:"beyondCap,omitempty"`
 	}
 	jsonFailUnder struct {
 		Threshold float64 `json:"threshold"`
@@ -204,6 +264,12 @@ type (
 		Classification      jsonClassification `json:"classification"`
 		CoverageBasis       string             `json:"coverageBasis"`
 		ClassificationShown bool               `json:"classificationShown"`
+		// Added with the known-defect label; absent when no path has it.
+		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
+		// Added with the three headline numbers; absent unless a workflow has
+		// more paths than the list holds. The older total, branches and
+		// classification keys keep their meaning: listed paths only.
+		Headline *jsonHeadline `json:"headline,omitempty"`
 		// Added with the CI check; absent when it is off.
 		CI *jsonCI `json:"ci,omitempty"`
 		// With --unmatched only.
@@ -214,6 +280,21 @@ type (
 		// Added with the type facts: assumptions that are off, or that
 		// claims rest on; absent when there is nothing to say.
 		Assumptions []jsonAssumption `json:"assumptions,omitempty"`
+		// Added with the assumptions panel: every assumption, on or off, with
+		// how many claims rest on it; absent when classification is off.
+		AssumptionPanel []jsonAssumption `json:"assumptionPanel,omitempty"`
+	}
+	jsonHeadline struct {
+		// PathCoverage: the workflows whose paths are all listed (testable
+		// figure when classification is on).
+		PathCoverage  jsonCount `json:"pathCoverage"`
+		PathWorkflows int       `json:"pathWorkflows"`
+		// WorkflowsTooBigForPathCoverage is how many workflows are measured by
+		// stage coverage instead.
+		WorkflowsTooBigForPathCoverage int       `json:"workflowsTooBigForPathCoverage"`
+		StageCoverage                  jsonCount `json:"stageCoverage"`
+		StagesTooBigToList             int       `json:"stagesTooBigToList"`
+		BranchCoverage                 jsonCount `json:"branchCoverage"`
 	}
 	jsonAssumption struct {
 		Name   string  `json:"name"`
@@ -245,9 +326,12 @@ type basisInfo struct {
 	basis       coverage.Basis
 	shown       bool // the classification block is printed (see measured.showClass)
 	assumptions []classify.AssumptionStatus
+	panel       []classify.AssumptionStatus
 }
 
-func (m *measured) basisInfo() basisInfo { return basisInfo{m.basis, m.showClass, m.assumptions} }
+func (m *measured) basisInfo() basisInfo {
+	return basisInfo{m.basis, m.showClass, m.assumptions, m.panel}
+}
 
 func classificationJSON(b coverage.Breakdown) jsonClassification {
 	var c jsonClassification
@@ -280,8 +364,13 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 		Total:    count1(res.Covered, res.Paths),
 		Branches: count1(res.BranchesTaken, res.Branches),
 		Traces: jsonTraces{Read: res.Counts.Read, Counted: res.Counts.Counted, Unmatched: res.Counts.Unmatched, Stale: res.Counts.Stale,
-			Incomplete: res.Counts.Incomplete, Excluded: res.Counts.Excluded, Unknown: res.Counts.Unknown, Unreadable: res.Counts.Unreadable, Other: res.Counts.Other},
+			Incomplete: res.Counts.Incomplete, Excluded: res.Counts.Excluded, Unknown: res.Counts.Unknown, Unreadable: res.Counts.Unreadable, Other: res.Counts.Other, BeyondCap: res.Counts.BeyondCap},
 		Classification: classificationJSON(res.Breakdown), CoverageBasis: string(bi.basis), ClassificationShown: bi.shown,
+	}
+	out.BlockedByKnownBugs = render.BlockedByKnownBugs(res)
+	if h, ok := res.Headline(); ok {
+		out.Headline = &jsonHeadline{PathCoverage: count1(h.PathCovered, h.PathTotal), PathWorkflows: h.PathWorkflows, WorkflowsTooBigForPathCoverage: h.TooBig,
+			StageCoverage: count1(h.StageCovered, h.StageTotal), StagesTooBigToList: h.StagesTooBig, BranchCoverage: count1(h.BranchCovered, h.BranchTotal)}
 	}
 	if names := render.CapNames(res); len(names) > 0 {
 		out.PathCap = &jsonPathCap{Limit: model.DefaultMaxPaths, Workflows: names,
@@ -300,6 +389,47 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 				StableID: p.StableID, Bucket: string(p.Class.Bucket), Label: optional(p.Class.Label), Source: string(p.Class.Source),
 				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons, Proof: proofJSON(p.Class.Proof), Assumptions: p.Class.Assumptions})
 		}
+		if render.ShowStages(w) {
+			jw.PathCountExact, jw.PathsListed = w.Exact.String(), len(w.Paths)
+		}
+		if w.Capped {
+			jw.BranchesAll = &jsonCount{Total: w.AllBranches, Covered: w.AllBranchesTaken, Percent: coverage.Percent(w.AllBranchesTaken, w.AllBranches)}
+		}
+		if render.ShowStages(w) {
+			for _, s := range w.Stages {
+				js := jsonStage{Index: s.Index + 1, Paths: s.Count.String(), TooBigToList: s.Big, Covered: s.Covered, Testable: s.Testable, CannotBeTested: s.CannotBeTested,
+					NeedsReview: s.NeedsReview, Branches: count1(s.BranchesTaken, s.Branches), Contexts: s.Contexts, CutOff: s.CutOff}
+				for _, sp := range s.Paths {
+					end := string(sp.Path.End)
+					if sp.Path.Continue {
+						end = "continues"
+					}
+					ids := []string{}
+					for _, st := range sp.Path.Steps {
+						ids = append(ids, st.Exit.ID.String())
+					}
+					jp := jsonSPth{ID: sp.ID, Covered: sp.Covered, Traces: sp.Traces, Bucket: string(sp.Class.Bucket), Label: optional(sp.Class.Label), End: end, Steps: ids}
+					if sp.Class.Bucket != classify.Testable {
+						jp.Explanation, jp.Proof = sp.Class.Explanation, proofJSON(sp.Class.Proof)
+					}
+					js.PathList = append(js.PathList, jp)
+				}
+				jw.Stages = append(jw.Stages, js)
+			}
+		}
+		pruned := append([]coverage.PrunedResult(nil), w.Pruned...)
+		sort.SliceStable(pruned, func(i, k int) bool { return pruned[i].Count.Cmp(pruned[k].Count) > 0 })
+		if len(pruned) > maxPrunedJSON {
+			jw.PrunedGroupsTotal = len(pruned)
+			pruned = pruned[:maxPrunedJSON]
+		}
+		if len(pruned) > 0 {
+			jw.PrunedScope = "the part of the map the list reached"
+		}
+		for _, pg := range pruned {
+			jw.PrunedGroups = append(jw.PrunedGroups, jsonPruned{Paths: pg.Count.String(), Prefix: pg.Prefix, Bucket: string(pg.Class.Bucket), Label: optional(pg.Class.Label),
+				Explanation: pg.Class.Explanation, UnderReview: pg.Unpruned, Proof: proofJSON(pg.Class.Proof), Assumptions: pg.Class.Assumptions})
+		}
 		for _, u := range w.Unexplained {
 			jw.UnexplainedTraces = append(jw.UnexplainedTraces, jsonUnexplained{StepsID: u.StepsID, Steps: u.Steps, Count: u.Count, Mismatch: u.Mismatch,
 				Acknowledged: u.Acknowledged, Reason: optional(u.Reason)})
@@ -316,6 +446,14 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 			ja.Why = &why
 		}
 		out.Assumptions = append(out.Assumptions, ja)
+	}
+	for _, a := range bi.panel {
+		ja := jsonAssumption{Name: a.Name, On: a.On, Claims: a.Claims}
+		if !a.On {
+			why := a.Why
+			ja.Why = &why
+		}
+		out.AssumptionPanel = append(out.AssumptionPanel, ja)
 	}
 	if threshold != nil {
 		c := res.Breakdown.For(bi.basis)

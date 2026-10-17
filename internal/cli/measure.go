@@ -60,6 +60,9 @@ type measured struct {
 	classNotes []string // where the markings came from (classify.Engine.Notes)
 	// assumptions that are off, or that claims rest on (classify.Engine.Assumptions)
 	assumptions []classify.AssumptionStatus
+	// panel is every assumption, on or off, with its claim count
+	// (classify.Engine.AssumptionPanel); every report prints it.
+	panel []classify.AssumptionStatus
 	// customLabels are the config's custom label definitions (the HTML
 	// glossary shows them next to the built-in ones).
 	customLabels []classify.Definition
@@ -75,7 +78,7 @@ func (m *measured) classView() *render.ClassificationView {
 	if !m.showClass {
 		return nil
 	}
-	return &render.ClassificationView{Basis: m.basis, Threshold: m.threshold, Notes: m.classNotes}
+	return &render.ClassificationView{Basis: m.basis, Threshold: m.threshold, Notes: m.classNotes, Panel: m.panel}
 }
 
 // overallThreshold is the --fail-under value for the overall figures
@@ -221,6 +224,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	in := coverage.Input{Workflows: workflows, Excluded: sc.excluded, Others: others, Traces: files, AllowStale: allowStale}
 	if engine != nil {
 		in.Classifier, in.Policy, in.Explained = engine.Classify, engine.Policy(), engine.Explained()
+		in.Listing, in.Plan = engine.Listing, engine.PlanStages
 	}
 	m.res = coverage.Compute(in)
 	if m.res.InternalError != nil {
@@ -262,6 +266,10 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 			truncated[w.Name] = w.Truncated
 		}
 		for _, f := range engine.Findings(measured, truncated) {
+			// "rules check" prints these itself, once, in its own output.
+			if cmdName == "rules check" && isEntryFinding(f) {
+				continue
+			}
 			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, f)
 		}
 		var final []classify.Classification
@@ -271,7 +279,17 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 			}
 		}
 		m.classNotes = append(engine.Notes(final, measured), unexplainedNotes(m.res)...)
+		// A part of the map left out of the list as impossible is one claim,
+		// and it rests on the same assumptions as a listed path would.
+		for _, w := range m.res.Workflows {
+			for _, pg := range w.Pruned {
+				if !pg.Unpruned {
+					final = append(final, pg.Class)
+				}
+			}
+		}
 		m.assumptions = engine.Assumptions(final)
+		m.panel = engine.AssumptionPanel(final)
 		m.customLabels = engine.CustomLabels()
 	}
 	return m, nil
@@ -490,4 +508,10 @@ func unexplainedNotes(res coverage.Result) []string {
 		}
 	}
 	return out
+}
+
+// isEntryFinding says whether a finding of the engine is about a rule or an
+// override that hits no path (stale, or beyond the path cap).
+func isEntryFinding(f string) bool {
+	return strings.Contains(f, "stale rule") || strings.Contains(f, "stale entry") || strings.Contains(f, "matches none of the listed paths")
 }

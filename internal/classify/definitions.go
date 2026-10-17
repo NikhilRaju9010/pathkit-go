@@ -191,10 +191,17 @@ var definitions = []Definition{
 	// F. manual and other.
 	label("manual", "", "person", "Marked by a person, in the config file or with //pathkit:untestable, with a reason.",
 		"A person knows something PathKit can't see.", "mark_untestable with a reason.", "as chosen", "Keep the reason up to date."),
+	label("known-defect", NeedsReview, "person", "A person says a known bug in the code or a service blocks a test from reaching this path.",
+		"The path is real, but a bug stops it from running until the bug is fixed. It stays in needs-review, so it is not hidden; under the default policy it counts in testable coverage like any needs-review path (unclassified_policy).", "A config rule or mark_untestable with label \"known-defect\" and a reason that names the bug.", "yes", "Fix the bug, then remove the entry. If a test runs the path anyway, it becomes testable by itself."),
 	label("needs-review", NeedsReview, "likely", "PathKit is not sure, or the label is unknown.",
 		"The safe place for anything unrecognized.", "A custom label with no definition.", "unknown", "Review it."),
 
 	// Assumptions.
+	{Kind: KindAssumption, Name: AssumptionClosedChannels, Meaning: "Temporal never closes a signal channel while the workflow runs, so a receive that finds the channel closed (more == false) cannot happen",
+		Why:                  "A channel from workflow.GetSignalChannel stays open until the workflow ends. The claims with the label closed-signal-channel (made by the detector of that name) rest on it.",
+		Example:              "ch.Receive(ctx, &v) returning more == false: the branch that handles it has no run that can take it.",
+		PossibleInProduction: "not applicable", DecidedBy: "PathKit", WhatToDo: "Nothing, unless your own code closes a channel it made itself (that is not a signal channel). To stop the claims, turn off the detector named closed-signal-channel (the assumption itself is named closed-signal-channels): classification.detectors.disable, with a reason.",
+	},
 	{Kind: KindAssumption, Name: AssumptionJSON, Meaning: "a value Temporal decodes into an interface{} holds only a string, float64, bool, nil, []interface{} or map[string]interface{}",
 		Why:                  "Temporal's default data converter decodes JSON that way. The claims named impossible-type rest on it for workflow inputs, activity results, signal payloads and SideEffect results that land in an interface{}.",
 		Example:              "A workflow input of type map[string]interface{}: a type switch on one of its values has no int case that can run.",

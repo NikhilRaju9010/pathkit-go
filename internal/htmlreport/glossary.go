@@ -34,7 +34,10 @@ type (
 		Assumptions []assumptionView
 		// Groups are the unknown-input-type paths, by the type switch they take.
 		Groups []groupRow
+		// Terms are the coverage words of the headline, in plain English.
+		Terms []termView
 	}
+	termView       struct{ Name, Meaning string }
 	assumptionView struct {
 		Name, Status, Meaning, Why, WhatToDo string
 		Claims                               int
@@ -88,6 +91,14 @@ func definitionsByName(custom []classify.Definition) (order []classify.Definitio
 	return order, byName
 }
 
+// headlineTerms explain the words of the project headline.
+var headlineTerms = []termView{
+	{"Path coverage", "The share of a workflow's paths that a test ran, counting only the paths a test can run (not the impossible ones). In the headline it covers only the workflows whose paths are all listed (at most 2000 each)."},
+	{"Too big for path coverage", "A workflow with more paths than the list holds. Its listed paths are only the first ones, so a coverage figure over them says little (0 of 2000 listed can hide thousands of paths a test ran). It is measured by stage coverage and branch coverage instead."},
+	{"Stage coverage", "A stage is a stretch of a workflow between two decisions that every path goes through. The paths of the stages multiply into the paths of the workflow, so each stage is small enough to list and cover on its own. Stage coverage is the stage paths a test ran, over the stage paths not shown impossible."},
+	{"Branch coverage", "The share of the exits of decisions that a test took at least once, over the whole map of every workflow."},
+}
+
 func buildGlossary(res coverage.Result, custom []classify.Definition, assumptions []classify.AssumptionStatus) *glossaryView {
 	order, _ := definitionsByName(custom)
 	isCustom := map[string]bool{}
@@ -101,7 +112,7 @@ func buildGlossary(res coverage.Result, custom []classify.Definition, assumption
 	}
 	use := map[string]*usage{}
 	groups := map[string]int{}
-	g := &glossaryView{Version: classify.DefinitionsVersion()}
+	g := &glossaryView{Version: classify.DefinitionsVersion(), Terms: headlineTerms}
 	for wi, w := range res.Workflows {
 		for _, p := range w.Paths {
 			c := p.Class

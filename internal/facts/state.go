@@ -49,6 +49,7 @@ type why struct {
 	early   bool // oBranch: learned from an if whose other side leaves (return, ...)
 	parents []*why
 	atStep  int // path steps done when the fact was created
+	stage   int // the stage it was created in (see state.stage)
 }
 
 type dop int
@@ -95,9 +96,12 @@ type state struct {
 	skips     []span
 	seq       int
 	stepsDone int
-	suspect   *Suspect
-	unknown   *Suspect
-	seenLoop  map[*model.Junction]bool
+	// stage counts the stages the walk has been handed on through (Rebase);
+	// a fact from an earlier stage has no step number to show.
+	stage    int
+	suspect  *Suspect
+	unknown  *Suspect
+	seenLoop map[*model.Junction]bool
 	// taken records the decisions already walked, for proofs that mention
 	// code a decision skipped.
 	taken []takenStep
@@ -115,7 +119,7 @@ func newState(a *Analyzer) *state {
 
 func (s *state) newWhy(o origin, pos token.Pos, k key, text func() string, parents ...*why) *why {
 	s.seq++
-	return &why{seq: s.seq, origin: o, key: k, pos: pos, text: text, parents: parents, atStep: s.stepsDone}
+	return &why{seq: s.seq, origin: o, key: k, pos: pos, text: text, parents: parents, atStep: s.stepsDone, stage: s.stage}
 }
 
 // where returns the file (base name) and line the reason points at.

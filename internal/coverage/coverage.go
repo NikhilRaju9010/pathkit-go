@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -39,6 +40,9 @@ type Workflow struct {
 	Package       string // import path of the workflow's package ("" when unknown)
 	AddedByConfig bool
 }
+
+// Input fields that decide how a workflow is cut up are in Input (Listing,
+// Plan); a nil one means a plain listing and plain stages.
 
 // TraceFile is one trace file: its content, or why it couldn't be read.
 type TraceFile struct {
@@ -62,6 +66,12 @@ type Input struct {
 	// Explained are the traces the config accepts as understood (by
 	// workflow and steps id). Only used when Classifier is set.
 	Explained []scope.ExplainedTrace
+	// Listing gives a workflow's path list (with the impossible parts of a
+	// workflow over the cap left out and counted); nil means a plain listing.
+	Listing func(workflow string, g *model.Graph) *classify.Listing
+	// Plan gives a workflow's stages and the class of every stage path; nil
+	// means plain stages, every stage path testable.
+	Plan func(workflow string, g *model.Graph) *classify.StagePlan
 }
 
 // Unexplained is a group of trace files of one workflow that fit no path
@@ -121,6 +131,60 @@ type WorkflowResult struct {
 	// unmatched-trace report, --unmatched); Unexplained stays empty with
 	// classification off, so that output does not change.
 	Unmatched []Unexplained
+
+	// Exact is the exact number of paths the workflow has; Capped says the list
+	// above holds fewer (the cap, and the parts left out as pruned groups).
+	Exact  *big.Int
+	Capped bool
+	// BeyondCap is how many counted traces ran a path that is not in the list.
+	BeyondCap int
+	// Pruned are the parts of the map left out of the list because the engine
+	// shows them impossible, with their exact counts.
+	Pruned []PrunedResult
+	// Stages is the workflow cut into stages, with the stage paths a test ran.
+	Stages []StageResult
+	// Ran holds every prefix of every path a counted trace ran, as the exit
+	// ids joined by newlines (a path beyond the list too); empty when no test
+	// ran the workflow. MissedGroups reads it.
+	Ran map[string]bool
+	// AllBranches and AllBranchesTaken count the exits of the whole map (the
+	// same as Branches when the list is whole).
+	AllBranches, AllBranchesTaken int
+}
+
+// PrunedResult is a part of the map left out of the path list.
+type PrunedResult struct {
+	Count *big.Int
+	// Prefix is the exits that lead to the impossible one (the last).
+	Prefix []string
+	Class  classify.Classification
+	// Unpruned: a trace ran through it, so the proof is not trusted and the
+	// paths count as needs-review.
+	Unpruned bool
+}
+
+// StageResult is one stage of a workflow and which of its paths a test ran.
+type StageResult struct {
+	Index    int
+	Count    *big.Int
+	Big      bool // too many paths to list: branch coverage only
+	Paths    []StagePathResult
+	Contexts int
+	CutOff   bool
+	// Branches counts the exits of the stage's decisions, and how many a test took.
+	Branches, BranchesTaken int
+	// Covered, and the buckets of the stage paths (Testable counts needs-review
+	// ones too, like testable coverage under the default policy).
+	Covered, Testable, CannotBeTested, NeedsReview int
+}
+
+// StagePathResult is one stage path and whether a test ran it.
+type StagePathResult struct {
+	ID      string
+	Path    model.StagePath
+	Covered bool
+	Traces  int
+	Class   classify.Classification
 }
 
 // Warning is one trace that didn't count, and why.
@@ -139,6 +203,10 @@ type Warning struct {
 type Counts struct {
 	Read, Counted, Unmatched, Stale, Incomplete, Excluded, Unknown, Unreadable int
 	Other                                                                      int // for in-scope workflows not picked with --function
+	// BeyondCap counts traces that fit the whole map but run a path that is not
+	// among the listed ones (the workflow has more paths than the cap lists).
+	// They are counted like any other trace; none is unmatched.
+	BeyondCap int
 }
 
 // Result is a whole coverage run.
@@ -152,6 +220,10 @@ type Result struct {
 	Warnings      []Warning
 	Counts        Counts
 	Breakdown     Breakdown
+	// PrunedPaths is how many paths were left out of the lists because the
+	// fact engine shows them impossible (counted exactly, kept as groups), over
+	// all workflows.
+	PrunedPaths *big.Int
 	// InternalError is set when PathKit's own consistency check failed (a
 	// path a test ran is not testable). It never happens in a correct
 	// build; the command that called Compute stops with this message
@@ -299,16 +371,47 @@ func Compute(in Input) Result {
 		branches map[string]bool // exit ID -> taken
 		unexp    map[string]*Unexplained
 		unexpIDs []string
+
+		listing  *classify.Listing
+		plan     *classify.StagePlan
+		capped   bool                   // the workflow has more paths than the list holds
+		allExits map[string]*model.Exit // every exit some path takes
+		seen     map[string]bool        // every exit ID some counted trace recorded
+		hits     []map[string]int       // per stage: traces per stage path key
+		unpruned map[int]bool           // pruned groups some trace ran through
+		beyond   int                    // traces that fit the map but not the list
+		ran      map[string]bool        // every prefix of every path a counted trace ran (a path beyond the list too)
 	}
 	states := map[string]*state{}
 	var order []*state
 	for _, w := range in.Workflows {
-		st := &state{wf: w, paths: w.Graph.Paths(model.DefaultMaxPaths), byKey: map[string]int{}, branches: map[string]bool{}, unexp: map[string]*Unexplained{}}
+		lst := classify.PlainListing(w.Graph)
+		if in.Listing != nil {
+			lst = in.Listing(w.Name, w.Graph)
+		}
+		plan := classify.PlainPlan(w.Graph, model.DefaultStageMaxPaths)
+		if in.Plan != nil {
+			plan = in.Plan(w.Name, w.Graph)
+		}
+		st := &state{wf: w, paths: lst.PathList, listing: lst, plan: plan, byKey: map[string]int{}, branches: map[string]bool{}, unexp: map[string]*Unexplained{},
+			seen: map[string]bool{}, ran: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
+		for k := range st.hits {
+			st.hits[k] = map[string]int{}
+		}
+		pruned := new(big.Int)
+		for _, pg := range lst.Pruned {
+			pruned.Add(pruned, pg.Group.Count)
+		}
+		st.capped = lst.Exact.Cmp(new(big.Int).Add(big.NewInt(int64(len(st.paths.List))), pruned)) > 0
 		for i, p := range st.paths.List {
 			st.byKey[p.Key()] = i
 			for _, s := range p.Steps {
 				st.branches[s.Exit.ID.String()] = false
 			}
+		}
+		st.allExits = map[string]*model.Exit{}
+		for _, e := range w.Graph.ReachableExits() {
+			st.allExits[e.ID.String()] = e
 		}
 		st.traces = make([]int, len(st.paths.List))
 		st.stale = make([]bool, len(st.paths.List))
@@ -424,19 +527,46 @@ func Compute(in Input) Result {
 			continue
 		}
 		i, ok := st.byKey[out.Path.Key()]
-		if !ok { // a real path beyond the listing cap
-			res.Counts.Unmatched++
-			warn(tf, trace.Unmatched, "trace %s (%s) took a path beyond the first %d listed paths; the workflow is over the path cap, so split it into smaller workflows", name, f.Workflow, model.DefaultMaxPaths)
-			continue
+		if !ok {
+			// It fits the whole map. If it runs through a part the engine proved
+			// impossible, the proof was wrong: list the path, and warn.
+			if gi := prunedBy(st.listing, out.Path); gi >= 0 {
+				st.unpruned[gi] = true
+				res.Warnings = append(res.Warnings, Warning{File: filepath.Base(tf.Path), Workflow: f.Workflow, Kind: "classification",
+					Message: fmt.Sprintf("trace %s (%s) ran a path inside a part of the map that PathKit had proved impossible (%s); that proof is not trusted: the %s paths in that part of the map are needs-review, and the path the trace ran is listed", name, f.Workflow, st.listing.Pruned[gi].Class.Explanation, st.listing.Pruned[gi].Group.Count)})
+				st.paths.List = append(st.paths.List, out.Path)
+				st.traces = append(st.traces, 0)
+				st.stale = append(st.stale, false)
+				i = len(st.paths.List) - 1
+				st.byKey[out.Path.Key()] = i
+				ok = true
+			}
 		}
 		res.Counts.Counted++
-		st.traces[i]++
-		if stale {
-			st.stale[i] = true
+		prefix := ""
+		for _, s := range out.Path.Steps {
+			prefix += s.Exit.ID.String() + "\n"
+			st.ran[prefix] = true
+		}
+		st.ran[""] = true
+		if !ok { // a path of a workflow with more paths than the list holds
+			res.Counts.BeyondCap++
+			st.beyond++
+		} else {
+			st.traces[i]++
+			if stale {
+				st.stale[i] = true
+			}
 		}
 		for _, id := range f.Steps { // raw steps, before loop folding
+			st.seen[id] = true
 			if _, onPath := st.branches[id]; onPath {
 				st.branches[id] = true
+			}
+		}
+		for _, pc := range st.wf.Graph.StagePieces(out.Path, st.plan.Stages) {
+			if pc.Stage < len(st.hits) {
+				st.hits[pc.Stage][pc.Key()]++
 			}
 		}
 	}
@@ -471,6 +601,8 @@ func Compute(in Input) Result {
 		}
 		wr := WorkflowResult{Name: st.wf.Name, File: st.wf.File, AddedByConfig: st.wf.AddedByConfig, Truncated: st.paths.Truncated, Branches: len(st.branches)}
 		wr.Breakdown.Policy = policy
+		wr.Exact, wr.Capped, wr.BeyondCap = st.listing.Exact, st.capped, st.beyond
+		wr.Ran = st.ran
 		for i, p := range st.paths.List {
 			pr := PathResult{Number: i + 1, Path: p, Covered: st.traces[i] > 0, Traces: st.traces[i], StaleTrace: st.stale[i], StableID: p.StableID(), Class: classifier(st.wf.Name, p)}
 			if pr.Class.Bucket == "" {
@@ -536,6 +668,21 @@ func Compute(in Input) Result {
 				msg += fmt.Sprintf("; %s marked by a person %s kept", plural(manual, "path"), map[bool]string{true: "is", false: "are"}[manual == 1])
 			}
 			res.Warnings = append(res.Warnings, Warning{Workflow: st.wf.Name, Kind: "classification", Message: msg})
+		}
+		finishStages(&wr, st.plan, st.hits, st.seen, st.allExits)
+		for gi, pg := range st.listing.Pruned {
+			pr := PrunedResult{Count: pg.Group.Count, Class: pg.Class, Unpruned: st.unpruned[gi]}
+			for _, s := range pg.Group.Prefix {
+				pr.Prefix = append(pr.Prefix, s.Exit.ID.String())
+			}
+			if pr.Unpruned {
+				pr.Class = classify.DefaultTestable()
+				pr.Class.Bucket, pr.Class.Label, pr.Class.Confidence, pr.Class.PossibleInProduction = classify.NeedsReview, "model-limit", classify.Likely, true
+				pr.Class.Explanation = "A test ran a path inside this part of the map, so the proof that it is impossible is not trusted: " + pg.Class.Explanation
+			} else {
+				res.PrunedPaths = new(big.Int).Add(orZero(res.PrunedPaths), pg.Group.Count)
+			}
+			wr.Pruned = append(wr.Pruned, pr)
 		}
 		res.Workflows = append(res.Workflows, wr)
 		res.Breakdown.merge(wr.Breakdown)
@@ -630,4 +777,100 @@ func distrustWhy(c classify.Classification, traces []*Unexplained) string {
 		where = fmt.Sprintf("; the claim rests on step %d, and the map stops fitting at step %d", uses, first)
 	}
 	return fmt.Sprintf("this workflow has %s that fit%s no path (%s)%s", plural(count, "trace"), map[bool]string{true: "s", false: ""}[count == 1], strings.Join(ids, ", "), where)
+}
+
+// prunedBy finds the pruned group a path runs through, or -1.
+func prunedBy(l *classify.Listing, p model.Path) int {
+	for gi, pg := range l.Pruned {
+		if len(p.Steps) < len(pg.Group.Prefix) {
+			continue
+		}
+		match := true
+		for i, s := range pg.Group.Prefix {
+			if p.Steps[i].Exit != s.Exit {
+				match = false
+				break
+			}
+		}
+		if match {
+			return gi
+		}
+	}
+	return -1
+}
+
+func orZero(n *big.Int) *big.Int {
+	if n == nil {
+		return new(big.Int)
+	}
+	return n
+}
+
+// finishStages fills in the stage results of a workflow: which stage paths a
+// test ran (hits are the traces per stage path key), and how many exits of
+// each stage a trace took (seen are the exit IDs recorded; allExits the exits
+// some path takes).
+func finishStages(wr *WorkflowResult, plan *classify.StagePlan, hits []map[string]int, seen map[string]bool, allExits map[string]*model.Exit) {
+	taken := 0
+	for id := range allExits {
+		if seen[id] {
+			taken++
+		}
+	}
+	wr.AllBranches, wr.AllBranchesTaken = len(allExits), taken
+	for k, stg := range plan.Stages {
+		sr := StageResult{Index: k, Count: stg.Count, Big: stg.Big, Contexts: plan.Contexts[k], CutOff: plan.CutOff[k]}
+		inStage := map[*model.Junction]bool{}
+		for _, j := range stg.Junctions {
+			inStage[j] = true
+		}
+		for id, e := range allExits {
+			if inStage[e.Junction] {
+				sr.Branches++
+				if seen[id] {
+					sr.BranchesTaken++
+				}
+			}
+		}
+		for _, sc := range plan.Classes[k] {
+			pr := StagePathResult{ID: sc.Path.StageID(), Path: sc.Path, Class: sc.Class, Traces: hits[k][sc.Path.Key()]}
+			pr.Covered = pr.Traces > 0
+			if pr.Covered && sc.Class.Bucket != classify.Testable {
+				pr.Class = classify.DefaultTestable() // a real run proves it possible
+			}
+			switch pr.Class.Bucket {
+			case classify.CannotBeTested:
+				sr.CannotBeTested++
+			case classify.NeedsReview:
+				sr.NeedsReview++
+				sr.Testable++
+			default:
+				sr.Testable++
+			}
+			if pr.Covered {
+				sr.Covered++
+			}
+			sr.Paths = append(sr.Paths, pr)
+		}
+		wr.Stages = append(wr.Stages, sr)
+	}
+}
+
+// StageTotals counts, over every workflow, the stage paths a test ran and the
+// ones a test can run (not shown impossible), leaving out the stages that are
+// too big to list.
+func StageTotals(res Result) (covered, total int) {
+	for _, w := range res.Workflows {
+		if !w.Capped && len(w.Pruned) == 0 {
+			continue // all its paths are listed: the path numbers say it
+		}
+		for _, s := range w.Stages {
+			if s.Big {
+				continue
+			}
+			covered += s.Covered
+			total += len(s.Paths) - s.CannotBeTested
+		}
+	}
+	return covered, total
 }

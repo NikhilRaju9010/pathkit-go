@@ -202,21 +202,17 @@ func TestMatchWithHelperMarkers(t *testing.T) {
 	}
 }
 
-// Following the helpers of a workflow would pass the path cap: they are not
-// followed there, and the graph says so. A workflow that stays under the cap
-// says nothing.
-func TestHelpersNotFollowedPastThePathCap(t *testing.T) {
+// A workflow whose helpers give it far more paths than the path cap still
+// follows them: the count is exact, and the listing is what is cut.
+func TestHelpersAreFollowedPastThePathCap(t *testing.T) {
 	g := helperGraph(t, "Explosion")
-	if len(g.Sites()) != 0 || g.UsesHelpers() {
-		t.Errorf("%d copies of helper code, want none", len(g.Sites()))
+	if len(g.Sites()) != 11 {
+		t.Errorf("%d copies of helper code, want 11 (one per call)", len(g.Sites()))
 	}
-	if note := g.HelperNote(); !strings.Contains(note, "helpers.Explosion") || !strings.Contains(note, "not followed") || !strings.Contains(note, "path cap") {
-		t.Errorf("note %q does not say that helpers are not followed because of the path cap", note)
+	if got := g.PathCount().String(); got != "2048" {
+		t.Errorf("PathCount = %s, want 2048 (2 to the 11th)", got)
 	}
-	if ps := g.Paths(model.DefaultMaxPaths); ps.Truncated || len(ps.List) != 1 {
-		t.Errorf("%d paths (truncated %v), want the one path with each call as a step", len(ps.List), ps.Truncated)
-	}
-	if note := helperGraph(t, "OneHelper").HelperNote(); note != "" {
-		t.Errorf("a workflow under the cap has the note %q", note)
+	if ps := g.Paths(model.DefaultMaxPaths); !ps.Truncated || len(ps.List) != model.DefaultMaxPaths {
+		t.Errorf("%d paths listed (truncated %v), want the first %d", len(ps.List), ps.Truncated, model.DefaultMaxPaths)
 	}
 }

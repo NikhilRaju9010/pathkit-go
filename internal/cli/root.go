@@ -4,6 +4,7 @@ package cli
 
 import (
 	"io"
+	"strings"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/version"
 	"github.com/spf13/cobra"
@@ -39,7 +40,7 @@ func newRootCommand() *cobra.Command {
 	root.SetVersionTemplate("{{.Version}}\n")
 
 	root.AddCommand(newAnalyzeCommand(), newTestCommand(), newTracesCommand(), newCoverageCommand(), newReportCommand(),
-		newCleanCommand(), newPrepareCommand(), newExplainCommand())
+		newCleanCommand(), newPrepareCommand(), newExplainCommand(), newRulesCommand(), newSuggestCommand())
 	return root
 }
 
@@ -50,5 +51,5 @@ func subcommandName(root, cmd *cobra.Command) string {
 	if cmd == nil || cmd == root {
 		return ""
 	}
-	return cmd.Name()
+	return strings.TrimPrefix(cmd.CommandPath(), root.Name()+" ")
 }

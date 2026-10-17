@@ -1,8 +1,45 @@
 # Changelog
 
-All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is "Unreleased". The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
+All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is part of the version being prepared, v0.2.0 (not tagged). The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
 
-## Unreleased
+## v0.2.0 (not tagged yet)
+
+The next version collects everything below; nothing is tagged yet.
+
+### Changed: headline numbers and JSON key style
+
+- **Three headline numbers** (text, `--summary`, `coverage`, HTML) when a workflow is over the 2000-path cap: path coverage over the workflows under the cap, stage coverage over the ones over it, branch coverage over all (whole map). Listed-path coverage of a big workflow is no longer in the headline. Without such a workflow nothing changes. New JSON key `headline`; every existing key keeps its value and meaning (listed paths only).
+- **JSON key names.** Output keys added in this version were written in snake_case; the keys of earlier versions are camelCase, so they were renamed to match (only unreleased keys, no earlier key changed): `path_count_exact`→`pathCountExact`, `paths_listed`→`pathsListed`, `pruned_groups`→`prunedGroups`, `pruned_groups_total`→`prunedGroupsTotal`, `pruned_scope`→`prunedScope`, `branches_all`→`branchesAll`, and in each `stages` entry `too_big_to_list`→`tooBigToList`, `cannot_be_tested`→`cannotBeTested`, `needs_review`→`needsReview`, `contexts_cut_off`→`contextsCutOff`, `path_list`→`pathList`, in each pruned group `under_review`→`underReview`, and `ci.stage_floor`→`ci.stageFloor`. Config-file keys stay snake_case, as before (`stage_floor`, `max_paths`, `max_contexts`).
+- `rules check` no longer prints a stale rule twice.
+
+### Added: review tools
+
+- **Missed paths by first untested step.** `pathkit report --groups` groups the testable paths no test ran by the first step no test took, biggest group first, each with file and line and how to cover it. The JSON has `missedGroups` (with `--groups`), the HTML report has a section.
+- **`pathkit rules check`** shows how many paths every rule, override, comment and explained trace hits. It refuses (exit 1) a rule, untestable override or comment that hits a path a test ran, and warns about entries that hit nothing or overlap.
+- **`pathkit suggest`** drafts config rules for the needs-review paths. Every draft has the label and the reason `TODO`; the config now refuses `TODO` in rules and overrides too.
+- **Label `known-defect`** (needs-review), set only by a person in a rule or `mark_untestable`: the path can happen, a known bug blocks it. The summary says "Blocked by known bugs: N" (`blockedByKnownBugs` in the JSON). This closes gap (h) of the shape fixtures.
+- **Assumptions panel** in every report format: `closed-signal-channels`, `default-json-converter`, `no-custom-interceptor`, on or off, with the number of claims that rest on each (`assumptionPanel` in the JSON).
+- **Label guide.** SETUP-GUIDE.md has a section on labels that look alike (no label was renamed); a test fails when a label is missing from the guide.
+- **Nightly workflow** `.github/workflows/nightly.yml` runs the soundness test with 10,000 programs on Linux. The normal CI workflow is unchanged.
+
+### Changed (stage view)
+
+- Stage numbers print only for a workflow whose paths are not all listed; the `branches` total of such a workflow is again the listed exits (`branchesAll` is the whole map).
+- Facts across stages: once a set of incoming states was cut at the limit, later stages are judged as cut too (a reviewer found the flag was forgotten after one stage).
+- The `report_orders.html` golden gained the missed-paths section (new section only).
+
+### Added: big workflows (exact counts, stages, pruning)
+
+- **Exact path counts.** Every workflow's number of paths is counted exactly (up to hundreds of digits) without listing them. Reports show "Exact paths: N (2000 listed; path coverage is incomplete)" instead of a silent cap.
+- **Stages.** A workflow is cut at the decisions every path past them goes through, and the stages are merged up to `classification.stages.max_paths` (256) paths. Reports show stage coverage and branch coverage; a stage too big on its own falls back to branch coverage. Stage path ids look like `g2:3fa94c0d17ab`. The HTML report has a Stages view. `classification.ci.stage_floor` is a floor for stage coverage.
+- **Facts across stages.** A stage is checked from every different state the stages before it can leave, at most `classification.engine.max_contexts` (16): impossible in every one is cannot-be-tested, possible in one is testable, cut off at the limit is needs-review.
+- **Traces beyond the list** are counted, not unmatched (`traces.beyondCap` in the JSON), and cover their stage paths.
+- **Pruning.** For a workflow with more paths than the list holds, the parts the fact engine shows impossible are left out of the list and counted as groups with their proofs, so the 2000 listed paths can be taken. A trace that runs through such a part un-prunes it, warns, and moves its claims to needs-review. Listed paths keep their stable ids.
+- **Helpers are always followed.** The milestone-4 fallback that kept helper calls as one step in a workflow that would pass the cap is gone; the path list is capped, the counts, stages and claims use the whole map.
+- **New JSON keys only:** `pathCountExact`, `pathsListed`, `stages`, `prunedGroups`, `prunedGroupsTotal`, `prunedScope`, `branchesAll` per workflow (only when it has more paths than the list holds, or parts left out as impossible; a workflow whose paths are all listed prints as before) and `traces.beyondCap`.
+- **Wording changed (on purpose):** the path-cap warning and its JSON `pathCapWarning.message` no longer say the capped paths are "not counted" or that coverage is a "lower bound"; both are now wrong. The headline is the same. The stderr note "helper functions are not followed" is gone with the fallback.
+- **Tests:** fixtures `bigflow` (24 decisions in a row; early exits; pruning; facts across stages with one, several and too many states), a capped workflow with helpers in `helperrun`, counts checked against the listing everywhere, stage and pruning checks in the soundness test (small stages, few states, small cap).
+- **Page script:** the two `.sort()` calls have explicit compare functions, the smoke test reads the page from standard input, and the page golden holds a marker instead of the embedded script.
 
 ### Added: path classification
 
@@ -32,7 +69,7 @@ Some paths can never run (a loop the code always enters, the same value tested t
 
 ### Added: helper functions and local distrust
 
-- **Helper functions are followed.** A function or method of the workflow's own package that calls the Temporal SDK (or calls one that does) becomes part of the workflow's map, one copy per call, up to three helpers deep: its activities, timers, branches, loops and error checks are steps of the workflow, printed `[in name]`. The error check after a call is a real decision with only the exit the helper's `return` allows; a helper whose errors PathKit cannot follow gives an *unknown* error (no longer "no error"). This fixes the old limit "an error from your own helper function fits no path" for these helpers. If following the helpers would give a workflow more paths than the path cap lists (2000), that workflow keeps each helper call as one step and a warning says so. Helpers in other packages, calls through interfaces or function values, calls inside bigger expressions, `go`/`defer` calls, and helpers with `goto`, `select`, a selector or type parameters are still one step (LIMITATIONS.md).
+- **Helper functions are followed.** A function or method of the workflow's own package that calls the Temporal SDK (or calls one that does) becomes part of the workflow's map, one copy per call, up to three helpers deep: its activities, timers, branches, loops and error checks are steps of the workflow, printed `[in name]`. The error check after a call is a real decision with only the exit the helper's `return` allows; a helper whose errors PathKit cannot follow gives an *unknown* error (no longer "no error"). This fixes the old limit "an error from your own helper function fits no path" for these helpers. Helpers in other packages, calls through interfaces or function values, calls inside bigger expressions, `go`/`defer` calls, and helpers with `goto`, `select`, a selector or type parameters are still one step (LIMITATIONS.md).
 - **Changed output, only for workflows that call such helpers:** their paths, `J` numbers, stable ids, function hash and counts. Every workflow that calls no helper that touches the Temporal API is unchanged, except that its traces must be recorded again (trace format 2). A saved `stable_id` that vanished is reported with the paths that replace it.
 - **Trace format 2.** `pathkit test` also marks up the helper code and records `>S1` / `<S1` markers around a helper's steps. Traces from an older PathKit are refused with one message: "traces are from an older PathKit ... re-run `pathkit test`".
 - **Local distrust of unmatched traces.** A trace that fits no path used to put every detector and rule claim of its workflow under review. Now only the claims that rest on the step where the trace leaves the map, or a later one, go under review; a claim whose reasoning stays before it keeps its label. The `fits no path` warning prints a ready-made `classification.explained_traces` entry with `"reason": "TODO"`, and the config refuses a reason of `TODO` (a config that already used `TODO` as a reason must change it). A function that is itself a workflow is not followed as a helper: it has a map of its own.

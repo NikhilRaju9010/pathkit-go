@@ -49,6 +49,7 @@ type ciState struct {
 	write        bool
 	floor        *float64
 	floorFrom    string
+	stageFloor   *float64
 	untested     []baseline.Finding
 	review       []baseline.Finding
 	lost         []baseline.Finding
@@ -83,6 +84,9 @@ func prepareCI(cmd *cobra.Command, opt ciOptions, sc *scoped, sf scopeFlags, fun
 	st := &ciState{write: opt.writeBaseline, allowLost: opt.allowLostTests}
 	if ci.FailUnderTestable != nil {
 		st.floor, st.floorFrom = ci.FailUnderTestable, cfg.Path
+	}
+	if ci.StageFloor != nil {
+		st.stageFloor, st.floorFrom = ci.StageFloor, cfg.Path
 	}
 	switch {
 	case fl.Changed("baseline"):
@@ -122,7 +126,7 @@ func prepareCI(cmd *cobra.Command, opt ciOptions, sc *scoped, sf scopeFlags, fun
 	if opt.allowLostTests && st.write {
 		return nil, userError("--allow-lost-tests has no effect with --write-baseline (nothing is checked while the baseline is written)")
 	}
-	if st.baselinePath == "" && st.floor == nil {
+	if st.baselinePath == "" && st.floor == nil && st.stageFloor == nil {
 		return nil, nil
 	}
 	return st, nil
@@ -163,6 +167,26 @@ func (st *ciState) failures(res coverage.Result) [][]string {
 		c := res.Breakdown.TestableCoverage()
 		if v := coverage.Percent(c.Covered, c.Paths); v < *st.floor {
 			out = append(out, []string{fmt.Sprintf("testable coverage %s is below classification.ci.fail_under_testable %s (in %s)", render.Pct(v, st.floor), render.Threshold(*st.floor), st.floorFrom)})
+		}
+	}
+	if st.stageFloor != nil {
+		covered, total := coverage.StageTotals(res)
+		bigStages := 0
+		for _, w := range res.Workflows {
+			if render.ShowStages(w) {
+				_, _, b := render.StageCoverage(w)
+				bigStages += b
+			}
+		}
+		left := ""
+		if bigStages > 0 {
+			left = fmt.Sprintf("; %s too big to list are not in this number", count(bigStages, "stage"))
+		}
+		switch v := coverage.Percent(covered, total); {
+		case total == 0:
+			out = append(out, []string{fmt.Sprintf("classification.ci.stage_floor %s (in %s) cannot be checked: no stage path is listed%s", render.Threshold(*st.stageFloor), st.floorFrom, left)})
+		case v < *st.stageFloor:
+			out = append(out, []string{fmt.Sprintf("stage coverage %s (%d of %d stage paths%s) is below classification.ci.stage_floor %s (in %s)", render.Pct(v, st.stageFloor), covered, total, left, render.Threshold(*st.stageFloor), st.floorFrom)})
 		}
 	}
 	text := pathTexts(res)
@@ -232,6 +256,7 @@ type (
 		Baseline       *string         `json:"baseline"`
 		BaselineMode   string          `json:"baselineMode"` // "check", "write" or "none"
 		Floor          *jsonCIFloor    `json:"floor"`
+		StageFloor     *jsonCIFloor    `json:"stageFloor,omitempty"`
 		NewUntested    []jsonCIFinding `json:"newUntested"`
 		NewNeedsReview []jsonCIFinding `json:"newNeedsReview"`
 		LostTests      []jsonCIFinding `json:"lostTests"`
@@ -265,6 +290,11 @@ func (st *ciState) json(res coverage.Result) *jsonCI {
 		c := res.Breakdown.TestableCoverage()
 		out.Floor = &jsonCIFloor{Threshold: *st.floor, Passed: coverage.Percent(c.Covered, c.Paths) >= *st.floor}
 		out.Passed = out.Floor.Passed
+	}
+	if st.stageFloor != nil {
+		covered, total := coverage.StageTotals(res)
+		out.StageFloor = &jsonCIFloor{Threshold: *st.stageFloor, Passed: coverage.Percent(covered, total) >= *st.stageFloor}
+		out.Passed = out.Passed && out.StageFloor.Passed
 	}
 	text := pathTexts(res)
 	conv := func(fs []baseline.Finding) []jsonCIFinding {

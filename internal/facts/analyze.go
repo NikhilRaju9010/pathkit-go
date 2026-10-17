@@ -20,27 +20,13 @@ func (a *Analyzer) Analyze(p model.Path) Result {
 	if a.off != "" || len(p.Steps) == 0 {
 		return Result{}
 	}
-	s := newState(a)
-	s.initParams()
-	s.run(a.g.Start.Nodes)
-	for i, st := range p.Steps {
-		step := i + 1
-		var c *Claim
-		switch st.Junction.Kind {
-		case model.PlainIf:
-			c = s.ifStep(step, st.Junction, st.Exit)
-		case model.Loop:
-			c = s.loopStep(step, st.Junction, st.Exit)
-		case model.Switch:
-			c = s.switchStep(step, st.Junction, st.Exit)
+	w := a.NewWalk()
+	for _, st := range p.Steps {
+		if c := w.Step(st); c != nil {
+			return Result{Claim: c, Suspect: w.s.suspect, Unknown: w.s.unknown}
 		}
-		if c != nil {
-			return Result{Claim: c, Suspect: s.suspect, Unknown: s.unknown}
-		}
-		s.stepsDone = step
-		s.run(st.Exit.To.Nodes)
 	}
-	return Result{Suspect: s.suspect, Unknown: s.unknown}
+	return w.Result()
 }
 
 // loopStep handles a step on a loop. Leaving a loop at its very first test is
@@ -340,7 +326,11 @@ func (s *state) buildClaim(c claimSpec) *Claim {
 			assumes = true
 		}
 		file, line := s.a.where(w)
-		items = append(items, item{when, w.seq, ProofStep{Step: w.step, File: file, Line: line, Text: s.sentence(w)}})
+		shown := w.step
+		if w.stage != s.stage {
+			shown = 0 // learned in an earlier stage: its step number belongs to that stage
+		}
+		items = append(items, item{when, w.seq, ProofStep{Step: shown, File: file, Line: line, Text: s.sentence(w)}})
 	}
 	// A decision between the facts and the claim that skipped code which
 	// would have changed one of the values: that is why the fact still holds.

@@ -18,8 +18,8 @@ func TestHelperTracesMatch(t *testing.T) {
 		t.Fatalf("pathkit test: exit %d\n%s\n%s", code, stdout, stderr)
 	}
 	files, _ := filepath.Glob(filepath.Join(traces, "*.trace.json"))
-	if len(files) != 21 {
-		t.Fatalf("%d traces, want one for each of the 21 tests", len(files))
+	if len(files) != 23 {
+		t.Fatalf("%d traces, want one for each of the 23 tests", len(files))
 	}
 	markers := 0
 	for _, f := range files {
@@ -63,22 +63,28 @@ func TestHelperTracesMatch(t *testing.T) {
 			PathList []struct {
 				Covered bool `json:"covered"`
 			} `json:"pathList"`
+			Exact  string `json:"pathCountExact"`
+			Stages []struct {
+				Covered int `json:"covered"`
+			} `json:"stages"`
 		} `json:"workflows"`
 		Traces struct {
-			Counted, Unmatched int
+			Counted, Unmatched, BeyondCap int
 		} `json:"traces"`
 	}
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.Traces.Counted != 21 || r.Traces.Unmatched != 0 {
-		t.Errorf("traces counted %d, unmatched %d; want 21 and 0\n%s", r.Traces.Counted, r.Traces.Unmatched, errOut)
+	if r.Traces.Counted != 23 || r.Traces.Unmatched != 0 || r.Traces.BeyondCap != 1 {
+		t.Errorf("traces counted %d, unmatched %d, beyond the list %d; want 23, 0 and 1\n%s", r.Traces.Counted, r.Traces.Unmatched, r.Traces.BeyondCap, errOut)
 	}
 	// covered/total paths, by the tests in helperrun_test.go
 	want := map[string][2]int{
 		"helperrun.BranchHelper": {4, 5}, "helperrun.ClosureHelper": {2, 3}, "helperrun.InLoop": {2, 3},
 		"helperrun.LoopHelper": {3, 3}, "helperrun.MethodHelper": {2, 3}, "helperrun.OneHelper": {2, 2},
 		"helperrun.PureHelper": {1, 1}, "helperrun.ThreeDeep": {3, 3}, "helperrun.TwoCalls": {2, 3},
+		// 2,048 paths: 2,000 listed, the all-failing run is the first listed, the all-passing run is beyond the list
+		"helperrun.Many": {1, 2000},
 	}
 	for _, w := range r.Workflows {
 		covered := 0
@@ -89,6 +95,17 @@ func TestHelperTracesMatch(t *testing.T) {
 		}
 		if got, ok := want[w.Name]; !ok || got != [2]int{covered, len(w.PathList)} {
 			t.Errorf("%s: covered %d of %d, want %v", w.Name, covered, len(w.PathList), want[w.Name])
+		}
+		if w.Name == "helperrun.Many" {
+			// the exact count, and both runs cover the stage paths they pass through
+			if w.Exact != "2048" || len(w.Stages) < 2 {
+				t.Errorf("Many: exact count %q, %d stages; want 2048 and several stages", w.Exact, len(w.Stages))
+			}
+			for k, s := range w.Stages {
+				if s.Covered != 2 {
+					t.Errorf("Many: stage %d has %d stage paths covered, want 2 (the all-passing and the all-failing run)", k+1, s.Covered)
+				}
+			}
 		}
 	}
 }

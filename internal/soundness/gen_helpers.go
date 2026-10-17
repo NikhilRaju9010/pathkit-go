@@ -34,7 +34,7 @@ func (g *gen) strArg() string {
 // helperProbe declares a helper and writes calls of it in the function.
 func (g *gen) helperProbe() {
 	name := g.helperName()
-	switch g.r.Intn(14) {
+	switch g.r.Intn(16) {
 	case 0: // an error of its own, swallowed by the caller
 		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, s string) error {
 	_ = workflow.GetInfo(ctx)
@@ -208,6 +208,8 @@ func (g *gen) helperProbe() {
 		g.line(0, "}")
 	case 12, 13: // a map handed to activities and local activities
 		g.mapToCallProbe()
+	case 14, 15: // values set early, asked about in a later stage
+		g.stageProbe()
 	default: // returns the helper's result: the helper's end is the workflow's
 		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, b bool) error {
 	if b {
@@ -272,4 +274,33 @@ func (g *gen) mapToCallProbe() {
 	}
 	g.line(0, "}")
 	g.sinks = append(g.sinks, v)
+}
+
+// stageProbe sets values in the first decisions of the function, then asks
+// about them after more decisions: with small stages the asking is in a later
+// stage than the setting, so the answer depends on the states the earlier
+// stages leave behind.
+func (g *gen) stageProbe() {
+	vars := []string{g.fresh("sv"), g.fresh("sv")}
+	for _, v := range vars {
+		g.line(0, "%s := %s", v, g.strConst())
+	}
+	for _, v := range vars {
+		if g.r.Intn(3) > 0 {
+			g.line(0, "if %s {", g.cond())
+			g.line(1, "%s = %s", v, g.strConst())
+			g.line(0, "}")
+		}
+	}
+	for i, n := 0, 2+g.r.Intn(4); i < n; i++ {
+		g.line(0, "if %s {", g.cond())
+		g.line(1, "noop()")
+		g.line(0, "}")
+	}
+	for _, v := range vars {
+		g.line(0, "if %s == %s {", v, g.strConst())
+		g.line(1, "noop()")
+		g.line(0, "}")
+	}
+	g.sinks = append(g.sinks, vars...)
 }

@@ -40,6 +40,12 @@ type Classification struct {
 	// "auto" (the default; on unless the module registers a custom interceptor)
 	// or "off".
 	NoCustomInterceptor string
+	// StageMaxPaths is classification.stages.max_paths: neighbouring stages are
+	// merged while the merged stage has at most this many paths (default 256).
+	StageMaxPaths int
+	// MaxContexts is classification.engine.max_contexts: how many different
+	// incoming states of a stage the fact engine follows (default 16).
+	MaxContexts int
 }
 
 // CISettings is classification.ci.
@@ -50,6 +56,9 @@ type CISettings struct {
 	// FailUnderTestable is the floor for testable coverage, in percent;
 	// nil means no floor.
 	FailUnderTestable *float64
+	// StageFloor is the floor for stage coverage (the stage paths a test ran, of
+	// those a test can run), in percent; nil means no floor.
+	StageFloor *float64
 }
 
 // ExplainedTrace is one explained_traces entry.
@@ -111,6 +120,7 @@ type classificationPart struct {
 	ExplainedTraces    []json.RawMessage `json:"explained_traces"`
 	CI                 json.RawMessage   `json:"ci"`
 	Engine             *enginePart       `json:"engine"`
+	Stages             *stagesPart       `json:"stages"`
 	Assumptions        *assumptionsPart  `json:"assumptions"`
 }
 
@@ -120,12 +130,18 @@ type assumptionsPart struct {
 }
 
 type enginePart struct {
-	Enabled *bool `json:"enabled"`
+	Enabled     *bool `json:"enabled"`
+	MaxContexts *int  `json:"max_contexts"`
+}
+
+type stagesPart struct {
+	MaxPaths *int `json:"max_paths"`
 }
 
 type ciEntry struct {
 	Baseline          *string  `json:"baseline"`
 	FailUnderTestable *float64 `json:"fail_under_testable"`
+	StageFloor        *float64 `json:"stage_floor"`
 }
 
 type explainedEntry struct {
@@ -196,6 +212,10 @@ func strict(raw json.RawMessage, into any) error {
 	d.DisallowUnknownFields()
 	return d.Decode(into)
 }
+
+// todoReason is the placeholder "pathkit suggest" writes; a config that
+// still has it is refused.
+func todoReason(s string) bool { return strings.EqualFold(strings.TrimSpace(s), "TODO") }
 
 func blank(s *string) bool { return s == nil || strings.TrimSpace(*s) == "" }
 
@@ -285,6 +305,9 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 		if blank(e.Label) {
 			return c, fail(`rule %q needs a "label"`, id)
 		}
+		if todoReason(*e.Label) {
+			return c, fail(`rule %q still has the label "TODO" that "pathkit suggest" prints: write the label (known-defect if a bug blocks the path, or a cannot-be-tested label with "impossible": true)`, id)
+		}
 		if !labelPattern.MatchString(*e.Label) {
 			return c, fail(`rule %q: "label" must be lowercase words joined by - (like "set-then-test"), got %q`, id, *e.Label)
 		}
@@ -313,17 +336,39 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 			}
 			without = *e.Without
 		}
-		if e.Impossible == nil || !*e.Impossible {
+		knownDefect := *e.Label == "known-defect"
+		if !knownDefect && (e.Impossible == nil || !*e.Impossible) {
 			return c, fail(`rule %q: "impossible" must be true (a rule can only say a combination of decisions is impossible)`, id)
+		}
+		if knownDefect && e.Impossible != nil && !*e.Impossible {
+			return c, fail(`rule %q: "impossible" may be left out for the label known-defect, but it cannot be false`, id)
 		}
 		if blank(e.Reason) {
 			return c, fail(`rule %q needs a "reason"`, id)
+		}
+		if todoReason(*e.Reason) {
+			return c, fail(`rule %q still has the reason "TODO" that PathKit prints in its ready-made entry: replace it with the real reason (it is shown in every report)`, id)
 		}
 		c.Rules = append(c.Rules, Rule{ID: id, Workflow: strings.TrimSpace(*e.Workflow), Label: *e.Label, When: *e.When, Without: without, Reason: *e.Reason})
 	}
 
 	if p.Engine != nil && p.Engine.Enabled != nil && !*p.Engine.Enabled {
 		c.EngineOff = true
+	}
+	c.MaxContexts, c.StageMaxPaths = 16, 256
+	if p.Engine != nil && p.Engine.MaxContexts != nil {
+		if v := *p.Engine.MaxContexts; v < 1 || v > 1024 {
+			return c, fail(`classification.engine.max_contexts must be a whole number from 1 to 1024, got %d`, v)
+		} else {
+			c.MaxContexts = v
+		}
+	}
+	if p.Stages != nil && p.Stages.MaxPaths != nil {
+		if v := *p.Stages.MaxPaths; v < 2 || v > 100000 {
+			return c, fail(`classification.stages.max_paths must be a whole number from 2 to 100000, got %d`, v)
+		} else {
+			c.StageMaxPaths = v
+		}
 	}
 	c.JSONConverter = "auto"
 	if p.Assumptions != nil && p.Assumptions.DefaultJSONConverter != nil {
@@ -397,7 +442,7 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 	if p.CI != nil {
 		var e ciEntry
 		if err := strict(p.CI, &e); err != nil {
-			return c, fail(`classification.ci must look like {"baseline": "pathkit-baseline.json", "fail_under_testable": 80} (%s)`, jsonProblem(p.CI, err))
+			return c, fail(`classification.ci must look like {"baseline": "pathkit-baseline.json", "fail_under_testable": 80, "stage_floor": 70} (%s)`, jsonProblem(p.CI, err))
 		}
 		if e.Baseline != nil {
 			if blank(e.Baseline) {
@@ -410,6 +455,12 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 				return c, fail(`classification.ci.fail_under_testable must be a number from 0 to 100, got %v`, *v)
 			}
 			c.CI.FailUnderTestable = v
+		}
+		if v := e.StageFloor; v != nil {
+			if *v < 0 || *v > 100 {
+				return c, fail(`classification.ci.stage_floor must be a number from 0 to 100, got %v`, *v)
+			}
+			c.CI.StageFloor = v
 		}
 	}
 
@@ -460,6 +511,9 @@ func overrideFrom(where string, workflow, stableID, reason *string, fail func(st
 	}
 	if blank(reason) {
 		return o, fail(`%s (%s %s) needs a "reason"`, where, strings.TrimSpace(*workflow), *stableID)
+	}
+	if todoReason(*reason) {
+		return o, fail(`%s (%s %s) still has the reason "TODO" that PathKit prints in its ready-made entry: replace it with the real reason (it is shown in every report)`, where, strings.TrimSpace(*workflow), *stableID)
 	}
 	o.Workflow, o.StableID, o.Reason = strings.TrimSpace(*workflow), *stableID, *reason
 	return o, nil

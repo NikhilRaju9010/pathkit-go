@@ -114,3 +114,17 @@ func TestEveryDefinitionIsComplete(t *testing.T) {
 		}
 	}
 }
+
+// Every built-in label is named in SETUP-GUIDE.md, so a new label cannot be
+// added without the guide saying how it differs from its neighbours.
+func TestEveryLabelIsInTheSetupGuide(t *testing.T) {
+	guide, err := os.ReadFile("../../SETUP-GUIDE.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range definitions {
+		if d.Kind == KindLabel && !strings.Contains(string(guide), "`"+d.Name+"`") {
+			t.Errorf("label %q is not named in SETUP-GUIDE.md (add it to \"Labels that look alike\" or the detector table)", d.Name)
+		}
+	}
+}

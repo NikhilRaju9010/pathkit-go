@@ -20,7 +20,7 @@ func CapNames(res coverage.Result) []string {
 	return names
 }
 
-// CapHeadline is the one-line warning that names the workflows.
+// CapHeadline is the one-line note that names the workflows.
 func CapHeadline(names []string) string {
 	what := "1 workflow has"
 	if len(names) != 1 {
@@ -34,9 +34,9 @@ func CapHeadline(names []string) string {
 // reports all print these lines, so they never disagree.
 func CapAdvice() []string {
 	return []string{
-		fmt.Sprintf("PathKit lists only the first %d paths of such a workflow. Paths beyond that are not listed, not classified and not counted, so the numbers for it are a lower bound.", model.DefaultMaxPaths),
-		"A test that ran a path beyond the cap shows up as an unmatched trace; that does not mean your code or a config entry is out of date.",
-		"What to do: split the workflow into smaller ones (for example child workflows), or move some decisions into activities, so each workflow stays under the cap. Until then, read this workflow's numbers as incomplete.",
+		fmt.Sprintf("PathKit lists only the first %d paths of such a workflow (possible ones first: parts shown impossible are left out and counted), but it counts all of them exactly (\"Exact paths\") and cuts the workflow into stages that are classified and covered one at a time (\"Stage coverage\").", model.DefaultMaxPaths),
+		"A test that ran a path beyond the list is counted like any other (it is not unmatched); it covers the stage paths it passes through.",
+		"What to do: split the workflow into smaller ones (for example child workflows) to make every number exact; until then read its stage coverage and branch coverage, not its path coverage.",
 	}
 }
 

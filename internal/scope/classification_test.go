@@ -280,3 +280,63 @@ func TestInterceptorAssumptionRead(t *testing.T) {
 		t.Error(`accepted "on"`)
 	}
 }
+
+// The stage settings have defaults, and refuse numbers that make no sense.
+func TestStageSettingsRead(t *testing.T) {
+	read := func(body string) (Classification, error) {
+		path := filepath.Join(t.TempDir(), FileName)
+		write(t, path, body)
+		c, err := Read(path)
+		if err != nil {
+			return Classification{}, err
+		}
+		return c.Classification, nil
+	}
+	c, err := read(`{"classification": {"enabled": true}}`)
+	if err != nil || c.StageMaxPaths != 256 || c.MaxContexts != 16 || c.CI.StageFloor != nil {
+		t.Errorf("defaults: %+v %v", c, err)
+	}
+	c, err = read(`{"classification": {"enabled": true, "stages": {"max_paths": 64}, "engine": {"max_contexts": 4}, "ci": {"stage_floor": 70}}}`)
+	if err != nil || c.StageMaxPaths != 64 || c.MaxContexts != 4 || c.CI.StageFloor == nil || *c.CI.StageFloor != 70 {
+		t.Errorf("set: %+v %v", c, err)
+	}
+	for _, bad := range []string{
+		`{"classification": {"enabled": true, "stages": {"max_paths": 1}}}`,
+		`{"classification": {"enabled": true, "engine": {"max_contexts": 0}}}`,
+		`{"classification": {"enabled": true, "ci": {"stage_floor": 101}}}`,
+		`{"classification": {"enabled": true, "stages": {"size": 5}}}`,
+	} {
+		if _, err := read(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
+// "pathkit suggest" writes the reason "TODO"; a config that still has it is
+// refused, for rules and overrides as well as explained traces. A
+// known-defect rule may leave out "impossible".
+func TestTodoReasonIsRefused(t *testing.T) {
+	tests := []struct {
+		name, body, want string
+	}{
+		{"rule", `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "known-defect", "when": ["if a --true"], "reason": "TODO"}]}}`, `still has the reason "TODO"`},
+		{"override", `{"classification": {"enabled": true, "paths": {"mark_untestable": [{"workflow": "W", "stable_id": "s1:0123456789ab", "label": "known-defect", "reason": " todo "}]}}}`, `still has the reason "TODO"`},
+		{"impossible false", `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "known-defect", "when": ["if a --true"], "impossible": false, "reason": "bug"}]}}`, "cannot be false"},
+		{"other label needs impossible", `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "x-y", "when": ["if a --true"], "reason": "bug"}]}}`, `"impossible" must be true`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), FileName)
+			write(t, path, tt.body)
+			_, err := Read(path)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want an error with %q, got %v", tt.want, err)
+			}
+		})
+	}
+	path := filepath.Join(t.TempDir(), FileName)
+	write(t, path, `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "known-defect", "when": ["if a --true"], "reason": "bug 12 blocks it"}]}}`)
+	if _, err := Read(path); err != nil {
+		t.Fatalf("a known-defect rule without \"impossible\" was refused: %v", err)
+	}
+}

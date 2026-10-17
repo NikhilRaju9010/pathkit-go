@@ -19,6 +19,8 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 | `pathkit prepare [folder \| folder/...]` | Prints the `go test -overlay=...` command that records traces, for running `go test` yourself. |
 | `pathkit report [folder \| folder/...]` | The whole project at a glance: every workflow's coverage with a High/Medium/Low priority, the project total, the excluded workflows, `--summary`, `--json`; `--html` for a shareable web page. |
 | `pathkit explain <stableId> [folder]` | Says why one path got its bucket and label, and who decided (section 5). |
+| `pathkit rules check [folder]` | Shows how many paths each rule, override, comment and explained trace hits, and refuses the ones a test disproves (section 5). |
+| `pathkit suggest [folder]` | Drafts config rules for the needs-review paths; every draft has the reason `TODO` (section 5). |
 | `pathkit --version` | Prints the installed version. |
 
 ## 1. Requirements
@@ -274,7 +276,8 @@ If the rounded number would look the same as the threshold, PathKit prints more 
 - `failUnder`: `{threshold, passed, basis}`, or `null` when no threshold is set;
 - added with path classification (everything above is unchanged): `classification`, `coverageBasis` and `classificationShown` at the top; `classification` inside each workflow; `stableId` (a path's id that survives unrelated edits; explained under "`stableId`" below), `bucket`, `label`, `source`, `confidence`, `possibleInProduction`, `explanation` and `ruleId` on each path. See "Testable and overall coverage" below;
 - added with claim proofs: `proof` on a path that an automatic detector made a claim about, needs-review claims included (a list of `{step, file, line, text}`; `step` is the 1-based step on the path, and 0 with no `file`/`line` for the closing sentence). A path with no detector claim has no `proof` key, and neither does a claim PathKit no longer trusts because the workflow has a trace that fits no path. It is the same reasoning `pathkit explain` prints as `Proof:`;
-- added with the path-cap warning, only when a workflow reached the 2000-path cap: `pathCapWarning`: `{limit, workflows, message}`. It says that the workflow's path list and classification are incomplete (see "Path enumeration stops at 2000 paths per workflow" in LIMITATIONS.md). Absent otherwise.
+- added with the path-cap warning, only when a workflow has more paths than the list holds: `pathCapWarning`: `{limit, workflows, message}`. It says that the workflow's path list is incomplete and where to look instead (see "The path list stops at 2000 paths per workflow" in LIMITATIONS.md). Absent otherwise.
+- added with exact counts and stages, per workflow, when it has several stages or more paths than the list holds: `pathCountExact` (the exact number of paths as a decimal string), `pathsListed`, `stages` (for each: `index`, `paths` (exact), `tooBigToList`, `covered`, `testable`, `cannotBeTested`, `needsReview`, `branches`, `contexts`, `contextsCutOff` and `pathList` with each stage path's `id` like `g2:3fa94c0d17ab`), `prunedGroups` (the 100 biggest parts left out of the list as impossible, each with its exact `paths`, the `prefix` of exits that leads to it, its label, proof and assumptions; `prunedGroupsTotal` says how many there are) and `branchesAll` (the exits of the whole map); and `traces.beyondCap` at the top. Nothing else changes.
 
 `percent` has one decimal; use `covered`/`total` for exact math.
 
@@ -445,11 +448,37 @@ A misspelled detector name is an error that lists the real names. The fact engin
 
 **The assumption `default-json-converter`.** Claims about values Temporal decodes assume the default JSON converter (see the `impossible-type` row). PathKit reads every Go file of the module (code, not comments or text) for a client or worker option named `DataConverter`, a call of `NewCodecDataConverter` or `NewCompositeDataConverter`, and a type with the methods of a data converter (`ToPayloads` and `FromPayloads`), a payload converter (`ToPayload` and `FromPayload`) or a payload codec (`Encode` and `Decode` taking payloads); if it finds one, the rule is off for the whole run, and the text report (`Assumption default-json-converter: OFF, because ...`), the HTML glossary and the JSON (`assumptions`: name, on, why, claims) all say so. When it is on and claims rest on it, the same places say how many. To turn it off yourself: `"classification": { "assumptions": { "default_json_converter": "off" } }` (`"auto"`, the default, is on unless the search finds a hit). `UseNumber` and `json.Number` do not switch it off: they change only what the decoder that uses them produces. Separately, a value that your workflow decodes itself with `json.Unmarshal`, or with `Decode` on a decoder made in the same function by `json.NewDecoder` that is never handed on and never calls `UseNumber`, holds only a string, float64, bool, nil, `[]interface{}` or `map[string]interface{}`: that is how the standard library works, so claims about it name no assumption and stay on even with the rule off.
 
+### Labels that look alike
+
+A label says *why* PathKit put a path in a bucket. Several are close; none was renamed (a saved report and a config file may use the name). This is how they differ, and `pathkit explain` always says which one applies and who decided.
+
+| Labels | The difference |
+| --- | --- |
+| `contradictory`, `constant-condition`, `value-flow`, `set-then-test` | All four say "an earlier step settles this check". `constant-condition`: the answer never depends on the run (the compiler, or a declaration with nothing in between, knows it). `contradictory`: the **same unchanged value** is tested twice and the path takes opposite answers. `value-flow`: the answer follows through a copy, an assignment or an early return. `set-then-test` is the label of a **config rule** you write for the same idea when PathKit cannot follow it. |
+| `loop-minimum`, `impossible-loop-exit`, `same-list-loops` | The loop labels. `impossible-loop-exit` is automatic: a `for cond` loop whose condition is true when it starts, left without a single trip (detector `loop-exit-before-first-trip`). `loop-minimum` is the label of a **config rule** you write: a loop your input guarantees to run at least once, so its skip side is impossible. `same-list-loops` is about **two** loops over the same list that must run the same number of times. |
+| `dead-code`, `after-continue-as-new`, `update-handler-continue-as-new` | Steps that cannot run because the code before them ended the run: `dead-code` is any return, panic or similar; the other two are Continue-As-New in the workflow function and inside an update handler. |
+| `impossible-type`, `impossible-nil`, `unknown-input-type` | `impossible-type` and `impossible-nil` are claims (cannot-be-tested) PathKit can prove from the types a value holds. `unknown-input-type` is what PathKit says when it **cannot** follow the value: needs-review, never a claim. |
+| `possible-correlation`, `model-limit`, `concurrency-order`, `needs-review` | All needs-review, all "PathKit is not sure". `possible-correlation`: two checks of one value that would contradict if nothing changed it. `model-limit`: PathKit's model cannot draw the behaviour (also used when a trace shows a claim may be wrong). `concurrency-order`: event order between coroutines. `needs-review` alone: anything unrecognized. |
+| `manual`, `known-defect` | Both set by a person. `manual`: the path cannot happen (cannot-be-tested), with a reason. `known-defect`: the path **can** happen, but a known bug blocks every test from reaching it (needs-review). The report counts these as "Blocked by known bugs"; fix the bug and remove the entry. A test that runs the path makes it testable by itself. |
+| `version-gate-old-branch`, `history-limit`, `workflow-task-failure`, `unfinished-handlers` | needs-special-test: possible in production, reachable only with a special test set-up. |
+| `either-or-wait`, `depends-on-missing`, `contradictory-get-result`, `closed-signal-channel`, `rejected-update-invisible`, `side-effect-error` | Single-purpose labels; their definitions are in the HTML glossary and the table above. |
+
+`known-defect` can only be set by you, in a rule or in `mark_untestable`:
+
+```json
+{ "classification": { "enabled": true, "rules": [
+  { "id": "eu-branch-blocked", "workflow": "orders.OrderWorkflow", "label": "known-defect",
+    "when": ["if region == \"eu\" --true"],
+    "reason": "the region is overwritten by a bug (ticket 123)" } ] } }
+```
+
+A rule with this label needs no `"impossible": true`. The reason is required, and the word `TODO` is refused.
+
 ### Helper functions (the workflow's own package)
 
 A workflow often calls functions of its own package that start activities or wait on timers (`o.charge(ctx)`, `reserve(ctx, items)`). PathKit follows those calls: the decisions inside the helper are decisions of the workflow, one set for each call, and show in `analyze` and `coverage` as `Sleep (timer) [in reserve]`. The error check after the call (`if err != nil`) is a decision too, with only the exit the helper's `return` allows. A helper with no call into the Temporal SDK (a validation function with `if`s) stays ordinary code, one step, as before. What is and is not followed, and how deep, is in LIMITATIONS.md ("Helper functions of the workflow's own package").
 
-Following helpers can multiply the paths of a workflow (every helper with an activity and its error check doubles the paths after it). If that would pass the path cap (2000 paths), PathKit does not follow the helpers of **that** workflow: each call stays one step, as before, and a warning says so (`helper functions are not followed: ...`). The other workflows are not affected.
+Following helpers can multiply the paths of a workflow (every helper with an activity and its error check doubles the paths after it). They are followed anyway: a workflow with more paths than the list holds is counted exactly, cut into stages and covered stage by stage (see "Big workflows" below).
 
 What changes for you:
 
@@ -457,6 +486,21 @@ What changes for you:
 - **`pathkit test` marks up the helper code too** (in its copy, never in your files) and records the trace format version 2. Traces recorded by an older PathKit are refused with one message: run `pathkit test` again.
 - **After upgrading, do this:** run `pathkit test` again (old traces are not counted, and until you do, coverage reads 0% with one warning saying why); read the warnings for any workflow that says its helpers are not followed; for saved `stable_id` entries and baselines, look for "stale entry" warnings, which now name the paths that replace a vanished id. A `//pathkit:branch` you added on an error check after a helper is not needed any more when the helper is followed.
 - **Marks and rules work in a helper.** `//pathkit:untestable` on a decision in a helper marks that decision in every copy; a rule's `when` entry for it is written as `analyze` prints it.
+
+### Big workflows: exact counts, stages and what was left out
+
+A workflow with more than 2000 paths used to be cut off silently. Now:
+
+- **Exact paths.** The text shows `Exact paths: 16,777,216 (2000 listed; path coverage is incomplete)`. The count is exact however big it is.
+- **Stages.** PathKit finds the decisions that every path past them goes through and cuts the workflow into *stages* between them; stages next to each other are merged while a stage has at most `classification.stages.max_paths` paths (default 256). `Stage coverage: 9/768 (1.2%) in 3 stages` is the stage paths a test ran, out of those a test can run. A trace is cut into its stage pieces, so no extra test run is needed, and a test that ran a path beyond the list counts. A stage that is bigger than the limit on its own is not listed: the report says `too many to list` and shows its branch coverage.
+- **Stage path ids** look like `g2:3fa94c0d17ab` (stage 2, a hash of the stage's decisions in words). They stay the same when unrelated code changes, like `stableId`.
+- **Facts across stages.** A stage is checked from every different state the stages before it can leave (at most `classification.engine.max_contexts`, default 16). A stage path is `cannot-be-tested` when it is impossible in every one of them, `testable` when one allows it, and `needs-review` when there were more states than the limit.
+- **Left out of the list as impossible.** The path list is filled with paths that can be taken: parts the fact engine shows impossible are left out, counted exactly, and shown as groups with their proof (`prunedGroups` in the JSON). If a test ever runs a path inside such a part, the proof was wrong: PathKit warns, lists the path, and moves that part to `needs-review`.
+- **CI.** `classification.ci.stage_floor` fails the run (exit 2) when stage coverage is below it, like `fail_under_testable`.
+
+```json
+"classification": { "enabled": true, "stages": { "max_paths": 256 }, "engine": { "max_contexts": 16 }, "ci": { "stage_floor": 70 } }
+```
 
 ### Two workflows with the same name in different folders
 
@@ -528,7 +572,7 @@ pathkit report: 1 testable path with no test not in the baseline pathkit-baselin
   orders.OrderWorkflow path 3 (s1:5179b1c99bbb, new): Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
 ```
 
-`--json` adds a `ci` object (`baseline`, `baselineMode`, `floor`, `newUntested`, `newNeedsReview`, `lostTests`, `lostTestsAllowed`, `passed`); it is absent when the check is off. A missing or damaged baseline file is exit 1.
+`--json` adds a `ci` object (`baseline`, `baselineMode`, `floor`, `stageFloor` (only when `stage_floor` is set), `newUntested`, `newNeedsReview`, `lostTests`, `lostTestsAllowed`, `passed`); it is absent when the check is off. A missing or damaged baseline file is exit 1.
 
 **Exit code 2 has two causes:** coverage below `--fail-under` (or `failUnder`), **or** the CI check above failed (baseline or floor). Both print the report first and then say on stderr which one it was; several reasons are all printed. Exit 1 is always a real error (PathKit could not do its job), never a coverage problem.
 
@@ -539,6 +583,65 @@ pathkit report: warning: rule "second-needs-first" (orders.W) entry "if a || b #
 ```
 
 It is a warning only (the exit code does not change), and it needs a baseline: without `classification.ci.baseline` (or `--baseline`) there is nothing to compare with. A baseline written before this existed has no anchors and gives no warning until it is written again. Adding or removing **any** decision with the same text warns (even one below it, which does not change what `#2` means), and so does an unrelated edit right next to the decision (a new `if` just above it, or a renamed activity it leads to): the warning can fire when `#2` is still right; check, then write the baseline again.
+
+### The three headline numbers (workflows over the cap)
+
+When every workflow has at most 2000 paths, the headline is the plain totals ("38 paths total · 20 covered · 18 missed · 52.6% project coverage" and "Branches: …"). When some workflow has more, a figure over its first 2000 paths says little ("0 of 2000" may hide thousands of paths a test ran), so the headline of the text report, `--summary`, `coverage` and the HTML report becomes three lines:
+
+```
+Path coverage (testable): 663/663 (100.0%) over 2 workflows; 2 workflows too big for path coverage, see stage coverage
+Stage coverage (testable): 17/323 (5.3%) over the 2 workflows too big for path coverage (a stage is a stretch of the workflow between two decisions every path goes through); 2 stages too big to list left out (branch coverage only)
+Branch coverage: 225/285 (78.9%) over all workflows, the whole map of each
+```
+
+- **Path coverage** counts only the workflows whose paths are all listed (the testable figure when classification is on, the overall one when it is off).
+- **Stage coverage** counts only the workflows over the cap; a stage too big to list is left out and counted.
+- **Branch coverage** counts every workflow, over its whole map (not only the listed paths).
+- `--json` keeps every existing key with its meaning: `total`, `branches`, `classification` and the per-workflow `paths` count **listed paths only**. The new `headline` object has `pathCoverage`, `pathWorkflows`, `workflowsTooBigForPathCoverage`, `stageCoverage`, `stagesTooBigToList` and `branchCoverage`; it is absent when no workflow is over the cap.
+- The HTML report shows the same three numbers as cards and explains the words in its glossary. The classification block (`Testable coverage: …`) is a count of paths by bucket and still includes the listed paths of a big workflow.
+
+### Which untested paths to start with: `report --groups` (path classification)
+
+A list of missed paths is long, and most of them differ only after the same untested step. `pathkit report --groups` groups the testable paths no test ran by the **first step no test took**, biggest group first:
+
+```
+Missed paths by first untested step: 530 testable paths in 259 groups
+  1. orders.OrderWorkflow: 8 paths, first untested step: if in.Express --true  (orders.go:42)
+       the tests get this far: if in.AmountCents <= 0 --false
+       how to cover it: make `in.Express` true
+```
+
+- It builds a tree from the paths the tests ran; a missed path follows the tree as far as it goes, and the step where it leaves the tree is its group. One test that takes that step usually covers several of the group's paths.
+- A workflow no test ran says `no test ran this workflow` and is grouped by its first decision.
+- Only testable paths no test ran are counted (not cannot-be-tested, not needs-review). Only the listed paths of a big workflow are grouped.
+- `--json` adds `missedGroups` (workflow, paths, firstUntestedStep, file, line, reachedAfter, howToCover; at most 500, `missedGroupsTotal` says how many there are). The HTML report always has the section, with the first 100 groups.
+
+### Checking what you wrote: `pathkit rules check` and `pathkit suggest` (path classification)
+
+`pathkit rules check` lists every rule, `mark_untestable` / `mark_testable` entry, `//pathkit:untestable` comment and explained trace, with how many listed paths (or traces) it hits right now:
+
+```
+Rules check: 1 entry
+  rule "eu-branch-blocked" [known-defect] in orders.OrderWorkflow: hits 2 paths
+```
+
+- **Refused (exit 1):** a rule, an untestable override or a comment that hits a path a test ran. A recorded run proves the path can happen, so the entry is wrong; fix or remove it.
+- **Warnings:** an entry that hits no path (stale, or mistyped; for a big workflow it only says the path may not be listed), and two entries that hit the same path (the first reason found wins: override, comment, rule). `--json` has the same lists.
+
+`pathkit suggest` prints a draft rule for each group of needs-review paths no test ran. Nothing is written for you. Every draft has the reason `TODO`, and PathKit refuses a config that still has it, so a draft only takes effect after you write the real reason. The draft's label is `TODO` too (the config refuses it): write `known-defect` if a bug blocks the path, or a cannot-be-tested label such as `manual` with `"impossible": true` if you know the path can never happen. Run `pathkit rules check` after pasting it.
+
+### The assumptions panel (path classification)
+
+With classification on, every report ends its classification block with the assumptions the claims rest on, each on or off, and how many claims rest on it:
+
+```
+Assumptions the claims rest on (a claim is a path PathKit calls impossible; "on" means PathKit uses the assumption):
+  closed-signal-channels:  on; no claim rests on it
+  default-json-converter:  on; no claim rests on it
+  no-custom-interceptor:   OFF (the module registers a custom interceptor ...); no claim rests on it
+```
+
+The JSON has the same list as `assumptionPanel`; the HTML summary shows it with a link to each definition. A part of a big workflow's map left out as impossible counts as one claim.
 
 ### Why does a path have its label? `pathkit explain` (path classification)
 
@@ -599,7 +702,7 @@ Traces that fit no path: 1 group, 1 trace file
 - **likely** is PathKit's best guess, and says so. The most common cause is an error check on an error from your own helper function: PathKit assumes it never fails (see "Only error checks right after a Temporal call are junctions" in LIMITATIONS.md), so a run that does fail there takes a road the map does not draw. `//pathkit:branch` on that `if` makes the map draw it.
 - With classification on, a group accepted in `classification.explained_traces` says `acknowledged: <reason>` (with classification off, acceptances are not read, so every group says `not acknowledged`).
 - When the run went round a loop several times, "followed the map" shows only the last trip (the loop rule) and says `(repeated loop trips folded: only the last one is kept)`; the step number in "then" counts the steps as recorded.
-- A trace that fits a path beyond the 2000-path cap is counted as unmatched on the `Traces:` line but is not listed here (it fits a real path); a line under the heading says how many.
+- A trace that fits a path beyond the 2000 listed paths is not unmatched: it is counted on the `Traces:` line (as "beyond the list" in the JSON) and covers its stage paths.
 - With no such trace, the section says `Traces that fit no path: none`. `--json --unmatched` adds `unmatchedTraces` (a list, empty when none) with the same fields. Without `--unmatched` nothing changes.
 
 **Cleaning up.** `pathkit test` clears old traces at the start of each run (unless `--keep-traces`). To delete them yourself:

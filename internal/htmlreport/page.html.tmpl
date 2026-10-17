@@ -36,6 +36,9 @@
 <nav aria-label="Sections">
 <a href="#summary">Summary</a>
 <a href="#workflows">Workflows</a>
+{{- if .Groups}}
+<a href="#groups">Missed paths ({{.GroupsTotal}} groups)</a>
+{{- end}}
 <a href="#paths">Paths</a>
 {{- if .Glossary}}
 <a href="#definitions">Glossary</a>
@@ -56,8 +59,14 @@
 <section id="summary" aria-labelledby="h-summary">
 <h2 id="h-summary">Summary</h2>
 {{- if .Measured}}
+{{- if .HeadlineLines}}
+{{- range .HeadlineLines}}
+<p class="total headline">{{.}}</p>
+{{- end}}
+{{- else}}
 <p class="total" data-total-paths="{{.TotalPaths}}" data-total-covered="{{.TotalCovered}}">{{.TotalLine}}</p>
 <p class="branches">{{.BranchesLine}}</p>
+{{- end}}
 {{- end}}
 <div class="cards">
 {{- range .Cards}}
@@ -85,6 +94,16 @@
 <pre class="classification">{{range .}}{{.}}
 {{end}}</pre>
 </details>
+{{- end}}
+{{- if .Panel}}
+<div class="assumptions" data-assumptions="{{len .Panel}}">
+<h3>Assumptions the claims rest on</h3>
+<ul>
+{{- range .Panel}}
+<li data-assumption="{{.Name}}" data-on="{{.On}}"><strong>{{.Name}}</strong>: {{.Status}}; {{.Claims}}. <a href="#def-{{.Name}}">What it means</a></li>
+{{- end}}
+</ul>
+</div>
 {{- end}}
 {{- with .FailUnder}}
 <p class="fail-under" data-fail-under-passed="{{.Passed}}">{{.Text}}</p>
@@ -118,6 +137,33 @@
 {{- end}}
 </section>
 
+{{- if .Groups}}
+<section id="groups" aria-labelledby="h-groups" data-groups="{{.GroupsTotal}}">
+<h2 id="h-groups">Missed paths by first untested step</h2>
+<p class="note">Testable paths with no test: {{.GroupsPaths}}. A group is the paths that leave the road the tests walked at the same step, so one new test that takes that step usually covers several of them. Biggest groups first. A workflow with more paths than the list holds counts only its listed paths.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Missed paths grouped by the first step no test took</caption>
+<thead><tr><th scope="col">Paths</th><th scope="col">Workflow</th><th scope="col">First untested step</th><th scope="col">Where</th><th scope="col">How to cover it</th></tr></thead>
+<tbody>
+{{- range .Groups}}
+<tr>
+<td data-label="Paths">{{.Paths}}</td>
+<td data-label="Workflow">{{.Workflow}}</td>
+<td data-label="First untested step"><code>{{.Step}}</code><br><span class="note">{{.After}}</span></td>
+<td data-label="Where" class="file">{{.Where}}</td>
+<td data-label="How to cover it">{{.Hint}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- if .GroupsMore}}
+<p class="note">... and {{.GroupsMore}} more groups (<code>pathkit report --groups --json</code> lists them).</p>
+{{- end}}
+</section>
+{{- end}}
+
 <section id="paths" aria-labelledby="h-paths">
 <h2 id="h-paths">Paths</h2>
 {{- if not .Measured}}
@@ -130,6 +176,24 @@
 <div class="wbody">
 <p class="file">{{$w.File}}</p>
 <p class="stats">{{if $.Measured}}{{$w.Stats}}{{else}}{{$w.TotalPathsLine}}{{end}}{{if $w.Truncated}} <span class="truncated">truncated</span>{{end}}</p>
+{{- if $w.Stages}}
+<div class="stages" data-stages="{{$i}}">
+<h4>Stages</h4>
+<p class="note">{{$w.ExactLine}}{{if $w.PrunedLine}} {{$w.PrunedLine}}.{{end}} A stage is a stretch of the workflow between two decisions that every path goes through, so its paths can be counted and covered one stage at a time.</p>
+<div class="tablebox">
+<table class="summary-table">
+<caption>Stages of {{$w.Name}}</caption>
+<thead><tr><th scope="col">Stage</th><th scope="col">Paths</th><th scope="col">Covered</th><th scope="col">%</th><th scope="col">Branches</th><th scope="col">Note</th></tr></thead>
+<tbody>
+{{- range $w.Stages}}
+<tr><td>{{.Number}}</td><td>{{.Paths}}</td><td>{{.Covered}}</td><td>{{.Pct}}</td><td>{{.Branches}}</td><td>{{.Note}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+<div class="sg" data-sg="{{$i}}"></div>
+</div>
+{{- end}}
 <div class="pt" data-pt="{{$i}}"></div>
 </div>
 </details>
@@ -179,6 +243,11 @@
 <section class="definitions" id="definitions" data-definitions-version="{{.Version}}" aria-labelledby="h-def">
 <h2 id="h-def">Glossary</h2>
 <p class="note">Click a label anywhere on this page to jump to its definition.</p>
+<dl class="terms" id="terms">
+{{- range .Terms}}
+<dt>{{.Name}}</dt><dd>{{.Meaning}}</dd>
+{{- end}}
+</dl>
 {{- if .Summary}}
 <div class="tablebox">
 <table class="summary-table">

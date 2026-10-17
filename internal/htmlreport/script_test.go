@@ -3,9 +3,7 @@ package htmlreport
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -58,11 +56,9 @@ func TestPageScriptWorks(t *testing.T) {
 	}})
 	in.Result.Paths += 3
 	in.Result.Covered++
-	file := filepath.Join(t.TempDir(), "page.html")
-	if err := os.WriteFile(file, []byte(mustReport(t, in)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Command(node, "testdata/smoke.js", file).CombinedOutput()
+	cmd := exec.Command(node, "testdata/smoke.js")
+	cmd.Stdin = strings.NewReader(mustReport(t, in))
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("script failed: %v\n%s", err, out)
 	}

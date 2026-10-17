@@ -61,7 +61,13 @@ type Engine struct {
 	icptMode     string
 	icptHits     []string
 	icptRelevant bool
-	explained    []scope.ExplainedTrace
+	// stageMax and maxContexts are classification.stages.max_paths and
+	// classification.engine.max_contexts; plans and listings are kept per workflow.
+	stageMax, maxContexts int
+	pathCap               int // how many paths a listing holds (model.DefaultMaxPaths)
+	plans                 map[string]*StagePlan
+	listings              map[string]*Listing
+	explained             []scope.ExplainedTrace
 	// extraWarnings are config warnings found while resolving rules.
 	extraWarnings []string
 	// anchors are where each numbered ("#n") rule entry points, for the
@@ -94,6 +100,10 @@ type rule struct {
 
 func collapse(s string) string { return strings.Join(strings.Fields(s), " ") }
 
+// KnownDefect is the built-in label a person sets, in a rule or an
+// override, for a path a known bug blocks. It puts the path in needs-review.
+const KnownDefect = "known-defect"
+
 // NewEngine checks a config's classification section against the label
 // registry. Workflow names in c must already be full names
 // ("orders.OrderWorkflow"): the caller resolves them against the loaded
@@ -104,7 +114,9 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{},
-		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter, icptMode: c.NoCustomInterceptor}
+		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter, icptMode: c.NoCustomInterceptor,
+		stageMax: orDefault(c.StageMaxPaths, model.DefaultStageMaxPaths), maxContexts: orDefault(c.MaxContexts, facts.DefaultMaxContexts),
+		plans: map[string]*StagePlan{}, listings: map[string]*Listing{}, pathCap: model.DefaultMaxPaths}
 	if c.Policy == string(Exclude) {
 		e.policy = Exclude
 	}
@@ -124,7 +136,7 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 			if !ok {
 				return nil, fmt.Errorf("classification.paths.mark_untestable (%s %s): label %q is not defined (built-in labels are in the definitions list; add your own with custom_labels)", o.Workflow, o.StableID, o.Label)
 			}
-			if d.Bucket != "" && d.Bucket != CannotBeTested {
+			if d.Bucket != "" && d.Bucket != CannotBeTested && o.Label != KnownDefect {
 				return nil, fmt.Errorf("classification.paths.mark_untestable (%s %s): label %q puts paths in %s, not cannot-be-tested", o.Workflow, o.StableID, o.Label, d.Bucket)
 			}
 		}
@@ -137,7 +149,7 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 		if !ok {
 			return nil, fmt.Errorf("classification.rules: rule %q: label %q is not defined (add it with custom_labels)", r.ID, r.Label)
 		}
-		if d.Bucket != CannotBeTested {
+		if d.Bucket != CannotBeTested && r.Label != KnownDefect {
 			if d.Bucket == "" {
 				d.Bucket = CannotBeTested // "manual": as chosen, and a rule says impossible
 			} else {
@@ -197,7 +209,13 @@ func (e *Engine) classify(workflow string, p model.Path, count bool) Classificat
 		c.Source, c.Origin = SourceManual, OriginOverride
 		if o.Untestable {
 			c.Bucket, c.Label, c.PossibleInProduction = CannotBeTested, o.Label, false
+			if o.Label == KnownDefect {
+				c.Bucket, c.PossibleInProduction = NeedsReview, true
+			}
 			c.Explanation = fmt.Sprintf("Marked untestable in the config (%s): %s", o.Label, o.Reason)
+			if o.Label == KnownDefect {
+				c.Explanation = "Marked as blocked by a known bug in the config: " + o.Reason
+			}
 			found = append(found, candidate{c, "config mark_untestable"})
 		} else {
 			c.Explanation = "Marked testable in the config: " + o.Reason
@@ -230,6 +248,9 @@ func (e *Engine) classify(workflow string, p model.Path, count bool) Classificat
 		}
 		c := DefaultTestable()
 		c.Source, c.Origin, c.Bucket, c.Label, c.PossibleInProduction, c.RuleID = SourceManual, OriginRule, CannotBeTested, r.Label, false, r.ID
+		if r.Label == KnownDefect {
+			c.Bucket, c.PossibleInProduction = NeedsReview, true
+		}
 		c.Explanation = fmt.Sprintf("Rule %q: %s", r.ID, r.Reason)
 		found = append(found, candidate{c, fmt.Sprintf("rule %q", r.ID)})
 	}
@@ -354,7 +375,11 @@ func (e *Engine) Notes(final []Classification, measured []string) []string {
 		if !in[r.Workflow] {
 			continue
 		}
-		out = append(out, fmt.Sprintf("Rule %q (%s): %s marked untestable", r.ID, r.Workflow, pathsN(byRule[r.ID])))
+		what := "marked untestable"
+		if r.Label == KnownDefect {
+			what = "marked as blocked by a known bug"
+		}
+		out = append(out, fmt.Sprintf("Rule %q (%s): %s %s", r.ID, r.Workflow, pathsN(byRule[r.ID]), what))
 	}
 	var keys []string
 	for k := range byDetector {
@@ -437,3 +462,15 @@ func (e *Engine) InterceptorOn() (on bool, why string) {
 	}
 	return true, ""
 }
+
+func orDefault(v, d int) int {
+	if v <= 0 {
+		return d
+	}
+	return v
+}
+
+// SetPathCap changes how many paths a listing holds. PathKit itself always
+// uses model.DefaultMaxPaths; the soundness test uses a small number so that
+// pruning happens on small programs.
+func (e *Engine) SetPathCap(n int) { e.pathCap = n }

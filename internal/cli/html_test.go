@@ -86,14 +86,28 @@ func TestReportHTMLGolden(t *testing.T) {
 	if stderr != wantErr {
 		t.Errorf("stderr %q\nwant   %q", stderr, wantErr)
 	}
+	// The embedded script (and the hash that lets it run) are left out of the
+	// comparison: they have their own tests, and a change to the script should
+	// not change this file. A fixed marker stands in for each.
 	if os.Getenv("PATHKIT_UPDATE_HTML_GOLDEN") != "" { // regenerate on purpose: PATHKIT_UPDATE_HTML_GOLDEN=1 go test ./internal/cli -run TestReportHTMLGolden
-		if err := os.WriteFile(golden, []byte(readFile(t, out)), 0o644); err != nil {
+		if err := os.WriteFile(golden, []byte(withoutScript(readFile(t, out))), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if got := readFile(t, out); got != readFile(t, golden) {
+	if got := withoutScript(readFile(t, out)); got != readFile(t, golden) {
 		t.Errorf("the page differs from testdata/report_orders.html:\n%s", got)
 	}
+}
+
+var (
+	scriptText = regexp.MustCompile(`(?s)(<script id="pk-code">).*?(</script>)`)
+	scriptHash = regexp.MustCompile(`script-src 'sha256-[A-Za-z0-9+/=]+'`)
+)
+
+// withoutScript replaces the page's script and its hash with fixed markers.
+func withoutScript(page string) string {
+	page = scriptText.ReplaceAllString(page, "${1}/*PKSCRIPT*/${2}")
+	return scriptHash.ReplaceAllString(page, "script-src 'sha256-PKSCRIPTHASH'")
 }
 
 // The trend keeps the last 5 report runs, and marks a scope change.

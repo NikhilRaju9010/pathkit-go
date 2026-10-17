@@ -42,7 +42,18 @@ jobs:
       - name: staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
+      - name: free memory (Linux)
+        if: runner.os == 'Linux'
+        run: free -m
+
+      # On Linux the race run was ended by the runner (exit 143) with the
+      # default parallelism, so it runs two packages at a time there.
+      - name: go test (with race detector, Linux)
+        if: runner.os == 'Linux'
+        run: go test -race -p 2 -timeout 30m ./...
+
       - name: go test (with race detector)
+        if: runner.os != 'Linux'
         run: go test -race -timeout 30m ./...
 
       # The pilot project (testdata/pilot) is a separate Go module, so the

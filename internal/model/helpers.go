@@ -306,7 +306,7 @@ func (b *builder) callErrorLabels(call *ast.CallExpr, depth int, seen map[ast.No
 // error.
 func (b *builder) helperErrLabel(call *ast.CallExpr) (string, bool) {
 	h := b.calleeOf(call)
-	if h == nil || !(b.isHelper(h) || (!b.noFollow && b.worthInlining(h, 0))) {
+	if h == nil || !(b.isHelper(h) || b.worthInlining(h, 0)) {
 		return "", false
 	}
 	s := b.summarize(h, 0, map[ast.Node]bool{})
@@ -394,9 +394,6 @@ func (b *builder) inlineAt(n ast.Node) *inlineCall {
 // followed into from the code being walked, and returns the function with
 // the call's argument that carries the workflow context.
 func (b *builder) inlinable(call *ast.CallExpr) (*helperFn, ast.Expr) {
-	if b.noFollow {
-		return nil, nil
-	}
 	h := b.calleeOf(call)
 	if h == nil || call.Ellipsis != token.NoPos {
 		return nil, nil

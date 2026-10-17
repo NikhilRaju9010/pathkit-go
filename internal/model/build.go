@@ -45,8 +45,6 @@ type builder struct {
 	err    error
 	decls  map[*types.Func]*helperFn // see helperDecls
 
-	// noFollow: helper functions are never followed (see Build).
-	noFollow bool
 	// cur is the copy of helper code being walked (nil for the workflow
 	// function); siteOf says which copy each block of a go/cfg graph is in.
 	cur    *Site
@@ -82,30 +80,12 @@ type blockPos struct {
 	det determined
 }
 
-// Build makes the junction map of one workflow.
-//
-// Helper functions of the workflow's package are followed (docs/DESIGN.md
-// D15). If following them gives the workflow more paths than the path cap
-// lists, they are not followed instead (each call stays one step, as before),
-// and the graph says so (HelperNote): a map cut at the cap is no use for
-// coverage, and a workflow without that blow-up should not pay for it.
+// Build makes the junction map of one workflow. Helper functions of the
+// workflow's package are followed (docs/DESIGN.md D15), however many paths
+// that gives: the map is counted, cut into stages and covered without listing
+// every path (D16).
 func Build(wf discover.Workflow) (*Graph, error) {
-	g, err := build(wf, true)
-	if err != nil || !g.UsesHelpers() || !g.Paths(DefaultMaxPaths).Truncated {
-		return g, err
-	}
-	plain, err := build(wf, false)
-	if err != nil {
-		return g, nil
-	}
-	plain.helperNote = fmt.Sprintf("%s: helper functions are not followed: following them gives more than the %d paths PathKit lists (the path cap), so each call stays one step and what happens inside the helpers is not on the map", wf.Name, DefaultMaxPaths)
-	return plain, nil
-}
-
-// build is Build with the choice of following helpers made by the caller.
-func build(wf discover.Workflow, follow bool) (*Graph, error) {
 	b := newBuilder(wf)
-	b.noFollow = !follow
 	if u := b.findUnsupported(); u != nil {
 		return nil, u
 	}

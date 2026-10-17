@@ -1,8 +1,9 @@
 // Runs the page's own script against a tiny DOM stub and drives it the way a
-// reader would. Usage: node smoke.js page.html   (prints one JSON object)
+// reader would. Usage: node smoke.js < page.html   (the page comes from standard
+// input; prints one JSON object)
 'use strict';
 const fs = require('fs');
-const html = fs.readFileSync(process.argv[2], 'utf8');
+const html = fs.readFileSync(0, 'utf8');
 
 const registry = {};
 class Node_ {
