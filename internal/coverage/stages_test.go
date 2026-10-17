@@ -201,4 +201,20 @@ func TestTraceBeyondTheList(t *testing.T) {
 	if wr.AllBranches != 48 || wr.AllBranchesTaken != 24 {
 		t.Errorf("branches of the whole map %d/%d, want 24/48", wr.AllBranchesTaken, wr.AllBranches)
 	}
+	// The groups know the test ran this workflow, though no listed path is
+	// covered: the first untested step is deeper than the start, and the road
+	// the test walked is the one the trace took.
+	gs := MissedGroups(wr)
+	if len(gs) == 0 {
+		t.Fatal("no missed group")
+	}
+	for _, g := range gs {
+		if g.NoTests {
+			t.Fatalf("group %v says no test ran the workflow, but a trace did", g.Step.Exit.ID)
+		}
+	}
+	// every listed path takes J1.true first, and the trace took J1.false
+	if top := gs[0]; top.Step.Exit.ID.String() != "J1.true" || len(top.Prefix) != 0 {
+		t.Errorf("first group is at %s after %d steps, want J1.true at the start", top.Step.Exit.ID, len(top.Prefix))
+	}
 }

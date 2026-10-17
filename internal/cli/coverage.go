@@ -205,6 +205,10 @@ type (
 		Label   *string  `json:"label"`
 		End     string   `json:"end"` // how the workflow ends, or "continues" into the next stage
 		Steps   []string `json:"steps"`
+		// Why PathKit put the stage path outside testable, with its proof; absent
+		// for a testable one.
+		Explanation string          `json:"explanation,omitempty"`
+		Proof       []jsonProofStep `json:"proof,omitempty"`
 	}
 	jsonPruned struct {
 		Paths       string          `json:"paths"`
@@ -260,6 +264,8 @@ type (
 		Classification      jsonClassification `json:"classification"`
 		CoverageBasis       string             `json:"coverageBasis"`
 		ClassificationShown bool               `json:"classificationShown"`
+		// Added with the known-defect label; absent when no path has it.
+		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
 		// Added with the CI check; absent when it is off.
 		CI *jsonCI `json:"ci,omitempty"`
 		// With --unmatched only.
@@ -270,6 +276,9 @@ type (
 		// Added with the type facts: assumptions that are off, or that
 		// claims rest on; absent when there is nothing to say.
 		Assumptions []jsonAssumption `json:"assumptions,omitempty"`
+		// Added with the assumptions panel: every assumption, on or off, with
+		// how many claims rest on it; absent when classification is off.
+		AssumptionPanel []jsonAssumption `json:"assumptionPanel,omitempty"`
 	}
 	jsonAssumption struct {
 		Name   string  `json:"name"`
@@ -301,9 +310,12 @@ type basisInfo struct {
 	basis       coverage.Basis
 	shown       bool // the classification block is printed (see measured.showClass)
 	assumptions []classify.AssumptionStatus
+	panel       []classify.AssumptionStatus
 }
 
-func (m *measured) basisInfo() basisInfo { return basisInfo{m.basis, m.showClass, m.assumptions} }
+func (m *measured) basisInfo() basisInfo {
+	return basisInfo{m.basis, m.showClass, m.assumptions, m.panel}
+}
 
 func classificationJSON(b coverage.Breakdown) jsonClassification {
 	var c jsonClassification
@@ -339,6 +351,7 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 			Incomplete: res.Counts.Incomplete, Excluded: res.Counts.Excluded, Unknown: res.Counts.Unknown, Unreadable: res.Counts.Unreadable, Other: res.Counts.Other, BeyondCap: res.Counts.BeyondCap},
 		Classification: classificationJSON(res.Breakdown), CoverageBasis: string(bi.basis), ClassificationShown: bi.shown,
 	}
+	out.BlockedByKnownBugs = render.BlockedByKnownBugs(res)
 	if names := render.CapNames(res); len(names) > 0 {
 		out.PathCap = &jsonPathCap{Limit: model.DefaultMaxPaths, Workflows: names,
 			Message: render.CapHeadline(names) + " " + strings.Join(render.CapAdvice(), " ")}
@@ -375,7 +388,11 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 					for _, st := range sp.Path.Steps {
 						ids = append(ids, st.Exit.ID.String())
 					}
-					js.PathList = append(js.PathList, jsonSPth{ID: sp.ID, Covered: sp.Covered, Traces: sp.Traces, Bucket: string(sp.Class.Bucket), Label: optional(sp.Class.Label), End: end, Steps: ids})
+					jp := jsonSPth{ID: sp.ID, Covered: sp.Covered, Traces: sp.Traces, Bucket: string(sp.Class.Bucket), Label: optional(sp.Class.Label), End: end, Steps: ids}
+					if sp.Class.Bucket != classify.Testable {
+						jp.Explanation, jp.Proof = sp.Class.Explanation, proofJSON(sp.Class.Proof)
+					}
+					js.PathList = append(js.PathList, jp)
 				}
 				jw.Stages = append(jw.Stages, js)
 			}
@@ -409,6 +426,14 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 			ja.Why = &why
 		}
 		out.Assumptions = append(out.Assumptions, ja)
+	}
+	for _, a := range bi.panel {
+		ja := jsonAssumption{Name: a.Name, On: a.On, Claims: a.Claims}
+		if !a.On {
+			why := a.Why
+			ja.Why = &why
+		}
+		out.AssumptionPanel = append(out.AssumptionPanel, ja)
 	}
 	if threshold != nil {
 		c := res.Breakdown.For(bi.basis)

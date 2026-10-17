@@ -175,6 +175,7 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 <nav aria-label="Sections">
 <a href="#summary">Summary</a>
 <a href="#workflows">Workflows</a>
+<a href="#groups">Missed paths (1 groups)</a>
 <a href="#paths">Paths</a>
 </nav>
 <div class="search" hidden>
@@ -227,6 +228,25 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 <td data-label="Coverage"><span class="bar-mini" aria-hidden="true"><i style="width:66.7%"></i></span> 2 of 3 · 66.7%</td>
 <td data-label="Missed">1</td>
 <td data-label="Paths">3</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="groups" aria-labelledby="h-groups" data-groups="1">
+<h2 id="h-groups">Missed paths by first untested step</h2>
+<p class="note">Testable paths with no test: 1. A group is the paths that leave the road the tests walked at the same step, so one new test that takes that step usually covers several of them. Biggest groups first. A workflow with more paths than the list holds counts only its listed paths.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Missed paths grouped by the first step no test took</caption>
+<thead><tr><th scope="col">Paths</th><th scope="col">Workflow</th><th scope="col">First untested step</th><th scope="col">Where</th><th scope="col">How to cover it</th></tr></thead>
+<tbody>
+<tr>
+<td data-label="Paths">1</td>
+<td data-label="Workflow">orders.OrderWorkflow</td>
+<td data-label="First untested step"><code>ChargeCard (activity) --success</code><br><span class="note">the tests get this far: if in.AmountCents &lt;= 0 --false</span></td>
+<td data-label="Where" class="file">orders.go:42</td>
+<td data-label="How to cover it">let activity ChargeCard succeed (mock it with env.OnActivity, passing the same activity the workflow starts (ChargeCard), with .Return(...); or let it run)</td>
 </tr>
 </tbody>
 </table>

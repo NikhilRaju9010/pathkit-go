@@ -78,6 +78,9 @@ type ReportInput struct {
 	// Assumptions are the assumptions that are off, or that claims rest on
 	// (classify.Engine.Assumptions); shown in the glossary.
 	Assumptions []classify.AssumptionStatus
+	// Panel is every assumption, on or off, with its claim count; the summary
+	// shows it.
+	Panel []classify.AssumptionStatus
 }
 
 // overallThreshold is the threshold for the overall figures: none when
@@ -127,8 +130,15 @@ type (
 		Traces                                        *coverage.Counts
 		Trend                                         []trendView
 		Glossary                                      *glossaryView
-		Data                                          *pageData
-		ScriptHash                                    string
+		// Groups are the testable paths no test ran, grouped by the first step
+		// no test took (biggest first, at most maxGroupsHTML); GroupsMore is
+		// how many more groups there are.
+		Panel                   []panelRow
+		Groups                  []groupRowView
+		GroupsPaths             int
+		GroupsTotal, GroupsMore int
+		Data                    *pageData
+		ScriptHash              string
 	}
 	cardView struct {
 		Key, Title, Value, Sub string
@@ -152,6 +162,14 @@ type (
 		Exact, ExactLine string
 		Stages           []stageRowView
 		PrunedLine       string
+	}
+	panelRow struct {
+		Name, Status, Claims string
+		On                   bool
+	}
+	groupRowView struct {
+		Workflow, Step, Where, After, Hint string
+		Paths                              int
 	}
 	stageRowView struct {
 		Number, Paths, Covered, Pct, Branches, Note string
@@ -206,7 +224,19 @@ func Report(in ReportInput) ([]byte, error) {
 	v.buildCards(res, in.Classification != nil)
 
 	if in.Classification != nil {
-		v.Glossary = buildGlossary(res, in.CustomLabels, in.Assumptions)
+		shown := in.Assumptions
+		if len(in.Panel) > 0 {
+			shown = in.Panel // the glossary defines every assumption the summary lists
+		}
+		v.Glossary = buildGlossary(res, in.CustomLabels, shown)
+	}
+	v.buildGroups(res)
+	for _, a := range in.Panel {
+		status := "on"
+		if !a.On {
+			status = "OFF: " + a.Why
+		}
+		v.Panel = append(v.Panel, panelRow{Name: a.Name, Status: status, Claims: render.ClaimsText(a.Claims), On: a.On})
 	}
 	data := newPageData(true, in.Classification != nil)
 	for wi, w := range res.Workflows {
@@ -372,4 +402,27 @@ func (v view) render() ([]byte, error) {
 		out = bytes.Replace(out, hashPlaceholder, []byte(base64.StdEncoding.EncodeToString(sum[:])), 1)
 	}
 	return out, nil
+}
+
+// maxGroupsHTML is how many missed-path groups the page lists.
+const maxGroupsHTML = 100
+
+func (v *view) buildGroups(res coverage.Result) {
+	gs := render.Groups(res)
+	v.GroupsTotal = len(gs)
+	for _, g := range gs {
+		v.GroupsPaths += g.Missed
+	}
+	if len(gs) > maxGroupsHTML {
+		v.GroupsMore, gs = len(gs)-maxGroupsHTML, gs[:maxGroupsHTML]
+	}
+	for _, g := range gs {
+		after := "the tests get this far: only the start of the workflow"
+		if g.NoTests {
+			after = "no test ran this workflow"
+		} else if len(g.After) > 0 {
+			after = "the tests get this far: " + render.AfterText(g.After)
+		}
+		v.Groups = append(v.Groups, groupRowView{Workflow: g.Workflow, Step: g.Step, Where: g.Where(), After: after, Hint: g.Hint, Paths: g.Missed})
+	}
 }

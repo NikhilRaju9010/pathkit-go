@@ -19,6 +19,8 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 | `pathkit prepare [folder \| folder/...]` | Prints the `go test -overlay=...` command that records traces, for running `go test` yourself. |
 | `pathkit report [folder \| folder/...]` | The whole project at a glance: every workflow's coverage with a High/Medium/Low priority, the project total, the excluded workflows, `--summary`, `--json`; `--html` for a shareable web page. |
 | `pathkit explain <stableId> [folder]` | Says why one path got its bucket and label, and who decided (section 5). |
+| `pathkit rules check [folder]` | Shows how many paths each rule, override, comment and explained trace hits, and refuses the ones a test disproves (section 5). |
+| `pathkit suggest [folder]` | Drafts config rules for the needs-review paths; every draft has the reason `TODO` (section 5). |
 | `pathkit --version` | Prints the installed version. |
 
 ## 1. Requirements
@@ -446,6 +448,32 @@ A misspelled detector name is an error that lists the real names. The fact engin
 
 **The assumption `default-json-converter`.** Claims about values Temporal decodes assume the default JSON converter (see the `impossible-type` row). PathKit reads every Go file of the module (code, not comments or text) for a client or worker option named `DataConverter`, a call of `NewCodecDataConverter` or `NewCompositeDataConverter`, and a type with the methods of a data converter (`ToPayloads` and `FromPayloads`), a payload converter (`ToPayload` and `FromPayload`) or a payload codec (`Encode` and `Decode` taking payloads); if it finds one, the rule is off for the whole run, and the text report (`Assumption default-json-converter: OFF, because ...`), the HTML glossary and the JSON (`assumptions`: name, on, why, claims) all say so. When it is on and claims rest on it, the same places say how many. To turn it off yourself: `"classification": { "assumptions": { "default_json_converter": "off" } }` (`"auto"`, the default, is on unless the search finds a hit). `UseNumber` and `json.Number` do not switch it off: they change only what the decoder that uses them produces. Separately, a value that your workflow decodes itself with `json.Unmarshal`, or with `Decode` on a decoder made in the same function by `json.NewDecoder` that is never handed on and never calls `UseNumber`, holds only a string, float64, bool, nil, `[]interface{}` or `map[string]interface{}`: that is how the standard library works, so claims about it name no assumption and stay on even with the rule off.
 
+### Labels that look alike
+
+A label says *why* PathKit put a path in a bucket. Several are close; none was renamed (a saved report and a config file may use the name). This is how they differ, and `pathkit explain` always says which one applies and who decided.
+
+| Labels | The difference |
+| --- | --- |
+| `contradictory`, `constant-condition`, `value-flow`, `set-then-test` | All four say "an earlier step settles this check". `constant-condition`: the answer never depends on the run (the compiler, or a declaration with nothing in between, knows it). `contradictory`: the **same unchanged value** is tested twice and the path takes opposite answers. `value-flow`: the answer follows through a copy, an assignment or an early return. `set-then-test` is the label of a **config rule** you write for the same idea when PathKit cannot follow it. |
+| `loop-minimum`, `impossible-loop-exit`, `same-list-loops` | The loop labels. `impossible-loop-exit` is automatic: a `for cond` loop whose condition is true when it starts, left without a single trip (detector `loop-exit-before-first-trip`). `loop-minimum` is the label of a **config rule** you write: a loop your input guarantees to run at least once, so its skip side is impossible. `same-list-loops` is about **two** loops over the same list that must run the same number of times. |
+| `dead-code`, `after-continue-as-new`, `update-handler-continue-as-new` | Steps that cannot run because the code before them ended the run: `dead-code` is any return, panic or similar; the other two are Continue-As-New in the workflow function and inside an update handler. |
+| `impossible-type`, `impossible-nil`, `unknown-input-type` | `impossible-type` and `impossible-nil` are claims (cannot-be-tested) PathKit can prove from the types a value holds. `unknown-input-type` is what PathKit says when it **cannot** follow the value: needs-review, never a claim. |
+| `possible-correlation`, `model-limit`, `concurrency-order`, `needs-review` | All needs-review, all "PathKit is not sure". `possible-correlation`: two checks of one value that would contradict if nothing changed it. `model-limit`: PathKit's model cannot draw the behaviour (also used when a trace shows a claim may be wrong). `concurrency-order`: event order between coroutines. `needs-review` alone: anything unrecognized. |
+| `manual`, `known-defect` | Both set by a person. `manual`: the path cannot happen (cannot-be-tested), with a reason. `known-defect`: the path **can** happen, but a known bug blocks every test from reaching it (needs-review). The report counts these as "Blocked by known bugs"; fix the bug and remove the entry. A test that runs the path makes it testable by itself. |
+| `version-gate-old-branch`, `history-limit`, `workflow-task-failure`, `unfinished-handlers` | needs-special-test: possible in production, reachable only with a special test set-up. |
+| `either-or-wait`, `depends-on-missing`, `contradictory-get-result`, `closed-signal-channel`, `rejected-update-invisible`, `side-effect-error` | Single-purpose labels; their definitions are in the HTML glossary and the table above. |
+
+`known-defect` can only be set by you, in a rule or in `mark_untestable`:
+
+```json
+{ "classification": { "enabled": true, "rules": [
+  { "id": "eu-branch-blocked", "workflow": "orders.OrderWorkflow", "label": "known-defect",
+    "when": ["if region == \"eu\" --true"],
+    "reason": "the region is overwritten by a bug (ticket 123)" } ] } }
+```
+
+A rule with this label needs no `"impossible": true`. The reason is required, and the word `TODO` is refused.
+
 ### Helper functions (the workflow's own package)
 
 A workflow often calls functions of its own package that start activities or wait on timers (`o.charge(ctx)`, `reserve(ctx, items)`). PathKit follows those calls: the decisions inside the helper are decisions of the workflow, one set for each call, and show in `analyze` and `coverage` as `Sleep (timer) [in reserve]`. The error check after the call (`if err != nil`) is a decision too, with only the exit the helper's `return` allows. A helper with no call into the Temporal SDK (a validation function with `if`s) stays ordinary code, one step, as before. What is and is not followed, and how deep, is in LIMITATIONS.md ("Helper functions of the workflow's own package").
@@ -555,6 +583,49 @@ pathkit report: warning: rule "second-needs-first" (orders.W) entry "if a || b #
 ```
 
 It is a warning only (the exit code does not change), and it needs a baseline: without `classification.ci.baseline` (or `--baseline`) there is nothing to compare with. A baseline written before this existed has no anchors and gives no warning until it is written again. Adding or removing **any** decision with the same text warns (even one below it, which does not change what `#2` means), and so does an unrelated edit right next to the decision (a new `if` just above it, or a renamed activity it leads to): the warning can fire when `#2` is still right; check, then write the baseline again.
+
+### Which untested paths to start with: `report --groups` (path classification)
+
+A list of missed paths is long, and most of them differ only after the same untested step. `pathkit report --groups` groups the testable paths no test ran by the **first step no test took**, biggest group first:
+
+```
+Missed paths by first untested step: 530 testable paths in 259 groups
+  1. orders.OrderWorkflow: 8 paths, first untested step: if in.Express --true  (orders.go:42)
+       the tests get this far: if in.AmountCents <= 0 --false
+       how to cover it: make `in.Express` true
+```
+
+- It builds a tree from the paths the tests ran; a missed path follows the tree as far as it goes, and the step where it leaves the tree is its group. One test that takes that step usually covers several of the group's paths.
+- A workflow no test ran says `no test ran this workflow` and is grouped by its first decision.
+- Only testable paths no test ran are counted (not cannot-be-tested, not needs-review). Only the listed paths of a big workflow are grouped.
+- `--json` adds `missedGroups` (workflow, paths, firstUntestedStep, file, line, reachedAfter, howToCover; at most 500, `missedGroupsTotal` says how many there are). The HTML report always has the section, with the first 100 groups.
+
+### Checking what you wrote: `pathkit rules check` and `pathkit suggest` (path classification)
+
+`pathkit rules check` lists every rule, `mark_untestable` / `mark_testable` entry, `//pathkit:untestable` comment and explained trace, with how many listed paths (or traces) it hits right now:
+
+```
+Rules check: 1 entry
+  rule "eu-branch-blocked" [known-defect] in orders.OrderWorkflow: hits 2 paths
+```
+
+- **Refused (exit 1):** a rule, an untestable override or a comment that hits a path a test ran. A recorded run proves the path can happen, so the entry is wrong; fix or remove it.
+- **Warnings:** an entry that hits no path (stale, or mistyped; for a big workflow it only says the path may not be listed), and two entries that hit the same path (the first reason found wins: override, comment, rule). `--json` has the same lists.
+
+`pathkit suggest` prints a draft rule for each group of needs-review paths no test ran. Nothing is written for you. Every draft has the reason `TODO`, and PathKit refuses a config that still has it, so a draft only takes effect after you write the real reason. The draft's label is `TODO` too (the config refuses it): write `known-defect` if a bug blocks the path, or a cannot-be-tested label such as `manual` with `"impossible": true` if you know the path can never happen. Run `pathkit rules check` after pasting it.
+
+### The assumptions panel (path classification)
+
+With classification on, every report ends its classification block with the assumptions the claims rest on, each on or off, and how many claims rest on it:
+
+```
+Assumptions the claims rest on (a claim is a path PathKit calls impossible; "on" means PathKit uses the assumption):
+  closed-signal-channels:  on; no claim rests on it
+  default-json-converter:  on; no claim rests on it
+  no-custom-interceptor:   OFF (the module registers a custom interceptor ...); no claim rests on it
+```
+
+The JSON has the same list as `assumptionPanel`; the HTML summary shows it with a link to each definition. A part of a big workflow's map left out as impossible counts as one claim.
 
 ### Why does a path have its label? `pathkit explain` (path classification)
 

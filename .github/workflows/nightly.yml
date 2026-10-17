@@ -1,0 +1,32 @@
+name: Nightly soundness
+
+# A long run of the soundness test: 10,000 random programs, with the fact
+# engine's "cannot be tested" claims checked against what the programs really
+# do. It runs on Linux only, once a night and on demand. The normal CI
+# workflow (ci.yml) is not changed by this file.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soundness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            testdata/pilot/go.sum
+
+      - name: Soundness test (10,000 programs)
+        env:
+          PATHKIT_SOUNDNESS_N: "10000"
+        run: go test -timeout 80m -run TestNoFalseCannotBeTestedClaims -v ./internal/soundness

@@ -24,6 +24,8 @@ type reportOptions struct {
 	hints   bool
 	// unmatched adds the unmatched-trace report (--unmatched).
 	unmatched bool
+	// groups adds the missed paths grouped by first untested step (--groups).
+	groups bool
 }
 
 func newReportCommand() *cobra.Command {
@@ -68,6 +70,7 @@ writes that file.`,
 	f.BoolVar(&opt.summary, "summary", false, "one line per workflow instead of every path")
 	f.BoolVar(&opt.hints, "hints", false, "under every testable path no test ran, say what a test must make happen to run it")
 	f.BoolVar(&opt.unmatched, "unmatched", false, "add a report of the traces that fit no path: where each left the map, what the map expected, and the likely cause")
+	f.BoolVar(&opt.groups, "groups", false, "add the testable paths no test ran, grouped by the first step no test took (biggest group first, with where it is and how to cover it)")
 	f.BoolVar(&opt.noColor, "no-color", false, "never colour the output (also: the config's \"noColor\", or the NO_COLOR environment variable)")
 	f.BoolVar(&opt.measure.allowStale, "allow-stale", false, "also count traces recorded for an older version of a workflow, when they still fit a path")
 	f.BoolVar(&opt.clean, "clean", false, "delete the trace files after the report (only when the report was produced)")
@@ -131,6 +134,9 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 		if opt.unmatched {
 			out.Unmatched = unmatchedJSON(m.res)
 		}
+		if opt.groups {
+			out.MissedGroups, out.MissedGroupsTotal = groupsJSON(m.res)
+		}
 		if err := enc.Encode(out); err != nil {
 			return err
 		}
@@ -149,6 +155,14 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 	if opt.unmatched {
 		plain += "\n" + render.UnmatchedSection(m.res)
 		printed += "\n" + render.UnmatchedSection(m.res)
+	}
+	if opt.groups {
+		sec := render.GroupsText(m.res)
+		if sec == "" {
+			sec = "Missed paths by first untested step: none (every testable path has a test).\n"
+		}
+		plain += "\n" + sec
+		printed += "\n" + sec
 	}
 	return finish(cmd, "report", m, printed, plain, outFile, opt.clean, html)
 }
@@ -195,15 +209,53 @@ type (
 		PathCap *jsonPathCap `json:"pathCapWarning,omitempty"`
 		// Assumptions that are off, or that claims rest on; absent when there is
 		// nothing to say (the same as in the coverage JSON).
-		Assumptions []jsonAssumption `json:"assumptions,omitempty"`
+		Assumptions     []jsonAssumption `json:"assumptions,omitempty"`
+		AssumptionPanel []jsonAssumption `json:"assumptionPanel,omitempty"`
+		// Added with --groups only.
+		MissedGroups      []jsonGroup `json:"missedGroups,omitempty"`
+		MissedGroupsTotal int         `json:"missedGroupsTotal,omitempty"`
+		// Added with the known-defect label; absent when no path has it.
+		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
+	}
+	jsonGroup struct {
+		Workflow string   `json:"workflow"`
+		Paths    int      `json:"paths"`
+		Step     string   `json:"firstUntestedStep"`
+		File     string   `json:"file,omitempty"`
+		Line     int      `json:"line,omitempty"`
+		After    []string `json:"reachedAfter"`
+		// NoTests: no test ran any path of the workflow.
+		NoTests bool   `json:"noTests,omitempty"`
+		Hint    string `json:"howToCover,omitempty"`
 	}
 )
+
+// maxGroupsJSON is how many groups --groups --json lists; missedGroupsTotal
+// says how many there are when that is more.
+const maxGroupsJSON = 500
+
+func groupsJSON(res coverage.Result) ([]jsonGroup, int) {
+	gs := render.Groups(res)
+	total := 0
+	if len(gs) > maxGroupsJSON {
+		total, gs = len(gs), gs[:maxGroupsJSON]
+	}
+	out := []jsonGroup{}
+	for _, g := range gs {
+		after := g.After
+		if after == nil {
+			after = []string{}
+		}
+		out = append(out, jsonGroup{Workflow: g.Workflow, Paths: g.Missed, Step: g.Step, File: g.File, Line: g.Line, After: after, NoTests: g.NoTests, Hint: g.Hint})
+	}
+	return out, total
+}
 
 func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisInfo) jsonReport {
 	c := coverageJSON(res, threshold, bi)
 	out := jsonReport{SchemaVersion: c.SchemaVersion, Tool: c.Tool, Workflows: []jsonReportWorkflow{}, Excluded: c.Excluded,
 		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder,
-		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions}
+		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
 		// Forward slashes on every system, so the JSON is the same everywhere;

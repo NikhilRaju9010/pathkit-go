@@ -20,6 +20,9 @@ type ClassificationView struct {
 	// Notes), printed under the bucket counts. Empty when nothing was
 	// configured.
 	Notes []string
+	// Panel is the assumptions the claims rest on, on or off, with how many
+	// claims rest on each (classify.Engine.AssumptionPanel). Empty: not printed.
+	Panel []classify.AssumptionStatus
 }
 
 // ClassificationLines is the classification block, one string per line, in
@@ -57,6 +60,9 @@ func ClassificationLines(res coverage.Result, v ClassificationView) []string {
 		lines = append(lines, fmt.Sprintf("  %s %d", bk.name, bk.count))
 		lines = append(lines, reasons[bk.bucket]...)
 	}
+	if n := BlockedByKnownBugs(res); n > 0 {
+		lines = append(lines, fmt.Sprintf("  Blocked by known bugs: %d", n))
+	}
 	for _, n := range v.Notes {
 		lines = append(lines, "  "+n)
 	}
@@ -73,7 +79,51 @@ func ClassificationLines(res coverage.Result, v ClassificationView) []string {
 
 // ClassificationBlock is ClassificationLines as text ending in a newline.
 func ClassificationBlock(res coverage.Result, v ClassificationView) string {
-	return strings.Join(ClassificationLines(res, v), "\n") + "\n"
+	return strings.Join(append(ClassificationLines(res, v), AssumptionPanelLines(v.Panel)...), "\n") + "\n"
+}
+
+// AssumptionPanelLines are the lines of the assumptions panel, which every
+// report shows when classification is on: each assumption, on or off, and
+// how many claims rest on it.
+func AssumptionPanelLines(panel []classify.AssumptionStatus) []string {
+	if len(panel) == 0 {
+		return nil
+	}
+	lines := []string{"Assumptions the claims rest on (a claim is a path PathKit calls impossible; \"on\" means PathKit uses the assumption):"}
+	for _, a := range panel {
+		state := "on"
+		if !a.On {
+			state = "OFF: " + a.Why
+		}
+		lines = append(lines, fmt.Sprintf("  %-24s %s; %s", a.Name+":", state, ClaimsText(a.Claims)))
+	}
+	return lines
+}
+
+// ClaimsText is "no claim rests on it", "1 claim rests on it" or "N claims
+// rest on it".
+func ClaimsText(n int) string {
+	switch n {
+	case 0:
+		return "no claim rests on it"
+	case 1:
+		return "1 claim rests on it"
+	}
+	return fmt.Sprintf("%d claims rest on it", n)
+}
+
+// BlockedByKnownBugs counts the paths a person marked known-defect and no
+// test has run (a path a test ran is testable and not counted).
+func BlockedByKnownBugs(res coverage.Result) int {
+	n := 0
+	for _, w := range res.Workflows {
+		for _, p := range w.Paths {
+			if p.Class.Label == classify.KnownDefect && p.Class.Bucket == classify.NeedsReview {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // reasonLines is, for each bucket other than testable, one line per reason

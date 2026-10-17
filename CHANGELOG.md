@@ -1,8 +1,26 @@
 # Changelog
 
-All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is "Unreleased". The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
+All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is part of the version being prepared, v0.2.0 (not tagged). The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
 
-## Unreleased
+## v0.2.0 (not tagged yet)
+
+The next version collects everything below; nothing is tagged yet.
+
+### Added: review tools
+
+- **Missed paths by first untested step.** `pathkit report --groups` groups the testable paths no test ran by the first step no test took, biggest group first, each with file and line and how to cover it. The JSON has `missedGroups` (with `--groups`), the HTML report has a section.
+- **`pathkit rules check`** shows how many paths every rule, override, comment and explained trace hits. It refuses (exit 1) a rule, untestable override or comment that hits a path a test ran, and warns about entries that hit nothing or overlap.
+- **`pathkit suggest`** drafts config rules for the needs-review paths. Every draft has the label and the reason `TODO`; the config now refuses `TODO` in rules and overrides too.
+- **Label `known-defect`** (needs-review), set only by a person in a rule or `mark_untestable`: the path can happen, a known bug blocks it. The summary says "Blocked by known bugs: N" (`blockedByKnownBugs` in the JSON). This closes gap (h) of the shape fixtures.
+- **Assumptions panel** in every report format: `closed-signal-channels`, `default-json-converter`, `no-custom-interceptor`, on or off, with the number of claims that rest on each (`assumptionPanel` in the JSON).
+- **Label guide.** SETUP-GUIDE.md has a section on labels that look alike (no label was renamed); a test fails when a label is missing from the guide.
+- **Nightly workflow** `.github/workflows/nightly.yml` runs the soundness test with 10,000 programs on Linux. The normal CI workflow is unchanged.
+
+### Changed (stage view)
+
+- Stage numbers print only for a workflow whose paths are not all listed; the `branches` total of such a workflow is again the listed exits (`branches_all` is the whole map).
+- Facts across stages: once a set of incoming states was cut at the limit, later stages are judged as cut too (a reviewer found the flag was forgotten after one stage).
+- The `report_orders.html` golden gained the missed-paths section (new section only).
 
 ### Added: big workflows (exact counts, stages, pruning)
 

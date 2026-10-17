@@ -311,3 +311,32 @@ func TestStageSettingsRead(t *testing.T) {
 		}
 	}
 }
+
+// "pathkit suggest" writes the reason "TODO"; a config that still has it is
+// refused, for rules and overrides as well as explained traces. A
+// known-defect rule may leave out "impossible".
+func TestTodoReasonIsRefused(t *testing.T) {
+	tests := []struct {
+		name, body, want string
+	}{
+		{"rule", `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "known-defect", "when": ["if a --true"], "reason": "TODO"}]}}`, `still has the reason "TODO"`},
+		{"override", `{"classification": {"enabled": true, "paths": {"mark_untestable": [{"workflow": "W", "stable_id": "s1:0123456789ab", "label": "known-defect", "reason": " todo "}]}}}`, `still has the reason "TODO"`},
+		{"impossible false", `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "known-defect", "when": ["if a --true"], "impossible": false, "reason": "bug"}]}}`, "cannot be false"},
+		{"other label needs impossible", `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "x-y", "when": ["if a --true"], "reason": "bug"}]}}`, `"impossible" must be true`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), FileName)
+			write(t, path, tt.body)
+			_, err := Read(path)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("want an error with %q, got %v", tt.want, err)
+			}
+		})
+	}
+	path := filepath.Join(t.TempDir(), FileName)
+	write(t, path, `{"classification": {"enabled": true, "rules": [{"id": "r1", "workflow": "W", "label": "known-defect", "when": ["if a --true"], "reason": "bug 12 blocks it"}]}}`)
+	if _, err := Read(path); err != nil {
+		t.Fatalf("a known-defect rule without \"impossible\" was refused: %v", err)
+	}
+}

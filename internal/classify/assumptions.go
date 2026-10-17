@@ -19,6 +19,11 @@ const AssumptionJSON = facts.AssumptionJSON
 // the call is made (see Definitions).
 const AssumptionInterceptor = facts.AssumptionInterceptor
 
+// AssumptionClosedChannels is the assumption behind the closed-signal-channel
+// detector: Temporal never closes a signal channel while the workflow runs,
+// so a receive that finds it closed ("more == false") cannot happen.
+const AssumptionClosedChannels = "closed-signal-channels"
+
 // AssumptionStatus says whether an assumption is on in this run, why not
 // when it is off, and how many claims rest on it.
 type AssumptionStatus struct {
@@ -130,4 +135,45 @@ func claimsRest(n int) string {
 		return "1 claim rests on it"
 	}
 	return fmt.Sprintf("%d claims rest on it", n)
+}
+
+// AssumptionPanel lists the three assumptions PathKit's claims can rest on,
+// each with whether it is on and how many cannot-be-tested claims rest on it
+// in this run. Unlike Assumptions it lists all of them every time, so a
+// report always shows what it rests on. final is every path's classification
+// after coverage has run.
+func (e *Engine) AssumptionPanel(final []Classification) []AssumptionStatus {
+	claims := func(name string) int {
+		n := 0
+		for _, c := range final {
+			if c.Bucket != CannotBeTested {
+				continue
+			}
+			for _, a := range c.Assumptions {
+				if a == name {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	closed := 0
+	for _, c := range final {
+		if c.Bucket == CannotBeTested && c.Label == "closed-signal-channel" {
+			closed++
+		}
+	}
+	chOn, chWhy := true, ""
+	for _, d := range e.disabled {
+		if d.Name == "closed-signal-channel" {
+			chOn, chWhy = false, "the closed-signal-channel detector is turned off in the config ("+d.Reason+")"
+		}
+	}
+	jsonOn, jsonWhy := e.JSONConverterOn()
+	icptOn, icptWhy := e.InterceptorOn()
+	return []AssumptionStatus{
+		{Name: AssumptionClosedChannels, On: chOn, Why: chWhy, Claims: closed},
+		{Name: AssumptionJSON, On: jsonOn, Why: jsonWhy, Claims: claims(AssumptionJSON)},
+		{Name: AssumptionInterceptor, On: icptOn, Why: icptWhy, Claims: claims(AssumptionInterceptor)},
+	}
 }

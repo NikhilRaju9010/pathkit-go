@@ -18,12 +18,14 @@ When v2 work closes a gap, `today` and `status` change in the same commit as the
 | `elemtype` | (e) `elem.(map[string]interface{})` on a slice built only with maps |
 | `zerovalue` | (f) `var s string` then `if s == ""` |
 | `helpererr` | (g) a helper that wraps `ExecuteActivity` and returns its error |
-| `knowndefect` | (h) a branch dead only because of a bug (needs-review, `known-defect`, set in the config) |
+| `knowndefect` | (h) a branch dead only because of a bug (needs-review, `known-defect`, set by the rule in this folder's `pathkit.json`) |
 | `addrtaken`, `closurewrite`, `ptrreceiver`, `loopchange`, `sidesignal` | (i) to (m) safety cases that must stay testable |
 | `notunderstood`, `pointerfield`, `unsafefn`, `skipregions` | (o) to (r) more safety cases for the fact engine: values assigned something not understood, a field behind a pointer, a function that uses `unsafe`, and an `if` or loop PathKit does not decide |
 | `recoverfn` | (n, first half) `recover`: must stay testable |
 | `gotofn` | (n, second half) `goto`: PathKit refuses it with a clear message (`TestGotoIsRefused`) |
 
 Run them with `go test ./internal/shapes -v`; the log lists every `today: missed` answer (the gap list for v2). To print today's answers for a new fixture: `PATHKIT_SHAPES_DUMP=1 go test ./internal/shapes -run Dump -v`.
+
+A folder may also hold a `pathkit.json`: the entries a person writes for a shape only a person can decide. The test reads it when it is there.
 
 The folder is its own Go module (`go vet ./...` inside it must pass).

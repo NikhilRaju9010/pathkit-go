@@ -36,6 +36,9 @@
 <nav aria-label="Sections">
 <a href="#summary">Summary</a>
 <a href="#workflows">Workflows</a>
+{{- if .Groups}}
+<a href="#groups">Missed paths ({{.GroupsTotal}} groups)</a>
+{{- end}}
 <a href="#paths">Paths</a>
 {{- if .Glossary}}
 <a href="#definitions">Glossary</a>
@@ -86,6 +89,16 @@
 {{end}}</pre>
 </details>
 {{- end}}
+{{- if .Panel}}
+<div class="assumptions" data-assumptions="{{len .Panel}}">
+<h3>Assumptions the claims rest on</h3>
+<ul>
+{{- range .Panel}}
+<li data-assumption="{{.Name}}" data-on="{{.On}}"><strong>{{.Name}}</strong>: {{.Status}}; {{.Claims}}. <a href="#def-{{.Name}}">What it means</a></li>
+{{- end}}
+</ul>
+</div>
+{{- end}}
 {{- with .FailUnder}}
 <p class="fail-under" data-fail-under-passed="{{.Passed}}">{{.Text}}</p>
 {{- end}}
@@ -117,6 +130,33 @@
 <p class="note">No workflows in scope.</p>
 {{- end}}
 </section>
+
+{{- if .Groups}}
+<section id="groups" aria-labelledby="h-groups" data-groups="{{.GroupsTotal}}">
+<h2 id="h-groups">Missed paths by first untested step</h2>
+<p class="note">Testable paths with no test: {{.GroupsPaths}}. A group is the paths that leave the road the tests walked at the same step, so one new test that takes that step usually covers several of them. Biggest groups first. A workflow with more paths than the list holds counts only its listed paths.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Missed paths grouped by the first step no test took</caption>
+<thead><tr><th scope="col">Paths</th><th scope="col">Workflow</th><th scope="col">First untested step</th><th scope="col">Where</th><th scope="col">How to cover it</th></tr></thead>
+<tbody>
+{{- range .Groups}}
+<tr>
+<td data-label="Paths">{{.Paths}}</td>
+<td data-label="Workflow">{{.Workflow}}</td>
+<td data-label="First untested step"><code>{{.Step}}</code><br><span class="note">{{.After}}</span></td>
+<td data-label="Where" class="file">{{.Where}}</td>
+<td data-label="How to cover it">{{.Hint}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- if .GroupsMore}}
+<p class="note">... and {{.GroupsMore}} more groups (<code>pathkit report --groups --json</code> lists them).</p>
+{{- end}}
+</section>
+{{- end}}
 
 <section id="paths" aria-labelledby="h-paths">
 <h2 id="h-paths">Paths</h2>

@@ -1,0 +1,14 @@
+{
+  "classification": {
+    "enabled": true,
+    "rules": [
+      {
+        "id": "eu-branch-blocked",
+        "workflow": "knowndefect.BugBlockedBranch",
+        "label": "known-defect",
+        "when": ["if region == \"eu\" --true"],
+        "reason": "region is overwritten by mistake, so the eu branch cannot run until the bug is fixed"
+      }
+    ]
+  }
+}

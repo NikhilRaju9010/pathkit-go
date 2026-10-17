@@ -213,6 +213,10 @@ func strict(raw json.RawMessage, into any) error {
 	return d.Decode(into)
 }
 
+// todoReason is the placeholder "pathkit suggest" writes; a config that
+// still has it is refused.
+func todoReason(s string) bool { return strings.EqualFold(strings.TrimSpace(s), "TODO") }
+
 func blank(s *string) bool { return s == nil || strings.TrimSpace(*s) == "" }
 
 // readClassification checks the section. fail builds an error that starts
@@ -301,6 +305,9 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 		if blank(e.Label) {
 			return c, fail(`rule %q needs a "label"`, id)
 		}
+		if todoReason(*e.Label) {
+			return c, fail(`rule %q still has the label "TODO" that "pathkit suggest" prints: write the label (known-defect if a bug blocks the path, or a cannot-be-tested label with "impossible": true)`, id)
+		}
 		if !labelPattern.MatchString(*e.Label) {
 			return c, fail(`rule %q: "label" must be lowercase words joined by - (like "set-then-test"), got %q`, id, *e.Label)
 		}
@@ -329,11 +336,18 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 			}
 			without = *e.Without
 		}
-		if e.Impossible == nil || !*e.Impossible {
+		knownDefect := *e.Label == "known-defect"
+		if !knownDefect && (e.Impossible == nil || !*e.Impossible) {
 			return c, fail(`rule %q: "impossible" must be true (a rule can only say a combination of decisions is impossible)`, id)
+		}
+		if knownDefect && e.Impossible != nil && !*e.Impossible {
+			return c, fail(`rule %q: "impossible" may be left out for the label known-defect, but it cannot be false`, id)
 		}
 		if blank(e.Reason) {
 			return c, fail(`rule %q needs a "reason"`, id)
+		}
+		if todoReason(*e.Reason) {
+			return c, fail(`rule %q still has the reason "TODO" that PathKit prints in its ready-made entry: replace it with the real reason (it is shown in every report)`, id)
 		}
 		c.Rules = append(c.Rules, Rule{ID: id, Workflow: strings.TrimSpace(*e.Workflow), Label: *e.Label, When: *e.When, Without: without, Reason: *e.Reason})
 	}
@@ -497,6 +511,9 @@ func overrideFrom(where string, workflow, stableID, reason *string, fail func(st
 	}
 	if blank(reason) {
 		return o, fail(`%s (%s %s) needs a "reason"`, where, strings.TrimSpace(*workflow), *stableID)
+	}
+	if todoReason(*reason) {
+		return o, fail(`%s (%s %s) still has the reason "TODO" that PathKit prints in its ready-made entry: replace it with the real reason (it is shown in every report)`, where, strings.TrimSpace(*workflow), *stableID)
 	}
 	o.Workflow, o.StableID, o.Reason = strings.TrimSpace(*workflow), *stableID, *reason
 	return o, nil

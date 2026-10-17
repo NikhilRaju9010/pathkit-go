@@ -69,6 +69,11 @@ type expectedFile struct {
 	Workflows   map[string]workflowCase `json:"workflows"`
 }
 
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
 func fixtureDirs(t *testing.T) []string {
 	t.Helper()
 	entries, err := os.ReadDir(shapesDir)
@@ -86,7 +91,8 @@ func fixtureDirs(t *testing.T) []string {
 }
 
 // todayResults runs PathKit as it is now on one fixture folder, with
-// classification on and no config rules, and lists every path of every
+// classification on and no config rules (unless the folder has a
+// pathkit.json), and lists every path of every
 // workflow.
 func todayResults(t *testing.T, dir string) map[string][]todayPath {
 	t.Helper()
@@ -94,7 +100,17 @@ func todayResults(t *testing.T, dir string) map[string][]todayPath {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eng, err := classify.NewEngine(scope.Classification{Enabled: true})
+	cl := scope.Classification{Enabled: true}
+	// A fixture may carry a pathkit.json: the entries a person writes, for
+	// the shapes only a person can decide (shape h, known-defect).
+	if cfgPath := filepath.Join(shapesDir, dir, "pathkit.json"); fileExists(cfgPath) {
+		cfg, err := scope.Read(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cl = cfg.Classification
+	}
+	eng, err := classify.NewEngine(cl)
 	if err != nil {
 		t.Fatal(err)
 	}

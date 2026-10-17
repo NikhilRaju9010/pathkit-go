@@ -143,6 +143,10 @@ type WorkflowResult struct {
 	Pruned []PrunedResult
 	// Stages is the workflow cut into stages, with the stage paths a test ran.
 	Stages []StageResult
+	// Ran holds every prefix of every path a counted trace ran, as the exit
+	// ids joined by newlines (a path beyond the list too); empty when no test
+	// ran the workflow. MissedGroups reads it.
+	Ran map[string]bool
 	// AllBranches and AllBranchesTaken count the exits of the whole map (the
 	// same as Branches when the list is whole).
 	AllBranches, AllBranchesTaken int
@@ -376,6 +380,7 @@ func Compute(in Input) Result {
 		hits     []map[string]int       // per stage: traces per stage path key
 		unpruned map[int]bool           // pruned groups some trace ran through
 		beyond   int                    // traces that fit the map but not the list
+		ran      map[string]bool        // every prefix of every path a counted trace ran (a path beyond the list too)
 	}
 	states := map[string]*state{}
 	var order []*state
@@ -389,7 +394,7 @@ func Compute(in Input) Result {
 			plan = in.Plan(w.Name, w.Graph)
 		}
 		st := &state{wf: w, paths: lst.PathList, listing: lst, plan: plan, byKey: map[string]int{}, branches: map[string]bool{}, unexp: map[string]*Unexplained{},
-			seen: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
+			seen: map[string]bool{}, ran: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
 		for k := range st.hits {
 			st.hits[k] = map[string]int{}
 		}
@@ -538,6 +543,12 @@ func Compute(in Input) Result {
 			}
 		}
 		res.Counts.Counted++
+		prefix := ""
+		for _, s := range out.Path.Steps {
+			prefix += s.Exit.ID.String() + "\n"
+			st.ran[prefix] = true
+		}
+		st.ran[""] = true
 		if !ok { // a path of a workflow with more paths than the list holds
 			res.Counts.BeyondCap++
 			st.beyond++
@@ -591,6 +602,7 @@ func Compute(in Input) Result {
 		wr := WorkflowResult{Name: st.wf.Name, File: st.wf.File, AddedByConfig: st.wf.AddedByConfig, Truncated: st.paths.Truncated, Branches: len(st.branches)}
 		wr.Breakdown.Policy = policy
 		wr.Exact, wr.Capped, wr.BeyondCap = st.listing.Exact, st.capped, st.beyond
+		wr.Ran = st.ran
 		for i, p := range st.paths.List {
 			pr := PathResult{Number: i + 1, Path: p, Covered: st.traces[i] > 0, Traces: st.traces[i], StaleTrace: st.stale[i], StableID: p.StableID(), Class: classifier(st.wf.Name, p)}
 			if pr.Class.Bucket == "" {
