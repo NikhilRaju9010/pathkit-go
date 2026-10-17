@@ -349,9 +349,85 @@ func PossibleMapPassedToCall(ctx workflow.Context) error {
 	return nil
 }
 
-func PossibleMapPassedToActivity(ctx workflow.Context) error {
+// The SDK encodes the arguments of ExecuteActivity when the call is made, so
+// the activity works on a copy and the map stays as it was (assumption
+// no-custom-interceptor).
+func ImpossibleMapPassedToActivity(ctx workflow.Context) error {
 	m := map[string]interface{}{"k": "x"}
 	_ = workflow.ExecuteActivity(ctx, "Fetch", m).Get(ctx, nil)
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// A local activity gets the very map the workflow holds (its arguments are
+// not encoded), so it may change it: not followed.
+func PossibleMapPassedToLocalActivity(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	_ = workflow.ExecuteLocalActivity(ctx, "Fetch", m).Get(ctx, nil)
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+type activityInput struct {
+	Data map[string]interface{}
+	Name string
+}
+
+// The map inside a struct written in the call is encoded with it.
+func ImpossibleMapInsideActivityInput(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	_ = workflow.ExecuteActivity(ctx, "Fetch", &activityInput{Data: m, Name: "n"}).Get(ctx, nil)
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// The struct is kept in a variable first: the map is reachable through it.
+func PossibleMapInsideKeptInput(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	in := &activityInput{Data: m, Name: "n"}
+	_ = workflow.ExecuteActivity(ctx, "Fetch", in).Get(ctx, nil)
+	in.Data["k"] = 1
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+func ImpossibleMapPassedToChildWorkflow(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	_ = workflow.ExecuteChildWorkflow(ctx, "Child", m).Get(ctx, nil)
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+func ImpossibleMapSignalled(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	_ = workflow.SignalExternalWorkflow(ctx, "id", "", "sig", m).Get(ctx, nil)
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// The map is also handed to an ordinary function: not followed.
+func PossibleMapPassedToActivityAndCall(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	_ = workflow.ExecuteActivity(ctx, "Fetch", m).Get(ctx, nil)
+	fill(m)
 	switch m["k"].(type) {
 	case int:
 		_ = act(ctx)

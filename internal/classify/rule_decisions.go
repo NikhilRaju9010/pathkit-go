@@ -149,9 +149,11 @@ func (e *ambiguousError) Error() string {
 //     a misspelled "without" entry would make the rule match MORE paths.
 func (e *Engine) AddGraph(workflow string, g *model.Graph) error {
 	on, _ := e.JSONConverterOn()
+	copied, _ := e.InterceptorOn()
 	e.graphs[workflow] = g
-	e.facts[workflow] = facts.New(g, facts.Options{JSONDecode: on})
+	e.facts[workflow] = facts.New(g, facts.Options{JSONDecode: on, ArgsCopied: copied})
 	e.jsonRelevant = e.jsonRelevant || e.facts[workflow].JSONRelevant()
+	e.icptRelevant = e.icptRelevant || e.facts[workflow].InterceptorRelevant()
 	t := newDecisionTable(g)
 	kept := e.anchors[:0]
 	for _, a := range e.anchors {

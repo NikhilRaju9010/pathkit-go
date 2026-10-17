@@ -257,3 +257,26 @@ func TestAssumptionsRead(t *testing.T) {
 		}
 	}
 }
+
+// classification.assumptions.no_custom_interceptor is "auto" (the default) or
+// "off"; anything else is refused.
+func TestInterceptorAssumptionRead(t *testing.T) {
+	read := func(body string) (string, error) {
+		path := filepath.Join(t.TempDir(), FileName)
+		write(t, path, body)
+		c, err := Read(path)
+		if err != nil {
+			return "", err
+		}
+		return c.Classification.NoCustomInterceptor, nil
+	}
+	if v, err := read(`{"classification": {"enabled": true}}`); err != nil || v != "auto" {
+		t.Errorf("default: %q %v", v, err)
+	}
+	if v, err := read(`{"classification": {"enabled": true, "assumptions": {"no_custom_interceptor": "off"}}}`); err != nil || v != "off" {
+		t.Errorf("off: %q %v", v, err)
+	}
+	if _, err := read(`{"classification": {"enabled": true, "assumptions": {"no_custom_interceptor": "on"}}}`); err == nil {
+		t.Error(`accepted "on"`)
+	}
+}

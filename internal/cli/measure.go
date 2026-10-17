@@ -446,6 +446,20 @@ func classificationEngine(sc *scoped, cmdName string, stderr io.Writer) (*classi
 		}
 		engine.SetConverterScan(hits)
 	}
+	// The same for a custom interceptor (the assumption no-custom-interceptor).
+	if !cl.EngineOff && cl.NoCustomInterceptor != "off" {
+		var hits []string
+		seenRoot := map[string]bool{}
+		for _, r := range sc.mapped {
+			root := load.ModuleRoot(r.wf.Filename)
+			if root == "" || seenRoot[root] {
+				continue
+			}
+			seenRoot[root] = true
+			hits = append(hits, load.CustomInterceptorUse(root)...)
+		}
+		engine.SetInterceptorScan(hits)
+	}
 	for _, r := range sc.mapped {
 		engine.AddMarks(r.wf.Name, r.graph.Marks)
 		if err := engine.AddGraph(r.wf.Name, r.graph); err != nil {

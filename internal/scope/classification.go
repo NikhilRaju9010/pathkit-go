@@ -36,6 +36,10 @@ type Classification struct {
 	// "auto" (the default: on unless the module sets a custom data
 	// converter) or "off".
 	JSONConverter string
+	// NoCustomInterceptor is classification.assumptions.no_custom_interceptor:
+	// "auto" (the default; on unless the module registers a custom interceptor)
+	// or "off".
+	NoCustomInterceptor string
 }
 
 // CISettings is classification.ci.
@@ -112,6 +116,7 @@ type classificationPart struct {
 
 type assumptionsPart struct {
 	DefaultJSONConverter *string `json:"default_json_converter"`
+	NoCustomInterceptor  *string `json:"no_custom_interceptor"`
 }
 
 type enginePart struct {
@@ -327,6 +332,15 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 			c.JSONConverter = v
 		default:
 			return c, fail(`classification.assumptions.default_json_converter must be "auto" or "off", got %q`, v)
+		}
+	}
+	c.NoCustomInterceptor = "auto"
+	if p.Assumptions != nil && p.Assumptions.NoCustomInterceptor != nil {
+		switch v := *p.Assumptions.NoCustomInterceptor; v {
+		case "auto", "off":
+			c.NoCustomInterceptor = v
+		default:
+			return c, fail(`classification.assumptions.no_custom_interceptor must be "auto" or "off", got %q`, v)
 		}
 	}
 

@@ -320,6 +320,7 @@ func (s *state) buildClaim(c claimSpec) *Claim {
 	uses := c.step
 	roots := map[*types.Var]bool{}
 	assumes := false
+	copied := false // a fact about a slice or map that was handed to a call that encodes it
 	for _, w := range whys {
 		when := 2*w.atStep + 1
 		if w.origin == oBranch || (w.origin == oCommaOk && w.step > 0) {
@@ -331,6 +332,9 @@ func (s *state) buildClaim(c claimSpec) *Claim {
 		uses = max(uses, w.step, w.atStep+1)
 		if w.key.v != nil {
 			roots[w.key.v] = true
+			if s.a.relaxed[w.key.v] {
+				copied = true
+			}
 		}
 		if w.origin == oJSON {
 			assumes = true
@@ -369,7 +373,10 @@ func (s *state) buildClaim(c claimSpec) *Claim {
 	}
 	claim := &Claim{Step: c.step, Kind: kind, Explanation: fmt.Sprintf(c.explanation, strings.Join(known, " ")), Proof: proof, Uses: uses}
 	if assumes {
-		claim.Assumptions = []string{AssumptionJSON}
+		claim.Assumptions = append(claim.Assumptions, AssumptionJSON)
+	}
+	if copied {
+		claim.Assumptions = append(claim.Assumptions, AssumptionInterceptor)
 	}
 	return claim
 }

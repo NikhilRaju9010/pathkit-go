@@ -14,6 +14,7 @@ package progs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -23,10 +24,28 @@ import (
 
 var _ = errors.New
 var _ = bytes.NewReader
+var _ = context.Background
 var _ json.Number
 var _ = time.Second
 
 func noop() {}
+
+// ActEcho is an activity that receives a map: the SDK hands it a decoded copy,
+// so whatever it does to the map is not seen by the workflow.
+func ActEcho(ctx context.Context, m map[string]interface{}) error {
+	if m != nil {
+		m["k"] = 99
+	}
+	return nil
+}
+
+// LocalSet is a local activity: it gets the very map the workflow holds.
+func LocalSet(ctx context.Context, m map[string]interface{}) error {
+	if m != nil {
+		m["k"] = 5
+	}
+	return nil
+}
 
 // pair2 stands for a call that is not Temporal's and may fail.
 func pair2(n int) error {
@@ -47,6 +66,9 @@ type Rec struct {
 func (r *Rec) setA(s string) { r.A = s }
 
 type Flagged bool
+
+// actInput wraps a map in a struct handed to an activity.
+type actInput struct{ Data map[string]interface{} }
 
 func sp(s string) *string { return &s }
 
@@ -111,6 +133,7 @@ func TestRunAll(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	run := func(name string, fn interface{}, args ...interface{}) {
 		env := suite.NewTestWorkflowEnvironment()
+		env.RegisterActivity(ActEcho)
 		env.ExecuteWorkflow(fn, args...)
 		if !env.IsWorkflowCompleted() {
 			t.Fatalf("%s %v: not completed", name, args)

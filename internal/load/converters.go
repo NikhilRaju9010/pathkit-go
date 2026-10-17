@@ -164,3 +164,93 @@ func recvName(e ast.Expr) string {
 	}
 	return types.ExprString(e)
 }
+
+// CustomInterceptorUse lists (at most five) places in the module under root
+// that register a custom Temporal interceptor, as "file.go:12: the line".
+// Only code counts. What counts: an option named Interceptors (in a client or
+// worker options literal, or assigned), a type that embeds one of the SDK's
+// interceptor base types, and a method named InterceptWorkflow. An
+// interceptor sees the arguments of workflow.ExecuteActivity and the like
+// before the SDK encodes them, and may keep or change them. The same folders
+// are skipped as in CustomConverterUse.
+func CustomInterceptorUse(root string) []string {
+	var hits []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if len(hits) >= 5 {
+			return filepath.SkipAll
+		}
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "vendor", ".git", ".pathkit", "node_modules", "testdata":
+				if path != root {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, path, data, 0)
+		if err != nil {
+			return nil
+		}
+		lines := strings.Split(string(data), "\n")
+		rel, _ := filepath.Rel(root, path)
+		where := func(p token.Pos) string {
+			n := fset.Position(p).Line
+			return fmt.Sprintf("%s:%d: %s", filepath.ToSlash(rel), n, strings.TrimSpace(lines[n-1]))
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.KeyValueExpr:
+				if id, ok := x.Key.(*ast.Ident); ok && id.Name == "Interceptors" {
+					hits = append(hits, where(x.Pos()))
+				}
+			case *ast.AssignStmt:
+				for _, l := range x.Lhs {
+					if sel, ok := l.(*ast.SelectorExpr); ok && sel.Sel.Name == "Interceptors" {
+						hits = append(hits, where(x.Pos()))
+					}
+				}
+			case *ast.Field:
+				if len(x.Names) == 0 && isInterceptorBase(x.Type) { // an embedded field
+					hits = append(hits, where(x.Pos()))
+				}
+			case *ast.FuncDecl:
+				if x.Recv != nil && x.Name.Name == "InterceptWorkflow" {
+					hits = append(hits, where(x.Pos()))
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if len(hits) > 5 {
+		hits = hits[:5]
+	}
+	return hits
+}
+
+func isInterceptorBase(e ast.Expr) bool {
+	if s, ok := e.(*ast.StarExpr); ok {
+		e = s.X
+	}
+	name := types.ExprString(e)
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:]
+	}
+	switch name {
+	case "WorkflowInboundInterceptorBase", "WorkflowOutboundInterceptorBase", "WorkerInterceptorBase", "InterceptorBase", "WorkflowInterceptorBase":
+		return true
+	}
+	return false
+}

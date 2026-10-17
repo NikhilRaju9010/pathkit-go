@@ -86,3 +86,34 @@ func TestCustomConverterUse(t *testing.T) {
 		t.Errorf("a clean module: hits = %v", hits)
 	}
 }
+
+// A module that registers a custom interceptor is found; text, comments and
+// a module without one are not.
+func TestCustomInterceptorUse(t *testing.T) {
+	found := map[string]string{
+		"worker option":  "package w\nvar _ = worker.Options{Interceptors: x}\n",
+		"client option":  "package w\nfunc f(o *client.Options) { o.Interceptors = x }\n",
+		"embedded base":  "package w\ntype I struct{ interceptor.WorkflowOutboundInterceptorBase }\n",
+		"worker version": "package w\ntype I struct{}\nfunc (I) InterceptWorkflow(a, b any) any { return nil }\n",
+	}
+	for name, src := range found {
+		root := t.TempDir()
+		write(t, root, "go.mod", "module example.com/m\n")
+		write(t, root, "w/w.go", src)
+		if hits := CustomInterceptorUse(root); len(hits) != 1 || !strings.HasPrefix(hits[0], "w/w.go:") {
+			t.Errorf("%s: hits = %v", name, hits)
+		}
+	}
+	for name, src := range map[string]string{
+		"comment":                        "package w\n// Interceptors: x\nfunc F() {}\n",
+		"string":                         "package w\nvar s = \"InterceptWorkflow\"\n",
+		"a plain function named like it": "package w\nfunc InterceptWorkflow() {}\n",
+	} {
+		root := t.TempDir()
+		write(t, root, "go.mod", "module example.com/m\n")
+		write(t, root, "w/w.go", src)
+		if hits := CustomInterceptorUse(root); len(hits) != 0 {
+			t.Errorf("%s: hits = %v, want none", name, hits)
+		}
+	}
+}

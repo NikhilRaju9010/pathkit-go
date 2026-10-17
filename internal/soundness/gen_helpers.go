@@ -34,7 +34,7 @@ func (g *gen) strArg() string {
 // helperProbe declares a helper and writes calls of it in the function.
 func (g *gen) helperProbe() {
 	name := g.helperName()
-	switch g.r.Intn(12) {
+	switch g.r.Intn(14) {
 	case 0: // an error of its own, swallowed by the caller
 		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, s string) error {
 	_ = workflow.GetInfo(ctx)
@@ -206,6 +206,8 @@ func (g *gen) helperProbe() {
 		g.line(0, "if %s := %s(ctx, %s); %s != nil {", err, name, arg, err)
 		g.line(1, "noop()")
 		g.line(0, "}")
+	case 12, 13: // a map handed to activities and local activities
+		g.mapToCallProbe()
 	default: // returns the helper's result: the helper's end is the workflow's
 		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, b bool) error {
 	if b {
@@ -228,3 +230,46 @@ func (g *gen) boolConst() string { return []string{"false", "true"}[g.r.Intn(2)]
 
 // helperSource is the helpers declared by the program, then nothing else.
 func (g *gen) helperSource() string { return strings.Join(g.helpers, "\n") }
+
+// mapToCallProbe hands a map to an activity (the SDK encodes it at the call,
+// so the activity cannot change it), to a local activity (which gets the very
+// map and does), or to both in some order, directly or inside a struct, and
+// then looks at a value of the map. A claim about that value must follow.
+func (g *gen) mapToCallProbe() {
+	m, v := g.fresh("am"), g.fresh("av")
+	actx := g.fresh("ac")
+	g.line(0, "%s := map[string]interface{}{\"k\": \"x\"}", m)
+	g.line(0, "%s := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{StartToCloseTimeout: time.Minute})", actx)
+	lctx := g.fresh("lc")
+	g.line(0, "%s := workflow.WithLocalActivityOptions(ctx, workflow.LocalActivityOptions{StartToCloseTimeout: time.Minute})", lctx)
+	g.line(0, "_, _ = %s, %s", actx, lctx)
+	arg := m
+	if g.r.Intn(3) == 0 {
+		arg = "&actInput{Data: " + m + "}"
+	}
+	steps := []string{
+		fmt.Sprintf("_ = workflow.ExecuteActivity(%s, ActEcho, %s).Get(%s, nil)", actx, arg, actx),
+		fmt.Sprintf("_ = workflow.ExecuteLocalActivity(%s, LocalSet, %s).Get(%s, nil)", lctx, m, lctx),
+		fmt.Sprintf("_ = workflow.ExecuteActivity(%s, ActEcho, %s).Get(%s, nil)", actx, arg, actx),
+	}
+	n := 1 + g.r.Intn(3)
+	start := g.r.Intn(len(steps))
+	for i := 0; i < n; i++ {
+		g.line(0, "%s", steps[(start+i)%len(steps)])
+	}
+	if g.r.Intn(3) == 0 {
+		g.line(0, "if %s {", g.cond())
+		g.line(1, "_ = workflow.ExecuteLocalActivity(%s, LocalSet, %s).Get(%s, nil)", lctx, m, lctx)
+		g.line(0, "}")
+	}
+	g.line(0, "%s := %s[\"k\"]", v, m)
+	cases := []string{"string", "int", "float64", "nil"}
+	g.r.Shuffle(len(cases), func(i, j int) { cases[i], cases[j] = cases[j], cases[i] })
+	g.line(0, "switch %s.(type) {", v)
+	for _, c := range cases[:2+g.r.Intn(2)] {
+		g.line(0, "case %s:", c)
+		g.line(1, "noop()")
+	}
+	g.line(0, "}")
+	g.sinks = append(g.sinks, v)
+}

@@ -193,6 +193,9 @@ type (
 		Unmatched           *[]jsonUnmatched   `json:"unmatchedTraces,omitempty"`
 		// Absent when no workflow reached the path cap.
 		PathCap *jsonPathCap `json:"pathCapWarning,omitempty"`
+		// Assumptions that are off, or that claims rest on; absent when there is
+		// nothing to say (the same as in the coverage JSON).
+		Assumptions []jsonAssumption `json:"assumptions,omitempty"`
 	}
 )
 
@@ -200,7 +203,7 @@ func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisIn
 	c := coverageJSON(res, threshold, bi)
 	out := jsonReport{SchemaVersion: c.SchemaVersion, Tool: c.Tool, Workflows: []jsonReportWorkflow{}, Excluded: c.Excluded,
 		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder,
-		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap}
+		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
 		// Forward slashes on every system, so the JSON is the same everywhere;

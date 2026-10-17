@@ -44,6 +44,11 @@ const (
 // Temporal's default JSON converter.
 const AssumptionJSON = "default-json-converter"
 
+// AssumptionInterceptor names the assumption a claim rests on when it keeps
+// facts about a slice or map across a call that encodes its arguments:
+// no workflow interceptor in the module sees the original value.
+const AssumptionInterceptor = "no-custom-interceptor"
+
 // ProofStep is one plain sentence of a proof. Step is the 1-based step of
 // the path the sentence is about (0 when it is about code between steps or
 // is the closing sentence); Line is the source line it points at (0 for the

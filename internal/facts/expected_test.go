@@ -17,6 +17,18 @@ var wantClaims = map[string]map[string]Kind{
 		"J1.true J2.true J3.true J4.false J5.true|completed":    Contradictory,
 		"J1.true J2.true J3.true J4.true|completed":             Contradictory,
 	},
+	"ImpossibleMapPassedToActivity": {
+		"J1.case int|completed": ImpossibleType,
+	},
+	"ImpossibleMapInsideActivityInput": {
+		"J1.case int|completed": ImpossibleType,
+	},
+	"ImpossibleMapPassedToChildWorkflow": {
+		"J1.case int|completed": ImpossibleType,
+	},
+	"ImpossibleMapSignalled": {
+		"J1.case int|completed": ImpossibleType,
+	},
 	"ImpossibleHelperLocal": {
 		"J1.true|": ConstantCondition,
 	},
@@ -236,7 +248,9 @@ var wantUnknown = map[string][]string{
 	"PossibleJSONMapWritten":               {"J1.case int|completed", "J1.default|completed"},
 	"PossibleMapAddressTaken":              {"J1.case int|completed", "J1.default|completed"},
 	"PossibleMapAliasWrites":               {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapPassedToActivity":          {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapInsideKeptInput":           {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapPassedToActivityAndCall":   {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapPassedToLocalActivity":     {"J1.case int|completed", "J1.default|completed"},
 	"PossibleMapPassedToCall":              {"J1.case int|completed", "J1.default|completed"},
 	"PossibleMapReassigned":                {"J1.case int|completed", "J1.default|completed"},
 	"PossibleMapWrittenInClosure":          {"J1.case int|completed", "J1.default|completed"},

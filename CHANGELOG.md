@@ -45,6 +45,12 @@ Some paths can never run (a loop the code always enters, the same value tested t
 - **New:** values the workflow decodes itself with `json.Unmarshal`, or with `Decode` on a decoder made by `json.NewDecoder` in the same function that is never handed on and never calls `UseNumber`, are followed like decoded values, with no assumption (the standard library's rule).
 - **Duplicate stable ids:** a test now fails if two paths of any workflow share a stable id (run on the pilot, every fixture and shape fixture, and any folders in `PATHKIT_UNIQUE_STABLE_DIRS`). None did.
 
+### Changed: maps and slices handed to activities
+
+- **A map or slice passed to `ExecuteActivity`, `ExecuteChildWorkflow` or `SignalExternalWorkflow` is no longer forgotten.** The SDK encodes those arguments when the call is made (checked in the SDK source), so the callee gets a copy. `ExecuteLocalActivity` and every other call stay as before. Claims that rest on this name the new assumption `no-custom-interceptor`; it is switched off by itself when the module registers a custom interceptor, or by `classification.assumptions.no_custom_interceptor = "off"`, and the text report, the HTML glossary and the JSON say so.
+- **`report --json` now has the `assumptions` list**, as `coverage --json` already had.
+- In the fixtures: `PossibleMapPassedToActivity` became `ImpossibleMapPassedToActivity` (the new rule claims it); `PossibleMapPassedToLocalActivity` keeps the old behaviour under test.
+
 ### Added: proofs for automatic claims
 
 - **Claim proofs.** Every claim an automatic detector makes now carries its reasoning as an ordered list of plain sentences: one for each decision on the path that matters (with its step number and line of code), then a closing sentence. This includes the needs-review claims of the closed-channel and history-size detectors; a claim PathKit no longer trusts (because a trace fits no path) has no proof. `pathkit explain` prints it as a numbered `Proof:` block, and `--json` has a new `proof` key on those paths only. Nothing else in any output changed.

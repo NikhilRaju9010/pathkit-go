@@ -54,6 +54,13 @@ type Engine struct {
 	jsonHits []string
 	// jsonRelevant: some workflow has a value the assumption is about.
 	jsonRelevant bool
+	// icptMode is classification.assumptions.no_custom_interceptor; icptHits are
+	// the places a custom interceptor is registered in the module (the
+	// assumption is then off); icptRelevant: some workflow hands a slice or map
+	// to a call that encodes its arguments.
+	icptMode     string
+	icptHits     []string
+	icptRelevant bool
 	explained    []scope.ExplainedTrace
 	// extraWarnings are config warnings found while resolving rules.
 	extraWarnings []string
@@ -97,7 +104,7 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{},
-		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter}
+		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter, icptMode: c.NoCustomInterceptor}
 	if c.Policy == string(Exclude) {
 		e.policy = Exclude
 	}
@@ -410,4 +417,23 @@ func (e *Engine) replacements(workflow, stableID string) string {
 		return ""
 	}
 	return fmt.Sprintf(". %s follows helper functions now, and this path was split by what happens inside them: the paths that replace it are %s; mark the ones you mean under their new ids", workflow, strings.Join(ids, ", "))
+}
+
+// SetInterceptorScan tells the engine where the module registers a custom
+// interceptor (see load.CustomInterceptorUse). Any hit turns the assumption
+// no-custom-interceptor off. Call it before AddGraph.
+func (e *Engine) SetInterceptorScan(hits []string) { e.icptHits = hits }
+
+// InterceptorOn reports whether facts about a slice or map may be kept across
+// a call that encodes its arguments, and when not, why.
+func (e *Engine) InterceptorOn() (on bool, why string) {
+	switch {
+	case e.engineOff:
+		return false, "the fact engine is off"
+	case e.icptMode == "off":
+		return false, "turned off in the config (classification.assumptions.no_custom_interceptor)"
+	case len(e.icptHits) > 0:
+		return false, "the module registers a custom interceptor (" + e.icptHits[0] + ")"
+	}
+	return true, ""
 }

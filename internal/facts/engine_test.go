@@ -26,7 +26,7 @@ type found struct {
 }
 
 func analyzeFixture(t *testing.T, dir string) map[string]found {
-	return analyzeFixtureWith(t, dir, Options{JSONDecode: true})
+	return analyzeFixtureWith(t, dir, Options{JSONDecode: true, ArgsCopied: true})
 }
 
 func analyzeFixtureWith(t *testing.T, dir string, opts Options) map[string]found {
@@ -204,7 +204,7 @@ func TestThreeValuedHelpers(t *testing.T) {
 // With the default-json-converter assumption off, nothing is claimed about
 // decoded values: the fixtures that rest on it make no claim.
 func TestJSONRuleOff(t *testing.T) {
-	all := analyzeFixtureWith(t, engineDir, Options{JSONDecode: false})
+	all := analyzeFixtureWith(t, engineDir, Options{JSONDecode: false, ArgsCopied: true})
 	for _, name := range []string{"ImpossibleJSONParam", "ImpossibleJSONMapParam", "ImpossibleJSONNested", "ImpossibleJSONGet"} {
 		if f := all[name]; len(f.claims) != 0 {
 			t.Errorf("%s: claims with the rule off: %v", name, f.claims)
@@ -261,8 +261,8 @@ func TestProofTextForTheTypeSwitchShape(t *testing.T) {
 // default-json-converter rule off, and name no assumption. A value Temporal
 // decoded needs the rule.
 func TestStdJSONNeedsNoAssumption(t *testing.T) {
-	off := analyzeFixtureWith(t, engineDir, Options{JSONDecode: false})
-	on := analyzeFixtureWith(t, engineDir, Options{JSONDecode: true})
+	off := analyzeFixtureWith(t, engineDir, Options{JSONDecode: false, ArgsCopied: true})
+	on := analyzeFixtureWith(t, engineDir, Options{JSONDecode: true, ArgsCopied: true})
 	for _, name := range []string{"ImpossibleStdUnmarshal", "ImpossibleStdDecoder", "ImpossibleStdUnmarshalDespiteOtherUseNumber"} {
 		for _, f := range []found{off[name], on[name]} {
 			if len(f.claims) == 0 {
@@ -280,5 +280,31 @@ func TestStdJSONNeedsNoAssumption(t *testing.T) {
 	}
 	if n := len(on["ImpossibleJSONGet"].claims); n == 0 {
 		t.Error("ImpossibleJSONGet: no claim with the rule on")
+	}
+}
+
+// A map handed to a call that encodes its arguments keeps its facts, and the
+// claim names the assumption no-custom-interceptor; with that assumption off
+// (the module registers a custom interceptor) the same code makes no claim.
+func TestArgsCopiedNeedsTheInterceptorAssumption(t *testing.T) {
+	on := analyzeFixtureWith(t, engineDir, Options{JSONDecode: true, ArgsCopied: true})
+	off := analyzeFixtureWith(t, engineDir, Options{JSONDecode: true, ArgsCopied: false})
+	for _, name := range []string{"ImpossibleMapPassedToActivity", "ImpossibleMapInsideActivityInput", "ImpossibleMapPassedToChildWorkflow", "ImpossibleMapSignalled"} {
+		if len(on[name].claims) == 0 {
+			t.Errorf("%s: no claim with the assumption on", name)
+		}
+		for key, as := range on[name].assumed {
+			if len(as) != 1 || as[0] != AssumptionInterceptor {
+				t.Errorf("%s %s: rests on %v, want [%s]", name, key, as, AssumptionInterceptor)
+			}
+		}
+		if n := len(off[name].claims); n != 0 {
+			t.Errorf("%s: %d claims with the assumption off, want 0", name, n)
+		}
+	}
+	for _, name := range []string{"PossibleMapPassedToLocalActivity", "PossibleMapInsideKeptInput", "PossibleMapPassedToActivityAndCall"} {
+		if n := len(on[name].claims); n != 0 {
+			t.Errorf("%s: %d claims, want 0 (the relaxation is only for arguments encoded at the call)", name, n)
+		}
 	}
 }

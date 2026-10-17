@@ -13,6 +13,12 @@ import (
 // results (see Definitions).
 const AssumptionJSON = facts.AssumptionJSON
 
+// AssumptionInterceptor is the assumption that no workflow interceptor in the
+// module sees the original arguments of workflow.ExecuteActivity,
+// ExecuteChildWorkflow and SignalExternalWorkflow, which the SDK encodes when
+// the call is made (see Definitions).
+const AssumptionInterceptor = facts.AssumptionInterceptor
+
 // AssumptionStatus says whether an assumption is on in this run, why not
 // when it is off, and how many claims rest on it.
 type AssumptionStatus struct {
@@ -27,30 +33,38 @@ type AssumptionStatus struct {
 // config turned off), so every report says so, and one that claims rest on. final is
 // every path's classification after coverage has run.
 func (e *Engine) Assumptions(final []Classification) []AssumptionStatus {
-	n := 0
-	for _, c := range final {
-		if c.Bucket == CannotBeTested {
-			for _, a := range c.Assumptions {
-				if a == AssumptionJSON {
-					n++
-				}
-			}
-		}
-	}
 	if e.engineOff {
 		return nil
 	}
+	count := func(name string) int {
+		n := 0
+		for _, c := range final {
+			if c.Bucket == CannotBeTested {
+				for _, a := range c.Assumptions {
+					if a == name {
+						n++
+					}
+				}
+			}
+		}
+		return n
+	}
+	var out []AssumptionStatus
+	// Off because of the module: say so only when a workflow has a value the
+	// assumption would have been about. (Turned off in the config: always say
+	// so, the person asked for it.)
+	add := func(name string, on bool, why string, relevant bool, mode string) {
+		n := count(name)
+		if (on && n == 0) || (!on && !relevant && mode != "off") {
+			return
+		}
+		out = append(out, AssumptionStatus{Name: name, On: on, Why: why, Claims: n})
+	}
 	on, why := e.JSONConverterOn()
-	if on && n == 0 {
-		return nil
-	}
-	// Off because the module sets its own converter: say so only when a
-	// workflow has a decoded value the assumption would have been about.
-	// (Turned off in the config: always say so, the person asked for it.)
-	if !on && !e.jsonRelevant && e.jsonMode != "off" {
-		return nil
-	}
-	return []AssumptionStatus{{Name: AssumptionJSON, On: on, Why: why, Claims: n}}
+	add(AssumptionJSON, on, why, e.jsonRelevant, e.jsonMode)
+	on, why = e.InterceptorOn()
+	add(AssumptionInterceptor, on, why, e.icptRelevant, e.icptMode)
+	return out
 }
 
 // assumptionNotes are the lines of the classification block about
@@ -62,7 +76,11 @@ func (e *Engine) assumptionNotes(final []Classification) []string {
 		if a.On {
 			out = append(out, fmt.Sprintf("Assumption %s: on; %s (%s)", a.Name, claimsRest(a.Claims), d.Meaning))
 		} else {
-			out = append(out, fmt.Sprintf("Assumption %s: OFF, because %s; no claim about decoded values is made", a.Name, a.Why))
+			what := "no claim about decoded values is made"
+			if a.Name == AssumptionInterceptor {
+				what = "a slice or map handed to an activity, child workflow or signal is not followed"
+			}
+			out = append(out, fmt.Sprintf("Assumption %s: OFF, because %s; %s", a.Name, a.Why, what))
 		}
 	}
 	return out

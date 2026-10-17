@@ -17,6 +17,13 @@ type Options struct {
 	// nil, []interface{} or map[string]interface{} (assumption
 	// default-json-converter). False turns the rule off.
 	JSONDecode bool
+	// ArgsCopied: a slice or map handed to workflow.ExecuteActivity,
+	// ExecuteChildWorkflow or SignalExternalWorkflow is not forgotten, because
+	// the SDK encodes those arguments when the call is made, so the callee gets
+	// a copy (assumption no-custom-interceptor: no interceptor sees the
+	// original). False turns the rule off. ExecuteLocalActivity passes the
+	// original and is never relaxed.
+	ArgsCopied bool
 }
 
 // Analyzer analyzes the paths of one workflow.
@@ -46,6 +53,10 @@ type Analyzer struct {
 	// decodeStd marks the calls in decode that encoding/json makes (json.Unmarshal,
 	// Decode on a decoder this function made and never switched to UseNumber).
 	decodeStd map[*ast.CallExpr]bool
+	// relaxed are slices and maps used as an argument that is encoded at the
+	// call (see Options.ArgsCopied); relaxable says some variable could be.
+	relaxed   map[*types.Var]bool
+	relaxable bool
 	// useNumber are the decoder variables UseNumber is called on.
 	useNumber map[*types.Var]bool
 	bodies    []*ast.FuncDecl
@@ -72,7 +83,7 @@ type Analyzer struct {
 // New prepares the engine for one workflow's graph.
 func New(g *model.Graph, opts ...Options) *Analyzer {
 	a := &Analyzer{g: g, info: g.TypesInfo(), fset: g.FileSet(), untracked: map[*types.Var]string{}, assignedIn: map[ast.Node]map[*types.Var]bool{}, calls: map[ast.Node]bool{},
-		escapes: map[*types.Var]string{}, ifaceEscapes: map[*types.Var]string{}, assertDerived: map[*types.Var]bool{}, inits: map[*types.Var][]ast.Expr{}, decode: map[*ast.CallExpr]*types.Var{}, decodeStd: map[*ast.CallExpr]bool{}, useNumber: map[*types.Var]bool{}, addrTaken: map[*types.Var]int{}}
+		escapes: map[*types.Var]string{}, ifaceEscapes: map[*types.Var]string{}, assertDerived: map[*types.Var]bool{}, inits: map[*types.Var][]ast.Expr{}, decode: map[*ast.CallExpr]*types.Var{}, decodeStd: map[*ast.CallExpr]bool{}, relaxed: map[*types.Var]bool{}, useNumber: map[*types.Var]bool{}, addrTaken: map[*types.Var]int{}}
 	if len(opts) > 0 {
 		a.opts = opts[0]
 	}
@@ -597,6 +608,13 @@ func (a *Analyzer) escapeUse(id *ast.Ident, v *types.Var, stack []ast.Node) stri
 		grand = stack[len(stack)-2]
 	}
 	const other = "it is passed on, copied or stored where PathKit does not follow it"
+	if a.argEncodedAtCall(id, stack) {
+		a.relaxable = true
+		if a.opts.ArgsCopied {
+			a.relaxed[v] = true
+			return ""
+		}
+	}
 	switch p := parent.(type) {
 	case *ast.CallExpr:
 		if f, ok := ast.Unparen(p.Fun).(*ast.Ident); ok {
@@ -808,3 +826,74 @@ func (a *Analyzer) onlyUsedAsReceiver(v *types.Var) bool {
 	}
 	return total == recv
 }
+
+// argEncodedAtCall: the identifier is, directly or inside a composite literal
+// (or its address) written in the call, an argument of workflow.ExecuteActivity,
+// ExecuteChildWorkflow or SignalExternalWorkflow. The SDK encodes those
+// arguments when the call is made (go.temporal.io/sdk/internal: encodeArgs in
+// workflowEnvironmentInterceptor.ExecuteActivity, getValidatedWorkflowFunction
+// for ExecuteChildWorkflow, encodeArg in signalExternalWorkflow), so the
+// callee works on a copy. ExecuteLocalActivity keeps the original arguments
+// (InputArgs) and is not one of them.
+func (a *Analyzer) argEncodedAtCall(id *ast.Ident, stack []ast.Node) bool {
+	var child ast.Node = id
+	for i := len(stack) - 1; i >= 0; i-- {
+		switch p := stack[i].(type) {
+		case *ast.ParenExpr, *ast.CompositeLit:
+		case *ast.KeyValueExpr:
+			if p.Value != child {
+				return false
+			}
+		case *ast.UnaryExpr:
+			if p.Op != token.AND {
+				return false
+			}
+		case *ast.CallExpr:
+			first, name := a.encodedCall(p)
+			if name == "" {
+				return false
+			}
+			for j, arg := range p.Args {
+				if arg == child && j >= first {
+					return true
+				}
+			}
+			return false
+		default:
+			return false
+		}
+		child = stack[i]
+	}
+	return false
+}
+
+// encodedCall: the index of the first argument that is encoded at the call
+// and the function's name, for the three workflow functions that encode their
+// arguments; "" for any other call.
+func (a *Analyzer) encodedCall(call *ast.CallExpr) (int, string) {
+	var id *ast.Ident
+	switch f := ast.Unparen(call.Fun).(type) {
+	case *ast.SelectorExpr:
+		id = f.Sel
+	case *ast.Ident:
+		id = f
+	default:
+		return 0, ""
+	}
+	fn, ok := a.info.Uses[id].(*types.Func)
+	if !ok || fn.Pkg() == nil || fn.Pkg().Path() != "go.temporal.io/sdk/workflow" || fn.Type().(*types.Signature).Recv() != nil {
+		return 0, ""
+	}
+	switch fn.Name() {
+	case "ExecuteActivity", "ExecuteChildWorkflow":
+		return 2, fn.Name() // (ctx, activity or workflow, args...)
+	case "SignalExternalWorkflow":
+		return 4, fn.Name() // (ctx, workflowID, runID, signalName, arg)
+	}
+	return 0, ""
+}
+
+// InterceptorRelevant reports whether the function has a slice or map handed
+// to a call that encodes its arguments: only then does the assumption
+// no-custom-interceptor matter to it.
+func (a *Analyzer) InterceptorRelevant() bool { return a.relaxable }
