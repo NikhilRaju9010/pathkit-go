@@ -166,3 +166,34 @@ func ProjectStageLine(res coverage.Result) string {
 	}
 	return line
 }
+
+// HeadlineLines are the project's headline lines. With no workflow over the
+// cap they are the plain totals (as always); with one, the three numbers of
+// coverage.Headline: path coverage over the workflows under the cap, stage
+// coverage over the ones over it, and branch coverage over all. classified
+// says whether classification is on (the numbers are then the testable ones).
+func HeadlineLines(res coverage.Result, threshold *float64, classified bool) []string {
+	h, ok := res.Headline()
+	if !ok {
+		lines := []string{ProjectTotalLine(res, threshold), BranchesLine(res)}
+		if l := ProjectStageLine(res); l != "" {
+			lines = append(lines, l)
+		}
+		return lines
+	}
+	name := func(s string) string {
+		if classified {
+			return s + " (testable)"
+		}
+		return s
+	}
+	path := fmt.Sprintf("%s: %d/%d (%s) over %s; %s too big for path coverage, see stage coverage",
+		name("Path coverage"), h.PathCovered, h.PathTotal, Pct(coverage.Percent(h.PathCovered, h.PathTotal), threshold), count(h.PathWorkflows, "workflow"), count(h.TooBig, "workflow"))
+	stage := fmt.Sprintf("%s: %d/%d (%s) over the %s too big for path coverage (a stage is a stretch of the workflow between two decisions every path goes through)",
+		name("Stage coverage"), h.StageCovered, h.StageTotal, Pct(coverage.Percent(h.StageCovered, h.StageTotal), nil), count(h.TooBig, "workflow"))
+	if h.StagesTooBig > 0 {
+		stage += fmt.Sprintf("; %s too big to list left out (branch coverage only)", count(h.StagesTooBig, "stage"))
+	}
+	branch := fmt.Sprintf("Branch coverage: %d/%d (%s) over all workflows, the whole map of each", h.BranchCovered, h.BranchTotal, Pct(coverage.Percent(h.BranchCovered, h.BranchTotal), nil))
+	return []string{path, stage, branch}
+}

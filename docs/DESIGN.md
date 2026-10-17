@@ -320,7 +320,7 @@ What is deliberately **not** in the file: the Go test name (the workflow runs on
 
 **Facts across stages.** The fact engine walks a stage from every different notebook the earlier stages can leave at its first decision (`Walk.Signature` says when two are the same), at most `classification.engine.max_contexts` (16). A stage path is cannot-be-tested when some decision on it is impossible in every one of them, testable when one of them allows it, and needs-review (`model-limit`) when the states were cut off at the limit and none of the examined ones allows it. When a stage is too big to follow, the next one starts with nothing known. Proofs name steps of the stage; a fact from an earlier stage has no step number. A test checks that a stage path called impossible is impossible on every whole path through it, on the engine fixtures, and the soundness test checks it on random programs with small stages and few states. *A cut stays cut:* once a stage had more different outgoing notebooks than the limit, every later stage is judged as cut (needs-review instead of impossible) until a stage whose incoming notebook is empty (a stage too big to follow, or none went on), because the notebooks left out may be the ones that make a later path possible. (A reviewer found this the first time: the flag was reset after one stage.)
 
-**Where stages are printed.** Only for a workflow whose paths are not all listed (more paths than the list holds, or parts left out as pruned groups). A workflow whose paths are all listed prints as before: its path numbers use every rule, override and detector, which the stage numbers (the fact engine only) do not. The `branches` total of a capped workflow stays the listed exits; `branches_all` is the whole map.
+**Where stages are printed.** Only for a workflow whose paths are not all listed (more paths than the list holds, or parts left out as pruned groups). A workflow whose paths are all listed prints as before: its path numbers use every rule, override and detector, which the stage numbers (the fact engine only) do not. The `branches` total of a capped workflow stays the listed exits; `branchesAll` is the whole map.
 
 **Stage coverage.** A trace is matched to a path of the whole map (a path beyond the list is fine), cut into its stage pieces, and each piece marks the stage path of that stage. No new test run is needed. The number shown is covered stage paths over stage paths not called impossible, over the stages that are small enough to list. A trace that fits the whole map but a path beyond the list is counted (`traces.beyondCap` in the JSON), never unmatched.
 
@@ -328,7 +328,7 @@ What is deliberately **not** in the file: the Go test name (the workflow runs on
 
 **Config.** `classification.stages.max_paths`, `classification.engine.max_contexts`, `classification.ci.stage_floor` (a floor for stage coverage, checked like `fail_under_testable`).
 
-**Output.** New JSON keys only (per workflow, when it has several stages or more paths than the list holds): `path_count_exact` (a decimal string), `paths_listed`, `stages`, `pruned_groups` (the 100 biggest, with `pruned_groups_total`), `branches_all`; and `traces.beyondCap`. The text and HTML reports gain "Exact paths", "Stage coverage", the stage lines and a Stages view.
+**Output.** New JSON keys only (per workflow, when it has several stages or more paths than the list holds): `pathCountExact` (a decimal string), `pathsListed`, `stages`, `prunedGroups` (the 100 biggest, with `prunedGroupsTotal`), `branchesAll`; and `traces.beyondCap`. The text and HTML reports gain "Exact paths", "Stage coverage", the stage lines and a Stages view.
 
 ## Non-goals for v1
 
@@ -346,6 +346,8 @@ What is deliberately **not** in the file: the Go test name (the workflow runs on
 - It follows calls across packages and prints the chain (`X -> Y -> Z`). → Powerful but a big scope jump; we deliberately don't in v1.
 - It supports `//workflowcheck:ignore` comments (no space after `//`) and a config with overrides. → `//pathkit:ignore` and `//pathkit:branch` (D2).
 - It says openly that it can't catch everything. → Same honesty rule as `LIMITATIONS.md`.
+
+**Headline (after M6).** When a workflow is over the cap (`Capped`), the project headline is three numbers (`coverage.Result.Headline`): path coverage over the workflows under the cap, stage coverage over the ones over it, branch coverage over all (the whole map). The listed paths of a capped workflow are not in the path number. With no such workflow the headline is the plain totals as before, so existing output does not change. JSON: the old keys keep their value and meaning (listed paths only); `headline` is new and present only when a workflow is over the cap. Output JSON keys are camelCase like every key from before v2; config keys are snake_case like theirs.
 
 ### D17 — Missed paths by first untested step (milestone M6)
 

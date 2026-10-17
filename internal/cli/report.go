@@ -216,6 +216,8 @@ type (
 		MissedGroupsTotal int         `json:"missedGroupsTotal,omitempty"`
 		// Added with the known-defect label; absent when no path has it.
 		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
+		// The three headline numbers; absent unless a workflow is over the cap.
+		Headline *jsonHeadline `json:"headline,omitempty"`
 	}
 	jsonGroup struct {
 		Workflow string   `json:"workflow"`
@@ -255,7 +257,7 @@ func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisIn
 	c := coverageJSON(res, threshold, bi)
 	out := jsonReport{SchemaVersion: c.SchemaVersion, Tool: c.Tool, Workflows: []jsonReportWorkflow{}, Excluded: c.Excluded,
 		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder,
-		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs}
+		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs, Headline: c.Headline}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
 		// Forward slashes on every system, so the JSON is the same everywhere;

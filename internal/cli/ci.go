@@ -256,7 +256,7 @@ type (
 		Baseline       *string         `json:"baseline"`
 		BaselineMode   string          `json:"baselineMode"` // "check", "write" or "none"
 		Floor          *jsonCIFloor    `json:"floor"`
-		StageFloor     *jsonCIFloor    `json:"stage_floor,omitempty"`
+		StageFloor     *jsonCIFloor    `json:"stageFloor,omitempty"`
 		NewUntested    []jsonCIFinding `json:"newUntested"`
 		NewNeedsReview []jsonCIFinding `json:"newNeedsReview"`
 		LostTests      []jsonCIFinding `json:"lostTests"`

@@ -63,7 +63,7 @@ func TestHelperTracesMatch(t *testing.T) {
 			PathList []struct {
 				Covered bool `json:"covered"`
 			} `json:"pathList"`
-			Exact  string `json:"path_count_exact"`
+			Exact  string `json:"pathCountExact"`
 			Stages []struct {
 				Covered int `json:"covered"`
 			} `json:"stages"`

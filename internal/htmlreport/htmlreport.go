@@ -119,17 +119,20 @@ type (
 		Measured                                      bool
 		TotalPaths, TotalCovered                      int
 		TotalLine, BranchesLine, TracesLine           string
-		Explain                                       string // what "testable" and "overall" mean
-		Cards                                         []cardView
-		Buckets                                       []bucketView
-		ClassLines                                    []string
-		FailUnder                                     *failUnderView
-		Workflows                                     []workflowView
-		ExcludedLine                                  string
-		Excluded                                      []scope.Excluded
-		Traces                                        *coverage.Counts
-		Trend                                         []trendView
-		Glossary                                      *glossaryView
+		// HeadlineLines replace TotalLine and BranchesLine when a workflow has
+		// more paths than the list holds (coverage.Headline).
+		HeadlineLines []string
+		Explain       string // what "testable" and "overall" mean
+		Cards         []cardView
+		Buckets       []bucketView
+		ClassLines    []string
+		FailUnder     *failUnderView
+		Workflows     []workflowView
+		ExcludedLine  string
+		Excluded      []scope.Excluded
+		Traces        *coverage.Counts
+		Trend         []trendView
+		Glossary      *glossaryView
 		// Groups are the testable paths no test ran, grouped by the first step
 		// no test took (biggest first, at most maxGroupsHTML); GroupsMore is
 		// how many more groups there are.
@@ -199,6 +202,9 @@ func Report(in ReportInput) ([]byte, error) {
 		Traces:       &res.Counts,
 	}
 	v.setHeader(in.Header)
+	if _, capped := res.Headline(); capped {
+		v.HeadlineLines = render.HeadlineLines(res, overallThreshold(in), in.Classification != nil)
+	}
 	if names := render.CapNames(res); len(names) > 0 {
 		v.CapHeadline, v.CapAdvice = render.CapHeadline(names), render.CapAdvice()
 	}
@@ -304,6 +310,37 @@ func Report(in ReportInput) ([]byte, error) {
 func (v *view) buildCards(res coverage.Result, classified bool) {
 	b := res.Breakdown
 	pct := func(c, p int) string { return render.Pct(coverage.Percent(c, p), nil) }
+	if h, capped := res.Headline(); capped {
+		// A workflow over the cap: the listed-path numbers stay out of the cards.
+		name := func(s string) string {
+			if classified {
+				return s + " (testable)"
+			}
+			return s
+		}
+		v.Cards = append(v.Cards,
+			cardView{Key: "path-coverage", Title: name("Path coverage"), Value: pct(h.PathCovered, h.PathTotal), Sub: plural(h.PathCovered, "of", h.PathTotal, "path") + " in " + cnt(h.PathWorkflows, "workflow") + " under the cap", Covered: h.PathCovered, Total: h.PathTotal},
+			cardView{Key: "stage-coverage", Title: name("Stage coverage"), Value: pct(h.StageCovered, h.StageTotal), Sub: plural(h.StageCovered, "of", h.StageTotal, "stage path") + " in " + cnt(h.TooBig, "workflow") + " too big for path coverage", Covered: h.StageCovered, Total: h.StageTotal},
+			cardView{Key: "branch-coverage", Title: "Branch coverage", Value: pct(h.BranchCovered, h.BranchTotal), Sub: plural(h.BranchCovered, "of", h.BranchTotal, "branch") + " over the whole map", Covered: h.BranchCovered, Total: h.BranchTotal},
+		)
+		if classified {
+			v.Explain = "Path coverage counts only the paths a test can run, in the workflows whose paths are all listed. A workflow with more paths than the list holds is measured by stage coverage and branch coverage instead. A stage is a stretch of the workflow between two decisions every path goes through."
+			total := float64(res.Paths)
+			for _, bk := range []struct {
+				key, name string
+				c         coverage.BucketCount
+			}{{"testable", "Testable", b.Testable}, {"cannot-be-tested", "Cannot be tested", b.CannotBeTested}, {"needs-special-test", "Needs special test", b.NeedsSpecialTest}, {"needs-review", "Needs review", b.NeedsReview}} {
+				w := 0.0
+				if total > 0 {
+					w = float64(bk.c.Paths) / total * 100
+				}
+				v.Buckets = append(v.Buckets, bucketView{Key: bk.key, Name: bk.name, Paths: bk.c.Paths, Covered: bk.c.Covered, Width: w})
+			}
+		} else {
+			v.Explain = "Path coverage is over the workflows whose paths are all listed. A workflow with more paths than the list holds is measured by stage coverage and branch coverage instead."
+		}
+		return
+	}
 	if classified {
 		t := b.TestableCoverage()
 		v.Cards = append(v.Cards, cardView{Key: "testable-coverage", Title: "Testable coverage", Value: pct(t.Covered, t.Paths),
@@ -425,4 +462,11 @@ func (v *view) buildGroups(res coverage.Result) {
 		}
 		v.Groups = append(v.Groups, groupRowView{Workflow: g.Workflow, Step: g.Step, Where: g.Where(), After: after, Hint: g.Hint, Paths: g.Missed})
 	}
+}
+
+func cnt(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return itoa(n) + " " + noun + "s"
 }

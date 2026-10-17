@@ -201,6 +201,12 @@ func TestTraceBeyondTheList(t *testing.T) {
 	if wr.AllBranches != 48 || wr.AllBranchesTaken != 24 {
 		t.Errorf("branches of the whole map %d/%d, want 24/48", wr.AllBranchesTaken, wr.AllBranches)
 	}
+	// The headline leaves the listed paths of this workflow out of the path
+	// number and measures it by stages and branches.
+	h, capped := res.Headline()
+	if !capped || h.TooBig != 1 || h.PathTotal != 0 || h.PathWorkflows != 0 || h.StageCovered != 3 || h.StageTotal != 768 || h.BranchTotal != 48 || h.BranchCovered != 24 {
+		t.Errorf("headline %+v capped %v", h, capped)
+	}
 	// The groups know the test ran this workflow, though no listed path is
 	// covered: the first untested step is deeper than the start, and the road
 	// the test walked is the one the trace took.
@@ -216,5 +222,15 @@ func TestTraceBeyondTheList(t *testing.T) {
 	// every listed path takes J1.true first, and the trace took J1.false
 	if top := gs[0]; top.Step.Exit.ID.String() != "J1.true" || len(top.Prefix) != 0 {
 		t.Errorf("first group is at %s after %d steps, want J1.true at the start", top.Step.Exit.ID, len(top.Prefix))
+	}
+}
+
+// A workflow whose paths are all listed has no headline of its own: the
+// plain totals are used.
+func TestNoHeadlineUnderTheCap(t *testing.T) {
+	orders := pilotWorkflow(t, "orders.OrderWorkflow")
+	res := Compute(Input{Workflows: []Workflow{orders}, Traces: []TraceFile{tf("a", orders, "complete", "J1.true")}})
+	if _, capped := res.Headline(); capped {
+		t.Error("a headline for a workflow under the cap")
 	}
 }

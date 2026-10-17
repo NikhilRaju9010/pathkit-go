@@ -88,11 +88,18 @@ func CoverageTextHints(res coverage.Result, threshold *float64, tags, hints bool
 		writeLines(&b, untested)
 	}
 	if !single {
-		fmt.Fprintf(&b, "\n%d paths total · %d covered · %d missed · %s coverage\n",
-			res.Paths, res.Covered, res.Paths-res.Covered, Pct(coverage.Percent(res.Covered, res.Paths), threshold))
-		fmt.Fprintf(&b, "Branches: %d/%d (%s)\n", res.BranchesTaken, res.Branches, Pct(coverage.Percent(res.BranchesTaken, res.Branches), nil))
-		if l := ProjectStageLine(res); l != "" {
-			b.WriteString(l + "\n")
+		if _, capped := res.Headline(); capped {
+			b.WriteString("\n")
+			for _, l := range HeadlineLines(res, threshold, tags) {
+				b.WriteString(l + "\n")
+			}
+		} else {
+			fmt.Fprintf(&b, "\n%d paths total · %d covered · %d missed · %s coverage\n",
+				res.Paths, res.Covered, res.Paths-res.Covered, Pct(coverage.Percent(res.Covered, res.Paths), threshold))
+			fmt.Fprintf(&b, "Branches: %d/%d (%s)\n", res.BranchesTaken, res.Branches, Pct(coverage.Percent(res.BranchesTaken, res.Branches), nil))
+			if l := ProjectStageLine(res); l != "" {
+				b.WriteString(l + "\n")
+			}
 		}
 	}
 	return b.String()

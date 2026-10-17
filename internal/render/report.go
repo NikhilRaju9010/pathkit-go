@@ -72,9 +72,8 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 		}
 	}
 
-	b.WriteString("\n" + ProjectTotalLine(res, opt.Threshold) + "\n")
-	b.WriteString(BranchesLine(res) + "\n")
-	if l := ProjectStageLine(res); l != "" {
+	b.WriteString("\n")
+	for _, l := range HeadlineLines(res, opt.Threshold, opt.Classification != nil) {
 		b.WriteString(l + "\n")
 	}
 	if opt.Classification != nil {

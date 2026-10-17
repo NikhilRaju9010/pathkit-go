@@ -167,35 +167,35 @@ type (
 		// Added with the unexplained-trace check; absent when every trace
 		// of the workflow fits a path.
 		UnexplainedTraces []jsonUnexplained `json:"unexplainedTraces,omitempty"`
-		// Added with exact counts and stages. path_count_exact is the exact
+		// Added with exact counts and stages. pathCountExact is the exact
 		// number of paths as a decimal string (it can have hundreds of
 		// digits). These keys are there when the workflow has several stages or
-		// more paths than the list holds; pruned_groups when parts of the map were
+		// more paths than the list holds; prunedGroups when parts of the map were
 		// left out of the list as impossible.
-		PathCountExact string       `json:"path_count_exact,omitempty"`
-		PathsListed    int          `json:"paths_listed,omitempty"`
+		PathCountExact string       `json:"pathCountExact,omitempty"`
+		PathsListed    int          `json:"pathsListed,omitempty"`
 		Stages         []jsonStage  `json:"stages,omitempty"`
-		PrunedGroups   []jsonPruned `json:"pruned_groups,omitempty"`
-		// PrunedGroupsTotal is how many groups there are when pruned_groups holds only
+		PrunedGroups   []jsonPruned `json:"prunedGroups,omitempty"`
+		// PrunedGroupsTotal is how many groups there are when prunedGroups holds only
 		// the biggest ones.
-		PrunedGroupsTotal int `json:"pruned_groups_total,omitempty"`
+		PrunedGroupsTotal int `json:"prunedGroupsTotal,omitempty"`
 		// PrunedScope says what the groups cover: only the part of the map the
 		// list reached, not every impossible part of the map.
-		PrunedScope string     `json:"pruned_scope,omitempty"`
-		BranchesAll *jsonCount `json:"branches_all,omitempty"`
+		PrunedScope string     `json:"prunedScope,omitempty"`
+		BranchesAll *jsonCount `json:"branchesAll,omitempty"`
 	}
 	jsonStage struct {
 		Index          int        `json:"index"`
 		Paths          string     `json:"paths"` // exact, a decimal string
-		TooBigToList   bool       `json:"too_big_to_list"`
+		TooBigToList   bool       `json:"tooBigToList"`
 		Covered        int        `json:"covered"`
 		Testable       int        `json:"testable"`
-		CannotBeTested int        `json:"cannot_be_tested"`
-		NeedsReview    int        `json:"needs_review"`
+		CannotBeTested int        `json:"cannotBeTested"`
+		NeedsReview    int        `json:"needsReview"`
 		Branches       jsonCount  `json:"branches"`
 		Contexts       int        `json:"contexts"`
-		CutOff         bool       `json:"contexts_cut_off"`
-		PathList       []jsonSPth `json:"path_list,omitempty"`
+		CutOff         bool       `json:"contextsCutOff"`
+		PathList       []jsonSPth `json:"pathList,omitempty"`
 	}
 	jsonSPth struct {
 		ID      string   `json:"id"`
@@ -216,7 +216,7 @@ type (
 		Bucket      string          `json:"bucket"`
 		Label       *string         `json:"label"`
 		Explanation string          `json:"explanation"`
-		UnderReview bool            `json:"under_review"`
+		UnderReview bool            `json:"underReview"`
 		Proof       []jsonProofStep `json:"proof,omitempty"`
 		Assumptions []string        `json:"assumptions,omitempty"`
 	}
@@ -266,6 +266,10 @@ type (
 		ClassificationShown bool               `json:"classificationShown"`
 		// Added with the known-defect label; absent when no path has it.
 		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
+		// Added with the three headline numbers; absent unless a workflow has
+		// more paths than the list holds. The older total, branches and
+		// classification keys keep their meaning: listed paths only.
+		Headline *jsonHeadline `json:"headline,omitempty"`
 		// Added with the CI check; absent when it is off.
 		CI *jsonCI `json:"ci,omitempty"`
 		// With --unmatched only.
@@ -279,6 +283,18 @@ type (
 		// Added with the assumptions panel: every assumption, on or off, with
 		// how many claims rest on it; absent when classification is off.
 		AssumptionPanel []jsonAssumption `json:"assumptionPanel,omitempty"`
+	}
+	jsonHeadline struct {
+		// PathCoverage: the workflows whose paths are all listed (testable
+		// figure when classification is on).
+		PathCoverage  jsonCount `json:"pathCoverage"`
+		PathWorkflows int       `json:"pathWorkflows"`
+		// WorkflowsTooBigForPathCoverage is how many workflows are measured by
+		// stage coverage instead.
+		WorkflowsTooBigForPathCoverage int       `json:"workflowsTooBigForPathCoverage"`
+		StageCoverage                  jsonCount `json:"stageCoverage"`
+		StagesTooBigToList             int       `json:"stagesTooBigToList"`
+		BranchCoverage                 jsonCount `json:"branchCoverage"`
 	}
 	jsonAssumption struct {
 		Name   string  `json:"name"`
@@ -352,6 +368,10 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 		Classification: classificationJSON(res.Breakdown), CoverageBasis: string(bi.basis), ClassificationShown: bi.shown,
 	}
 	out.BlockedByKnownBugs = render.BlockedByKnownBugs(res)
+	if h, ok := res.Headline(); ok {
+		out.Headline = &jsonHeadline{PathCoverage: count1(h.PathCovered, h.PathTotal), PathWorkflows: h.PathWorkflows, WorkflowsTooBigForPathCoverage: h.TooBig,
+			StageCoverage: count1(h.StageCovered, h.StageTotal), StagesTooBigToList: h.StagesTooBig, BranchCoverage: count1(h.BranchCovered, h.BranchTotal)}
+	}
 	if names := render.CapNames(res); len(names) > 0 {
 		out.PathCap = &jsonPathCap{Limit: model.DefaultMaxPaths, Workflows: names,
 			Message: render.CapHeadline(names) + " " + strings.Join(render.CapAdvice(), " ")}

@@ -6,6 +6,12 @@ All notable changes to PathKit for Go are listed here. PathKit has not had a tag
 
 The next version collects everything below; nothing is tagged yet.
 
+### Changed: headline numbers and JSON key style
+
+- **Three headline numbers** (text, `--summary`, `coverage`, HTML) when a workflow is over the 2000-path cap: path coverage over the workflows under the cap, stage coverage over the ones over it, branch coverage over all (whole map). Listed-path coverage of a big workflow is no longer in the headline. Without such a workflow nothing changes. New JSON key `headline`; every existing key keeps its value and meaning (listed paths only).
+- **JSON key names.** Output keys added in this version were written in snake_case; the keys of earlier versions are camelCase, so they were renamed to match (only unreleased keys, no earlier key changed): `path_count_exact`→`pathCountExact`, `paths_listed`→`pathsListed`, `pruned_groups`→`prunedGroups`, `pruned_groups_total`→`prunedGroupsTotal`, `pruned_scope`→`prunedScope`, `branches_all`→`branchesAll`, and in each `stages` entry `too_big_to_list`→`tooBigToList`, `cannot_be_tested`→`cannotBeTested`, `needs_review`→`needsReview`, `contexts_cut_off`→`contextsCutOff`, `path_list`→`pathList`, in each pruned group `under_review`→`underReview`, and `ci.stage_floor`→`ci.stageFloor`. Config-file keys stay snake_case, as before (`stage_floor`, `max_paths`, `max_contexts`).
+- `rules check` no longer prints a stale rule twice.
+
 ### Added: review tools
 
 - **Missed paths by first untested step.** `pathkit report --groups` groups the testable paths no test ran by the first step no test took, biggest group first, each with file and line and how to cover it. The JSON has `missedGroups` (with `--groups`), the HTML report has a section.
@@ -18,7 +24,7 @@ The next version collects everything below; nothing is tagged yet.
 
 ### Changed (stage view)
 
-- Stage numbers print only for a workflow whose paths are not all listed; the `branches` total of such a workflow is again the listed exits (`branches_all` is the whole map).
+- Stage numbers print only for a workflow whose paths are not all listed; the `branches` total of such a workflow is again the listed exits (`branchesAll` is the whole map).
 - Facts across stages: once a set of incoming states was cut at the limit, later stages are judged as cut too (a reviewer found the flag was forgotten after one stage).
 - The `report_orders.html` golden gained the missed-paths section (new section only).
 
@@ -30,7 +36,7 @@ The next version collects everything below; nothing is tagged yet.
 - **Traces beyond the list** are counted, not unmatched (`traces.beyondCap` in the JSON), and cover their stage paths.
 - **Pruning.** For a workflow with more paths than the list holds, the parts the fact engine shows impossible are left out of the list and counted as groups with their proofs, so the 2000 listed paths can be taken. A trace that runs through such a part un-prunes it, warns, and moves its claims to needs-review. Listed paths keep their stable ids.
 - **Helpers are always followed.** The milestone-4 fallback that kept helper calls as one step in a workflow that would pass the cap is gone; the path list is capped, the counts, stages and claims use the whole map.
-- **New JSON keys only:** `path_count_exact`, `paths_listed`, `stages`, `pruned_groups`, `pruned_groups_total`, `pruned_scope`, `branches_all` per workflow (only when it has more paths than the list holds, or parts left out as impossible; a workflow whose paths are all listed prints as before) and `traces.beyondCap`.
+- **New JSON keys only:** `pathCountExact`, `pathsListed`, `stages`, `prunedGroups`, `prunedGroupsTotal`, `prunedScope`, `branchesAll` per workflow (only when it has more paths than the list holds, or parts left out as impossible; a workflow whose paths are all listed prints as before) and `traces.beyondCap`.
 - **Wording changed (on purpose):** the path-cap warning and its JSON `pathCapWarning.message` no longer say the capped paths are "not counted" or that coverage is a "lower bound"; both are now wrong. The headline is the same. The stderr note "helper functions are not followed" is gone with the fallback.
 - **Tests:** fixtures `bigflow` (24 decisions in a row; early exits; pruning; facts across stages with one, several and too many states), a capped workflow with helpers in `helperrun`, counts checked against the listing everywhere, stage and pruning checks in the soundness test (small stages, few states, small cap).
 - **Page script:** the two `.sort()` calls have explicit compare functions, the smoke test reads the page from standard input, and the page golden holds a marker instead of the embedded script.

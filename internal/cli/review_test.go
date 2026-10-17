@@ -240,3 +240,76 @@ func TestAssumptionPanelInEveryFormat(t *testing.T) {
 		t.Error("the panel is there with classification off")
 	}
 }
+
+// A rule that hits nothing is warned about once by rules check, not twice
+// (the loader's stale-entry finding is left out of rules check).
+func TestRulesCheckWarnsOnceAboutAStaleRule(t *testing.T) {
+	rule := strings.Replace(defectRule, `if region == \"eu\" --true`, `if region == \"asia\" --true`, 1)
+	out, stderr, code := run(t, "rules", "check", absPath(t, defectFixture), "--traces", t.TempDir(), "--config", defectConfig(t, rule))
+	if code != ExitOK || strings.Count(out+stderr, "eu-blocked") != 2 /* the list line and the warning */ || strings.Contains(stderr, "stale rule") {
+		t.Errorf("code=%d out=%q stderr=%q", code, out, stderr)
+	}
+	// report still prints the finding, as before
+	_, stderr, _ = run(t, "report", absPath(t, defectFixture), "--traces", writeTracesFor(t, defectFixture, "knowndefect.BugBlockedBranch", []string{"J1.true", "J2.false"}), "--config", defectConfig(t, rule))
+	if !strings.Contains(stderr, "stale rule") {
+		t.Errorf("report lost the stale-rule warning: %q", stderr)
+	}
+}
+
+// With a workflow over the cap, the headline shows three numbers and leaves
+// the listed paths of that workflow out of the path number. Without one, the
+// headline is the plain totals and the JSON has no headline key.
+func TestHeadlineThreeNumbers(t *testing.T) {
+	big := absPath(t, "../../testdata/fixtures/bigflow")
+	cfg := writeConfig(t, `{"packages": [`+jsonString(big)+`], "classification": {"enabled": true}}`)
+	traces := writeTracesFor(t, "../../testdata/fixtures/bigflow", "bigflow.TwentyFourIfs", []string{"J9.nowhere"})
+	for _, args := range [][]string{{"report", big}, {"report", big, "--summary"}} {
+		out, stderr, code := run(t, append(args, "--traces", traces, "--config", cfg, "--no-color")...)
+		if code != ExitOK {
+			t.Fatalf("%v: code=%d stderr=%q", args, code, stderr)
+		}
+		for _, want := range []string{"Path coverage (testable): ", " too big for path coverage, see stage coverage", "Stage coverage (testable): ", "Branch coverage: "} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v: headline lacks %q", args, want)
+			}
+		}
+		if strings.Contains(out, "paths total ·") {
+			t.Errorf("%v: the listed-path total is still in the headline", args)
+		}
+	}
+	js, _, _ := run(t, "report", big, "--traces", traces, "--config", cfg, "--json")
+	m := decode(t, js)
+	h, ok := m["headline"].(map[string]any)
+	if !ok || h["workflowsTooBigForPathCoverage"].(float64) < 1 || h["stageCoverage"].(map[string]any)["total"].(float64) == 0 {
+		t.Errorf("headline in JSON: %v", m["headline"])
+	}
+	if _, ok := m["total"]; !ok { // the old keys are still there, listed paths only
+		t.Error("the old total key is gone")
+	}
+	page := filepath.Join(t.TempDir(), "r.html")
+	if _, stderr, code := run(t, "report", big, "--traces", traces, "--config", cfg, "--html="+page); code != ExitOK {
+		t.Fatalf("html: code=%d stderr=%q", code, stderr)
+	}
+	b, _ := os.ReadFile(page)
+	for _, want := range []string{`data-card="path-coverage"`, `data-card="stage-coverage"`, `data-card="branch-coverage"`, `class="total headline"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("html lacks %s", want)
+		}
+	}
+	if strings.Contains(string(b), `data-card="paths"`) {
+		t.Error("html still has the listed-paths card")
+	}
+}
+
+func TestHeadlineUnchangedUnderTheCap(t *testing.T) {
+	traces := ordersTraces(t)
+	inPilot(t)
+	out, _, _ := run(t, "report", "./orders", "--traces", traces, "--no-color")
+	if !strings.Contains(out, "paths total · ") || strings.Contains(out, "Path coverage") {
+		t.Errorf("a project under the cap changed its headline:\n%s", out)
+	}
+	js, _, _ := run(t, "report", "./orders", "--traces", traces, "--json")
+	if _, has := decode(t, js)["headline"]; has {
+		t.Error("headline key without a workflow over the cap")
+	}
+}

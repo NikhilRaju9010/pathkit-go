@@ -59,8 +59,14 @@
 <section id="summary" aria-labelledby="h-summary">
 <h2 id="h-summary">Summary</h2>
 {{- if .Measured}}
+{{- if .HeadlineLines}}
+{{- range .HeadlineLines}}
+<p class="total headline">{{.}}</p>
+{{- end}}
+{{- else}}
 <p class="total" data-total-paths="{{.TotalPaths}}" data-total-covered="{{.TotalCovered}}">{{.TotalLine}}</p>
 <p class="branches">{{.BranchesLine}}</p>
+{{- end}}
 {{- end}}
 <div class="cards">
 {{- range .Cards}}
@@ -237,6 +243,11 @@
 <section class="definitions" id="definitions" data-definitions-version="{{.Version}}" aria-labelledby="h-def">
 <h2 id="h-def">Glossary</h2>
 <p class="note">Click a label anywhere on this page to jump to its definition.</p>
+<dl class="terms" id="terms">
+{{- range .Terms}}
+<dt>{{.Name}}</dt><dd>{{.Meaning}}</dd>
+{{- end}}
+</dl>
 {{- if .Summary}}
 <div class="tablebox">
 <table class="summary-table">

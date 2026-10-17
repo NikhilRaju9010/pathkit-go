@@ -277,7 +277,7 @@ If the rounded number would look the same as the threshold, PathKit prints more 
 - added with path classification (everything above is unchanged): `classification`, `coverageBasis` and `classificationShown` at the top; `classification` inside each workflow; `stableId` (a path's id that survives unrelated edits; explained under "`stableId`" below), `bucket`, `label`, `source`, `confidence`, `possibleInProduction`, `explanation` and `ruleId` on each path. See "Testable and overall coverage" below;
 - added with claim proofs: `proof` on a path that an automatic detector made a claim about, needs-review claims included (a list of `{step, file, line, text}`; `step` is the 1-based step on the path, and 0 with no `file`/`line` for the closing sentence). A path with no detector claim has no `proof` key, and neither does a claim PathKit no longer trusts because the workflow has a trace that fits no path. It is the same reasoning `pathkit explain` prints as `Proof:`;
 - added with the path-cap warning, only when a workflow has more paths than the list holds: `pathCapWarning`: `{limit, workflows, message}`. It says that the workflow's path list is incomplete and where to look instead (see "The path list stops at 2000 paths per workflow" in LIMITATIONS.md). Absent otherwise.
-- added with exact counts and stages, per workflow, when it has several stages or more paths than the list holds: `path_count_exact` (the exact number of paths as a decimal string), `paths_listed`, `stages` (for each: `index`, `paths` (exact), `too_big_to_list`, `covered`, `testable`, `cannot_be_tested`, `needs_review`, `branches`, `contexts`, `contexts_cut_off` and `path_list` with each stage path's `id` like `g2:3fa94c0d17ab`), `pruned_groups` (the 100 biggest parts left out of the list as impossible, each with its exact `paths`, the `prefix` of exits that leads to it, its label, proof and assumptions; `pruned_groups_total` says how many there are) and `branches_all` (the exits of the whole map); and `traces.beyondCap` at the top. Nothing else changes.
+- added with exact counts and stages, per workflow, when it has several stages or more paths than the list holds: `pathCountExact` (the exact number of paths as a decimal string), `pathsListed`, `stages` (for each: `index`, `paths` (exact), `tooBigToList`, `covered`, `testable`, `cannotBeTested`, `needsReview`, `branches`, `contexts`, `contextsCutOff` and `pathList` with each stage path's `id` like `g2:3fa94c0d17ab`), `prunedGroups` (the 100 biggest parts left out of the list as impossible, each with its exact `paths`, the `prefix` of exits that leads to it, its label, proof and assumptions; `prunedGroupsTotal` says how many there are) and `branchesAll` (the exits of the whole map); and `traces.beyondCap` at the top. Nothing else changes.
 
 `percent` has one decimal; use `covered`/`total` for exact math.
 
@@ -495,7 +495,7 @@ A workflow with more than 2000 paths used to be cut off silently. Now:
 - **Stages.** PathKit finds the decisions that every path past them goes through and cuts the workflow into *stages* between them; stages next to each other are merged while a stage has at most `classification.stages.max_paths` paths (default 256). `Stage coverage: 9/768 (1.2%) in 3 stages` is the stage paths a test ran, out of those a test can run. A trace is cut into its stage pieces, so no extra test run is needed, and a test that ran a path beyond the list counts. A stage that is bigger than the limit on its own is not listed: the report says `too many to list` and shows its branch coverage.
 - **Stage path ids** look like `g2:3fa94c0d17ab` (stage 2, a hash of the stage's decisions in words). They stay the same when unrelated code changes, like `stableId`.
 - **Facts across stages.** A stage is checked from every different state the stages before it can leave (at most `classification.engine.max_contexts`, default 16). A stage path is `cannot-be-tested` when it is impossible in every one of them, `testable` when one allows it, and `needs-review` when there were more states than the limit.
-- **Left out of the list as impossible.** The path list is filled with paths that can be taken: parts the fact engine shows impossible are left out, counted exactly, and shown as groups with their proof (`pruned_groups` in the JSON). If a test ever runs a path inside such a part, the proof was wrong: PathKit warns, lists the path, and moves that part to `needs-review`.
+- **Left out of the list as impossible.** The path list is filled with paths that can be taken: parts the fact engine shows impossible are left out, counted exactly, and shown as groups with their proof (`prunedGroups` in the JSON). If a test ever runs a path inside such a part, the proof was wrong: PathKit warns, lists the path, and moves that part to `needs-review`.
 - **CI.** `classification.ci.stage_floor` fails the run (exit 2) when stage coverage is below it, like `fail_under_testable`.
 
 ```json
@@ -572,7 +572,7 @@ pathkit report: 1 testable path with no test not in the baseline pathkit-baselin
   orders.OrderWorkflow path 3 (s1:5179b1c99bbb, new): Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
 ```
 
-`--json` adds a `ci` object (`baseline`, `baselineMode`, `floor`, `newUntested`, `newNeedsReview`, `lostTests`, `lostTestsAllowed`, `passed`); it is absent when the check is off. A missing or damaged baseline file is exit 1.
+`--json` adds a `ci` object (`baseline`, `baselineMode`, `floor`, `stageFloor` (only when `stage_floor` is set), `newUntested`, `newNeedsReview`, `lostTests`, `lostTestsAllowed`, `passed`); it is absent when the check is off. A missing or damaged baseline file is exit 1.
 
 **Exit code 2 has two causes:** coverage below `--fail-under` (or `failUnder`), **or** the CI check above failed (baseline or floor). Both print the report first and then say on stderr which one it was; several reasons are all printed. Exit 1 is always a real error (PathKit could not do its job), never a coverage problem.
 
@@ -583,6 +583,22 @@ pathkit report: warning: rule "second-needs-first" (orders.W) entry "if a || b #
 ```
 
 It is a warning only (the exit code does not change), and it needs a baseline: without `classification.ci.baseline` (or `--baseline`) there is nothing to compare with. A baseline written before this existed has no anchors and gives no warning until it is written again. Adding or removing **any** decision with the same text warns (even one below it, which does not change what `#2` means), and so does an unrelated edit right next to the decision (a new `if` just above it, or a renamed activity it leads to): the warning can fire when `#2` is still right; check, then write the baseline again.
+
+### The three headline numbers (workflows over the cap)
+
+When every workflow has at most 2000 paths, the headline is the plain totals ("38 paths total · 20 covered · 18 missed · 52.6% project coverage" and "Branches: …"). When some workflow has more, a figure over its first 2000 paths says little ("0 of 2000" may hide thousands of paths a test ran), so the headline of the text report, `--summary`, `coverage` and the HTML report becomes three lines:
+
+```
+Path coverage (testable): 663/663 (100.0%) over 2 workflows; 2 workflows too big for path coverage, see stage coverage
+Stage coverage (testable): 17/323 (5.3%) over the 2 workflows too big for path coverage (a stage is a stretch of the workflow between two decisions every path goes through); 2 stages too big to list left out (branch coverage only)
+Branch coverage: 225/285 (78.9%) over all workflows, the whole map of each
+```
+
+- **Path coverage** counts only the workflows whose paths are all listed (the testable figure when classification is on, the overall one when it is off).
+- **Stage coverage** counts only the workflows over the cap; a stage too big to list is left out and counted.
+- **Branch coverage** counts every workflow, over its whole map (not only the listed paths).
+- `--json` keeps every existing key with its meaning: `total`, `branches`, `classification` and the per-workflow `paths` count **listed paths only**. The new `headline` object has `pathCoverage`, `pathWorkflows`, `workflowsTooBigForPathCoverage`, `stageCoverage`, `stagesTooBigToList` and `branchCoverage`; it is absent when no workflow is over the cap.
+- The HTML report shows the same three numbers as cards and explains the words in its glossary. The classification block (`Testable coverage: …`) is a count of paths by bucket and still includes the listed paths of a big workflow.
 
 ### Which untested paths to start with: `report --groups` (path classification)
 

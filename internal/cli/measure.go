@@ -266,6 +266,10 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 			truncated[w.Name] = w.Truncated
 		}
 		for _, f := range engine.Findings(measured, truncated) {
+			// "rules check" prints these itself, once, in its own output.
+			if cmdName == "rules check" && isEntryFinding(f) {
+				continue
+			}
 			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, f)
 		}
 		var final []classify.Classification
@@ -504,4 +508,10 @@ func unexplainedNotes(res coverage.Result) []string {
 		}
 	}
 	return out
+}
+
+// isEntryFinding says whether a finding of the engine is about a rule or an
+// override that hits no path (stale, or beyond the path cap).
+func isEntryFinding(f string) bool {
+	return strings.Contains(f, "stale rule") || strings.Contains(f, "stale entry") || strings.Contains(f, "matches none of the listed paths")
 }
