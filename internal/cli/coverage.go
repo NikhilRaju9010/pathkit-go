@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -94,6 +95,10 @@ func runCoverage(cmd *cobra.Command, target string, opt coverageOptions) error {
 	return finish(cmd, "coverage", m, output, output, opt.out, opt.clean, nil)
 }
 
+// maxPrunedJSON is how many pruned groups the JSON lists (the biggest ones);
+// the text and the page give the total.
+const maxPrunedJSON = 100
+
 // The --json shape (schemaVersion 1), documented in SETUP-GUIDE.md.
 type (
 	jsonCount struct {
@@ -162,6 +167,54 @@ type (
 		// Added with the unexplained-trace check; absent when every trace
 		// of the workflow fits a path.
 		UnexplainedTraces []jsonUnexplained `json:"unexplainedTraces,omitempty"`
+		// Added with exact counts and stages. path_count_exact is the exact
+		// number of paths as a decimal string (it can have hundreds of
+		// digits). These keys are there when the workflow has several stages or
+		// more paths than the list holds; pruned_groups when parts of the map were
+		// left out of the list as impossible.
+		PathCountExact string       `json:"path_count_exact,omitempty"`
+		PathsListed    int          `json:"paths_listed,omitempty"`
+		Stages         []jsonStage  `json:"stages,omitempty"`
+		PrunedGroups   []jsonPruned `json:"pruned_groups,omitempty"`
+		// PrunedGroupsTotal is how many groups there are when pruned_groups holds only
+		// the biggest ones.
+		PrunedGroupsTotal int `json:"pruned_groups_total,omitempty"`
+		// PrunedScope says what the groups cover: only the part of the map the
+		// list reached, not every impossible part of the map.
+		PrunedScope string     `json:"pruned_scope,omitempty"`
+		BranchesAll *jsonCount `json:"branches_all,omitempty"`
+	}
+	jsonStage struct {
+		Index          int        `json:"index"`
+		Paths          string     `json:"paths"` // exact, a decimal string
+		TooBigToList   bool       `json:"too_big_to_list"`
+		Covered        int        `json:"covered"`
+		Testable       int        `json:"testable"`
+		CannotBeTested int        `json:"cannot_be_tested"`
+		NeedsReview    int        `json:"needs_review"`
+		Branches       jsonCount  `json:"branches"`
+		Contexts       int        `json:"contexts"`
+		CutOff         bool       `json:"contexts_cut_off"`
+		PathList       []jsonSPth `json:"path_list,omitempty"`
+	}
+	jsonSPth struct {
+		ID      string   `json:"id"`
+		Covered bool     `json:"covered"`
+		Traces  int      `json:"traces"`
+		Bucket  string   `json:"bucket"`
+		Label   *string  `json:"label"`
+		End     string   `json:"end"` // how the workflow ends, or "continues" into the next stage
+		Steps   []string `json:"steps"`
+	}
+	jsonPruned struct {
+		Paths       string          `json:"paths"`
+		Prefix      []string        `json:"prefix"`
+		Bucket      string          `json:"bucket"`
+		Label       *string         `json:"label"`
+		Explanation string          `json:"explanation"`
+		UnderReview bool            `json:"under_review"`
+		Proof       []jsonProofStep `json:"proof,omitempty"`
+		Assumptions []string        `json:"assumptions,omitempty"`
 	}
 	jsonUnexplained struct {
 		StepsID      string   `json:"stepsId"`
@@ -185,6 +238,9 @@ type (
 		Unknown    int `json:"unknownWorkflow"`
 		Unreadable int `json:"unreadable"`
 		Other      int `json:"otherWorkflows"`
+		// Added with exact counts: traces that fit the whole map but run a path
+		// that is not among the listed ones. They are counted, not unmatched.
+		BeyondCap int `json:"beyondCap,omitempty"`
 	}
 	jsonFailUnder struct {
 		Threshold float64 `json:"threshold"`
@@ -280,7 +336,7 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 		Total:    count1(res.Covered, res.Paths),
 		Branches: count1(res.BranchesTaken, res.Branches),
 		Traces: jsonTraces{Read: res.Counts.Read, Counted: res.Counts.Counted, Unmatched: res.Counts.Unmatched, Stale: res.Counts.Stale,
-			Incomplete: res.Counts.Incomplete, Excluded: res.Counts.Excluded, Unknown: res.Counts.Unknown, Unreadable: res.Counts.Unreadable, Other: res.Counts.Other},
+			Incomplete: res.Counts.Incomplete, Excluded: res.Counts.Excluded, Unknown: res.Counts.Unknown, Unreadable: res.Counts.Unreadable, Other: res.Counts.Other, BeyondCap: res.Counts.BeyondCap},
 		Classification: classificationJSON(res.Breakdown), CoverageBasis: string(bi.basis), ClassificationShown: bi.shown,
 	}
 	if names := render.CapNames(res); len(names) > 0 {
@@ -299,6 +355,43 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 				End: string(p.Path.End), Compensation: p.Path.Compensation, Covered: p.Covered, Traces: p.Traces, StaleTrace: p.StaleTrace,
 				StableID: p.StableID, Bucket: string(p.Class.Bucket), Label: optional(p.Class.Label), Source: string(p.Class.Source),
 				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons, Proof: proofJSON(p.Class.Proof), Assumptions: p.Class.Assumptions})
+		}
+		if render.ShowStages(w) {
+			jw.PathCountExact, jw.PathsListed = w.Exact.String(), len(w.Paths)
+		}
+		if w.Capped {
+			jw.BranchesAll = &jsonCount{Total: w.AllBranches, Covered: w.AllBranchesTaken, Percent: coverage.Percent(w.AllBranchesTaken, w.AllBranches)}
+		}
+		if render.ShowStages(w) {
+			for _, s := range w.Stages {
+				js := jsonStage{Index: s.Index + 1, Paths: s.Count.String(), TooBigToList: s.Big, Covered: s.Covered, Testable: s.Testable, CannotBeTested: s.CannotBeTested,
+					NeedsReview: s.NeedsReview, Branches: count1(s.BranchesTaken, s.Branches), Contexts: s.Contexts, CutOff: s.CutOff}
+				for _, sp := range s.Paths {
+					end := string(sp.Path.End)
+					if sp.Path.Continue {
+						end = "continues"
+					}
+					ids := []string{}
+					for _, st := range sp.Path.Steps {
+						ids = append(ids, st.Exit.ID.String())
+					}
+					js.PathList = append(js.PathList, jsonSPth{ID: sp.ID, Covered: sp.Covered, Traces: sp.Traces, Bucket: string(sp.Class.Bucket), Label: optional(sp.Class.Label), End: end, Steps: ids})
+				}
+				jw.Stages = append(jw.Stages, js)
+			}
+		}
+		pruned := append([]coverage.PrunedResult(nil), w.Pruned...)
+		sort.SliceStable(pruned, func(i, k int) bool { return pruned[i].Count.Cmp(pruned[k].Count) > 0 })
+		if len(pruned) > maxPrunedJSON {
+			jw.PrunedGroupsTotal = len(pruned)
+			pruned = pruned[:maxPrunedJSON]
+		}
+		if len(pruned) > 0 {
+			jw.PrunedScope = "the part of the map the list reached"
+		}
+		for _, pg := range pruned {
+			jw.PrunedGroups = append(jw.PrunedGroups, jsonPruned{Paths: pg.Count.String(), Prefix: pg.Prefix, Bucket: string(pg.Class.Bucket), Label: optional(pg.Class.Label),
+				Explanation: pg.Class.Explanation, UnderReview: pg.Unpruned, Proof: proofJSON(pg.Class.Proof), Assumptions: pg.Class.Assumptions})
 		}
 		for _, u := range w.Unexplained {
 			jw.UnexplainedTraces = append(jw.UnexplainedTraces, jsonUnexplained{StepsID: u.StepsID, Steps: u.Steps, Count: u.Count, Mismatch: u.Mismatch,

@@ -41,12 +41,18 @@ func TotalLine(ps model.PathList, max int) string {
 type TextOptions struct {
 	Summary bool
 	Limit   int // 0 means no limit
+	// Exact, when not empty, is the exact number of paths, printed under the
+	// total line (for a workflow with more paths than the list holds).
+	Exact string
 }
 
 // Text prints one workflow's paths in the setup guide's format.
 func Text(g *model.Graph, ps model.PathList, max int, opt TextOptions) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Workflow: %s\n%s\n", g.Workflow, TotalLine(ps, max))
+	if opt.Exact != "" {
+		fmt.Fprintf(&b, "Exact paths: %s\n", opt.Exact)
+	}
 	if opt.Summary {
 		return b.String()
 	}

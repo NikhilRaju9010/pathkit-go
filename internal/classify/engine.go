@@ -61,7 +61,13 @@ type Engine struct {
 	icptMode     string
 	icptHits     []string
 	icptRelevant bool
-	explained    []scope.ExplainedTrace
+	// stageMax and maxContexts are classification.stages.max_paths and
+	// classification.engine.max_contexts; plans and listings are kept per workflow.
+	stageMax, maxContexts int
+	pathCap               int // how many paths a listing holds (model.DefaultMaxPaths)
+	plans                 map[string]*StagePlan
+	listings              map[string]*Listing
+	explained             []scope.ExplainedTrace
 	// extraWarnings are config warnings found while resolving rules.
 	extraWarnings []string
 	// anchors are where each numbered ("#n") rule entry points, for the
@@ -104,7 +110,9 @@ func NewEngine(c scope.Classification) (*Engine, error) {
 		return nil, err
 	}
 	e := &Engine{registry: reg, policy: CountAsTestable, overrides: map[string]*override{}, rules: map[string][]*rule{}, marks: map[string][]model.Mark{},
-		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter, icptMode: c.NoCustomInterceptor}
+		facts: map[string]*facts.Analyzer{}, graphs: map[string]*model.Graph{}, engineOff: c.EngineOff, jsonMode: c.JSONConverter, icptMode: c.NoCustomInterceptor,
+		stageMax: orDefault(c.StageMaxPaths, model.DefaultStageMaxPaths), maxContexts: orDefault(c.MaxContexts, facts.DefaultMaxContexts),
+		plans: map[string]*StagePlan{}, listings: map[string]*Listing{}, pathCap: model.DefaultMaxPaths}
 	if c.Policy == string(Exclude) {
 		e.policy = Exclude
 	}
@@ -437,3 +445,15 @@ func (e *Engine) InterceptorOn() (on bool, why string) {
 	}
 	return true, ""
 }
+
+func orDefault(v, d int) int {
+	if v <= 0 {
+		return d
+	}
+	return v
+}
+
+// SetPathCap changes how many paths a listing holds. PathKit itself always
+// uses model.DefaultMaxPaths; the soundness test uses a small number so that
+// pruning happens on small programs.
+func (e *Engine) SetPathCap(n int) { e.pathCap = n }

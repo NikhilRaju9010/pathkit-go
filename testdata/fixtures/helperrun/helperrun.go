@@ -193,3 +193,21 @@ func PureHelper(ctx workflow.Context, n int) error {
 	}
 	return workflow.Sleep(ctx, time.Second)
 }
+
+// Many calls the helper eleven times and ignores what it says: 2^11 = 2,048
+// paths, more than the path cap lists. The helper is followed all the same.
+func Many(ctx workflow.Context) error {
+	ctx = options(ctx)
+	_ = charge(ctx, 1)
+	_ = charge(ctx, 2)
+	_ = charge(ctx, 3)
+	_ = charge(ctx, 4)
+	_ = charge(ctx, 5)
+	_ = charge(ctx, 6)
+	_ = charge(ctx, 7)
+	_ = charge(ctx, 8)
+	_ = charge(ctx, 9)
+	_ = charge(ctx, 10)
+	_ = charge(ctx, 11)
+	return nil
+}

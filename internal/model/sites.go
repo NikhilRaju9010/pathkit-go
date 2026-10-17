@@ -186,8 +186,3 @@ func (j *Junction) Where() string {
 	}
 	return " [" + strings.Join(names, ", ") + "]"
 }
-
-// HelperNote says why helper functions are not followed in this graph, when
-// following them would have given more paths than the path cap: "" when they
-// are followed (or there are none).
-func (g *Graph) HelperNote() string { return g.helperNote }

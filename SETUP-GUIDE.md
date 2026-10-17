@@ -274,7 +274,8 @@ If the rounded number would look the same as the threshold, PathKit prints more 
 - `failUnder`: `{threshold, passed, basis}`, or `null` when no threshold is set;
 - added with path classification (everything above is unchanged): `classification`, `coverageBasis` and `classificationShown` at the top; `classification` inside each workflow; `stableId` (a path's id that survives unrelated edits; explained under "`stableId`" below), `bucket`, `label`, `source`, `confidence`, `possibleInProduction`, `explanation` and `ruleId` on each path. See "Testable and overall coverage" below;
 - added with claim proofs: `proof` on a path that an automatic detector made a claim about, needs-review claims included (a list of `{step, file, line, text}`; `step` is the 1-based step on the path, and 0 with no `file`/`line` for the closing sentence). A path with no detector claim has no `proof` key, and neither does a claim PathKit no longer trusts because the workflow has a trace that fits no path. It is the same reasoning `pathkit explain` prints as `Proof:`;
-- added with the path-cap warning, only when a workflow reached the 2000-path cap: `pathCapWarning`: `{limit, workflows, message}`. It says that the workflow's path list and classification are incomplete (see "Path enumeration stops at 2000 paths per workflow" in LIMITATIONS.md). Absent otherwise.
+- added with the path-cap warning, only when a workflow has more paths than the list holds: `pathCapWarning`: `{limit, workflows, message}`. It says that the workflow's path list is incomplete and where to look instead (see "The path list stops at 2000 paths per workflow" in LIMITATIONS.md). Absent otherwise.
+- added with exact counts and stages, per workflow, when it has several stages or more paths than the list holds: `path_count_exact` (the exact number of paths as a decimal string), `paths_listed`, `stages` (for each: `index`, `paths` (exact), `too_big_to_list`, `covered`, `testable`, `cannot_be_tested`, `needs_review`, `branches`, `contexts`, `contexts_cut_off` and `path_list` with each stage path's `id` like `g2:3fa94c0d17ab`), `pruned_groups` (the 100 biggest parts left out of the list as impossible, each with its exact `paths`, the `prefix` of exits that leads to it, its label, proof and assumptions; `pruned_groups_total` says how many there are) and `branches_all` (the exits of the whole map); and `traces.beyondCap` at the top. Nothing else changes.
 
 `percent` has one decimal; use `covered`/`total` for exact math.
 
@@ -449,7 +450,7 @@ A misspelled detector name is an error that lists the real names. The fact engin
 
 A workflow often calls functions of its own package that start activities or wait on timers (`o.charge(ctx)`, `reserve(ctx, items)`). PathKit follows those calls: the decisions inside the helper are decisions of the workflow, one set for each call, and show in `analyze` and `coverage` as `Sleep (timer) [in reserve]`. The error check after the call (`if err != nil`) is a decision too, with only the exit the helper's `return` allows. A helper with no call into the Temporal SDK (a validation function with `if`s) stays ordinary code, one step, as before. What is and is not followed, and how deep, is in LIMITATIONS.md ("Helper functions of the workflow's own package").
 
-Following helpers can multiply the paths of a workflow (every helper with an activity and its error check doubles the paths after it). If that would pass the path cap (2000 paths), PathKit does not follow the helpers of **that** workflow: each call stays one step, as before, and a warning says so (`helper functions are not followed: ...`). The other workflows are not affected.
+Following helpers can multiply the paths of a workflow (every helper with an activity and its error check doubles the paths after it). They are followed anyway: a workflow with more paths than the list holds is counted exactly, cut into stages and covered stage by stage (see "Big workflows" below).
 
 What changes for you:
 
@@ -457,6 +458,21 @@ What changes for you:
 - **`pathkit test` marks up the helper code too** (in its copy, never in your files) and records the trace format version 2. Traces recorded by an older PathKit are refused with one message: run `pathkit test` again.
 - **After upgrading, do this:** run `pathkit test` again (old traces are not counted, and until you do, coverage reads 0% with one warning saying why); read the warnings for any workflow that says its helpers are not followed; for saved `stable_id` entries and baselines, look for "stale entry" warnings, which now name the paths that replace a vanished id. A `//pathkit:branch` you added on an error check after a helper is not needed any more when the helper is followed.
 - **Marks and rules work in a helper.** `//pathkit:untestable` on a decision in a helper marks that decision in every copy; a rule's `when` entry for it is written as `analyze` prints it.
+
+### Big workflows: exact counts, stages and what was left out
+
+A workflow with more than 2000 paths used to be cut off silently. Now:
+
+- **Exact paths.** The text shows `Exact paths: 16,777,216 (2000 listed; path coverage is incomplete)`. The count is exact however big it is.
+- **Stages.** PathKit finds the decisions that every path past them goes through and cuts the workflow into *stages* between them; stages next to each other are merged while a stage has at most `classification.stages.max_paths` paths (default 256). `Stage coverage: 9/768 (1.2%) in 3 stages` is the stage paths a test ran, out of those a test can run. A trace is cut into its stage pieces, so no extra test run is needed, and a test that ran a path beyond the list counts. A stage that is bigger than the limit on its own is not listed: the report says `too many to list` and shows its branch coverage.
+- **Stage path ids** look like `g2:3fa94c0d17ab` (stage 2, a hash of the stage's decisions in words). They stay the same when unrelated code changes, like `stableId`.
+- **Facts across stages.** A stage is checked from every different state the stages before it can leave (at most `classification.engine.max_contexts`, default 16). A stage path is `cannot-be-tested` when it is impossible in every one of them, `testable` when one allows it, and `needs-review` when there were more states than the limit.
+- **Left out of the list as impossible.** The path list is filled with paths that can be taken: parts the fact engine shows impossible are left out, counted exactly, and shown as groups with their proof (`pruned_groups` in the JSON). If a test ever runs a path inside such a part, the proof was wrong: PathKit warns, lists the path, and moves that part to `needs-review`.
+- **CI.** `classification.ci.stage_floor` fails the run (exit 2) when stage coverage is below it, like `fail_under_testable`.
+
+```json
+"classification": { "enabled": true, "stages": { "max_paths": 256 }, "engine": { "max_contexts": 16 }, "ci": { "stage_floor": 70 } }
+```
 
 ### Two workflows with the same name in different folders
 
@@ -599,7 +615,7 @@ Traces that fit no path: 1 group, 1 trace file
 - **likely** is PathKit's best guess, and says so. The most common cause is an error check on an error from your own helper function: PathKit assumes it never fails (see "Only error checks right after a Temporal call are junctions" in LIMITATIONS.md), so a run that does fail there takes a road the map does not draw. `//pathkit:branch` on that `if` makes the map draw it.
 - With classification on, a group accepted in `classification.explained_traces` says `acknowledged: <reason>` (with classification off, acceptances are not read, so every group says `not acknowledged`).
 - When the run went round a loop several times, "followed the map" shows only the last trip (the loop rule) and says `(repeated loop trips folded: only the last one is kept)`; the step number in "then" counts the steps as recorded.
-- A trace that fits a path beyond the 2000-path cap is counted as unmatched on the `Traces:` line but is not listed here (it fits a real path); a line under the heading says how many.
+- A trace that fits a path beyond the 2000 listed paths is not unmatched: it is counted on the `Traces:` line (as "beyond the list" in the JSON) and covers its stage paths.
 - With no such trace, the section says `Traces that fit no path: none`. `--json --unmatched` adds `unmatchedTraces` (a list, empty when none) with the same fields. Without `--unmatched` nothing changes.
 
 **Cleaning up.** `pathkit test` clears old traces at the start of each run (unless `--keep-traces`). To delete them yourself:

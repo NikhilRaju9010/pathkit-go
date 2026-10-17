@@ -146,6 +146,15 @@ type (
 		Covered, Total, Missed                           int
 		Width                                            float64 // covered, percent of the workflow's paths
 		Open                                             bool
+		// Exact, ExactLine and Stages are set for a workflow with several stages or
+		// more paths than the list holds: the exact count, what it means, and one
+		// row per stage.
+		Exact, ExactLine string
+		Stages           []stageRowView
+		PrunedLine       string
+	}
+	stageRowView struct {
+		Number, Paths, Covered, Pct, Branches, Note string
 	}
 	failUnderView struct {
 		Passed bool
@@ -206,6 +215,38 @@ func Report(in ReportInput) ([]byte, error) {
 			Stats: render.WorkflowStats(w), Covered: w.Covered, Total: len(w.Paths), Missed: len(w.Paths) - w.Covered,
 			TotalPathsLine: render.TotalLine(model.PathList{List: make([]model.Path, len(w.Paths)), Truncated: w.Truncated}, model.DefaultMaxPaths),
 			Open:           wi == 0,
+		}
+		if render.ShowStages(w) {
+			wv.Exact = render.Big(w.Exact)
+			wv.ExactLine = strings.TrimSuffix(strings.SplitN(render.StageLines(w), "\n", 2)[0], "\n")
+			for _, s := range w.Stages {
+				row := stageRowView{Number: itoa(s.Index + 1), Paths: render.Big(s.Count), Branches: itoa(s.BranchesTaken) + "/" + itoa(s.Branches)}
+				if s.Big {
+					row.Covered, row.Pct, row.Note = "-", "-", "too many paths to list: branch coverage only"
+				} else {
+					row.Covered = itoa(s.Covered) + "/" + itoa(len(s.Paths)-s.CannotBeTested)
+					row.Pct = render.Pct(coverage.Percent(s.Covered, len(s.Paths)-s.CannotBeTested), nil)
+					var notes []string
+					if s.CannotBeTested > 0 {
+						notes = append(notes, itoa(s.CannotBeTested)+" cannot be tested")
+					}
+					if s.NeedsReview > 0 {
+						notes = append(notes, itoa(s.NeedsReview)+" need review")
+					}
+					if s.CutOff {
+						notes = append(notes, "more incoming states than the limit were cut off")
+					}
+					row.Note = strings.Join(notes, "; ")
+				}
+				wv.Stages = append(wv.Stages, row)
+			}
+			if len(w.Pruned) > 0 {
+				for _, l := range strings.Split(render.StageLines(w), "\n") {
+					if strings.HasPrefix(l, "Left out of the list") {
+						wv.PrunedLine = l
+					}
+				}
+			}
 		}
 		wv.Priority, _ = coverage.Priority(w.Covered, len(w.Paths))
 		wv.Pct = render.Pct(coverage.Percent(w.Covered, len(w.Paths)), nil)

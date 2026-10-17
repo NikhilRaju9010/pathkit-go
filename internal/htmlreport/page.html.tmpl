@@ -130,6 +130,24 @@
 <div class="wbody">
 <p class="file">{{$w.File}}</p>
 <p class="stats">{{if $.Measured}}{{$w.Stats}}{{else}}{{$w.TotalPathsLine}}{{end}}{{if $w.Truncated}} <span class="truncated">truncated</span>{{end}}</p>
+{{- if $w.Stages}}
+<div class="stages" data-stages="{{$i}}">
+<h4>Stages</h4>
+<p class="note">{{$w.ExactLine}}{{if $w.PrunedLine}} {{$w.PrunedLine}}.{{end}} A stage is a stretch of the workflow between two decisions that every path goes through, so its paths can be counted and covered one stage at a time.</p>
+<div class="tablebox">
+<table class="summary-table">
+<caption>Stages of {{$w.Name}}</caption>
+<thead><tr><th scope="col">Stage</th><th scope="col">Paths</th><th scope="col">Covered</th><th scope="col">%</th><th scope="col">Branches</th><th scope="col">Note</th></tr></thead>
+<tbody>
+{{- range $w.Stages}}
+<tr><td>{{.Number}}</td><td>{{.Paths}}</td><td>{{.Covered}}</td><td>{{.Pct}}</td><td>{{.Branches}}</td><td>{{.Note}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+<div class="sg" data-sg="{{$i}}"></div>
+</div>
+{{- end}}
 <div class="pt" data-pt="{{$i}}"></div>
 </div>
 </details>

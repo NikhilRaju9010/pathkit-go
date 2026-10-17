@@ -221,6 +221,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	in := coverage.Input{Workflows: workflows, Excluded: sc.excluded, Others: others, Traces: files, AllowStale: allowStale}
 	if engine != nil {
 		in.Classifier, in.Policy, in.Explained = engine.Classify, engine.Policy(), engine.Explained()
+		in.Listing, in.Plan = engine.Listing, engine.PlanStages
 	}
 	m.res = coverage.Compute(in)
 	if m.res.InternalError != nil {

@@ -42,6 +42,28 @@ type wfData struct {
 	A  bool    `json:"a,omitempty"`
 	P  string  `json:"p,omitempty"`
 	R  [][]any `json:"r"`
+	// X is the exact number of paths (a decimal string) and Sg the stages, for a
+	// workflow with several stages or more paths than the list holds.
+	X  string      `json:"x,omitempty"`
+	Sg []stageData `json:"sg,omitempty"`
+}
+
+// stageData is one stage: its exact path count, covered / testable / cannot-
+// be-tested / needs-review stage paths, branches taken and total, and the
+// stage paths as rows [id, status, bucket, label, text, short explanation]
+// (indexes into s for the strings).
+type stageData struct {
+	N  string  `json:"n"`
+	B  bool    `json:"b,omitempty"`
+	C  int     `json:"c"`
+	T  int     `json:"t"`
+	X  int     `json:"x"`
+	R  int     `json:"r"`
+	Bt int     `json:"bt"`
+	Bn int     `json:"bn"`
+	Cx int     `json:"cx,omitempty"`
+	Co bool    `json:"co,omitempty"`
+	P  [][]any `json:"p,omitempty"`
 }
 
 func newPageData(measured, classified bool) *pageData {
@@ -93,6 +115,24 @@ func (d *pageData) addWorkflow(w coverage.WorkflowResult, classified bool) {
 			ex = d.str(p.Class.Explanation)
 		}
 		wf.R = append(wf.R, []any{p.Number, p.StableID, status, b, l, by, ex, d.steps(render.PathText(p.Path))})
+	}
+	if render.ShowStages(w) {
+		wf.X = w.Exact.String()
+		for _, s := range w.Stages {
+			sd := stageData{N: s.Count.String(), B: s.Big, C: s.Covered, T: s.Testable, X: s.CannotBeTested, R: s.NeedsReview, Bt: s.BranchesTaken, Bn: s.Branches, Cx: s.Contexts, Co: s.CutOff}
+			for _, sp := range s.Paths {
+				status := 0
+				if sp.Covered {
+					status = 1
+				}
+				b, l, ex := -1, -1, -1
+				if classified {
+					b, l, ex = d.str(string(sp.Class.Bucket)), d.str(sp.Class.Label), d.str(sp.Class.Explanation)
+				}
+				sd.P = append(sd.P, []any{sp.ID, status, b, l, d.str(render.StagePathText(sp.Path)), ex})
+			}
+			wf.Sg = append(wf.Sg, sd)
+		}
 	}
 	d.W = append(d.W, wf)
 }

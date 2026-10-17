@@ -51,6 +51,7 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 			}
 			fmt.Fprintf(&b, "%s (%s)\n", reportName(w), w.File)
 			fmt.Fprintf(&b, "%s\n", workflowStats(w, opt.Color, true))
+			b.WriteString(StageLines(w))
 			for _, p := range w.Paths {
 				word := paint("missed", red, opt.Color)
 				if p.Covered {
@@ -73,6 +74,9 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 
 	b.WriteString("\n" + ProjectTotalLine(res, opt.Threshold) + "\n")
 	b.WriteString(BranchesLine(res) + "\n")
+	if l := ProjectStageLine(res); l != "" {
+		b.WriteString(l + "\n")
+	}
 	if opt.Classification != nil {
 		b.WriteString("\n" + ClassificationBlock(res, *opt.Classification))
 	}
@@ -147,6 +151,13 @@ func workflowStats(w coverage.WorkflowResult, color, branches bool) string {
 		paths = fmt.Sprintf("%d/%d+ paths (truncated at maxPaths=%d)", w.Covered, total, model.DefaultMaxPaths)
 	}
 	parts := []string{paths, WorkflowPct(w.Covered, total)}
+	if w.Capped {
+		parts = append(parts, "path coverage incomplete: "+Big(w.Exact)+" paths in all")
+	}
+	if len(w.Stages) > 1 || w.Capped {
+		c, t, _ := StageCoverage(w)
+		parts = append(parts, fmt.Sprintf("stages %d/%d (%s)", c, t, Pct(coverage.Percent(c, t), nil)))
+	}
 	if branches {
 		parts = append(parts, fmt.Sprintf("branches %d/%d", w.BranchesTaken, w.Branches))
 	}

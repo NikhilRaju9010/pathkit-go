@@ -280,3 +280,34 @@ func TestInterceptorAssumptionRead(t *testing.T) {
 		t.Error(`accepted "on"`)
 	}
 }
+
+// The stage settings have defaults, and refuse numbers that make no sense.
+func TestStageSettingsRead(t *testing.T) {
+	read := func(body string) (Classification, error) {
+		path := filepath.Join(t.TempDir(), FileName)
+		write(t, path, body)
+		c, err := Read(path)
+		if err != nil {
+			return Classification{}, err
+		}
+		return c.Classification, nil
+	}
+	c, err := read(`{"classification": {"enabled": true}}`)
+	if err != nil || c.StageMaxPaths != 256 || c.MaxContexts != 16 || c.CI.StageFloor != nil {
+		t.Errorf("defaults: %+v %v", c, err)
+	}
+	c, err = read(`{"classification": {"enabled": true, "stages": {"max_paths": 64}, "engine": {"max_contexts": 4}, "ci": {"stage_floor": 70}}}`)
+	if err != nil || c.StageMaxPaths != 64 || c.MaxContexts != 4 || c.CI.StageFloor == nil || *c.CI.StageFloor != 70 {
+		t.Errorf("set: %+v %v", c, err)
+	}
+	for _, bad := range []string{
+		`{"classification": {"enabled": true, "stages": {"max_paths": 1}}}`,
+		`{"classification": {"enabled": true, "engine": {"max_contexts": 0}}}`,
+		`{"classification": {"enabled": true, "ci": {"stage_floor": 101}}}`,
+		`{"classification": {"enabled": true, "stages": {"size": 5}}}`,
+	} {
+		if _, err := read(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

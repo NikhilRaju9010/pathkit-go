@@ -308,3 +308,259 @@ func TestArgsCopiedNeedsTheInterceptorAssumption(t *testing.T) {
 		}
 	}
 }
+
+// A stage path the engine calls impossible in every incoming state makes every
+// full path through it impossible when the paths are followed whole. Checked
+// on the engine fixtures and the shape fixtures with several stage sizes and
+// context limits (limit 1 cuts the states off, so claims become pending).
+func TestStageClaimsAgreeWithWholePaths(t *testing.T) {
+	dirs := []string{engineDir, "../../testdata/shapes/valueflow", "../../testdata/shapes/typeswitch", "../../testdata/shapes/zerovalue", "../../testdata/shapes/guardedtwice", "../../testdata/fixtures/bigflow"}
+	checked, impossibleStages := 0, 0
+	for _, dir := range dirs {
+		res, err := load.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, wf := range discover.Find(res.Packages) {
+			g, err := model.Build(wf)
+			if err != nil {
+				continue
+			}
+			ps := g.Paths(5000)
+			if ps.Truncated {
+				continue
+			}
+			a := New(g, Options{JSONDecode: true, ArgsCopied: true})
+			for _, maxPaths := range []int{2, 8, 256} {
+				stages := g.Stages(maxPaths)
+				for _, maxCtx := range []int{1, 16} {
+					reps := a.AnalyzeStages(g, stages, maxCtx)
+					imp := map[int]map[string]bool{}
+					for k, rep := range reps {
+						imp[k] = map[string]bool{}
+						for _, r := range rep.Results {
+							if r.Verdict == Impossible {
+								imp[k][r.Path.Key()] = true
+								impossibleStages++
+							}
+						}
+					}
+					for _, p := range ps.List {
+						whole := a.Analyze(p).Claim != nil
+						for _, pc := range g.StagePieces(p, stages) {
+							if imp[pc.Stage][pc.Key()] && !whole {
+								t.Errorf("%s (stages %d, contexts %d): stage %d path %s is called impossible, but the whole path %s has no claim", wf.Name, maxPaths, maxCtx, pc.Stage, pc.Key(), p.Key())
+							}
+						}
+					}
+					checked++
+				}
+			}
+		}
+	}
+	if checked < 100 || impossibleStages == 0 {
+		t.Errorf("checked %d runs, %d impossible stage paths", checked, impossibleStages)
+	}
+}
+
+// Listing with pruning leaves out exactly the paths the engine calls
+// impossible at a step, counts them, and lists the rest unchanged.
+func TestPrunedListingAddsUp(t *testing.T) {
+	dirs := []string{engineDir, "../../testdata/shapes/valueflow", "../../testdata/shapes/typeswitch", "../../testdata/shapes/zerovalue", "../../testdata/shapes/guardedtwice", "../../testdata/shapes/loopchange"}
+	groups, checked := 0, 0
+	for _, dir := range dirs {
+		res, err := load.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, wf := range discover.Find(res.Packages) {
+			g, err := model.Build(wf)
+			if err != nil {
+				continue
+			}
+			all := g.Paths(1 << 20)
+			if all.Truncated {
+				continue
+			}
+			a := New(g, Options{JSONDecode: true, ArgsCopied: true})
+			pl := g.PathsPruned(1<<20, func() any { return a.NewWalk() },
+				func(s any) any { return s.(*Walk).Clone() },
+				func(s any, st model.Step) any {
+					if c := s.(*Walk).Step(st); c != nil {
+						return c
+					}
+					return nil
+				})
+			listed := map[string]bool{}
+			for _, p := range pl.List {
+				listed[p.Key()] = true
+				if a.Analyze(p).Claim != nil {
+					t.Errorf("%s: listed path %s has a claim", wf.Name, p.Key())
+				}
+			}
+			under := 0
+			for _, p := range all.List {
+				inGroup := 0
+				for _, gr := range pl.Pruned {
+					if hasPrefix(p, gr.Prefix) {
+						inGroup++
+					}
+				}
+				switch {
+				case listed[p.Key()] && inGroup != 0:
+					t.Errorf("%s: path %s is listed and pruned", wf.Name, p.Key())
+				case !listed[p.Key()] && inGroup != 1:
+					t.Errorf("%s: path %s is in %d pruned groups (want 1)", wf.Name, p.Key(), inGroup)
+				}
+				if !listed[p.Key()] {
+					under++
+					if a.Analyze(p).Claim == nil {
+						t.Errorf("%s: pruned path %s has no claim when walked whole", wf.Name, p.Key())
+					}
+				}
+			}
+			sum := 0
+			for _, gr := range pl.Pruned {
+				sum += int(gr.Count.Int64())
+			}
+			if sum != under || len(pl.List)+under != len(all.List) {
+				t.Errorf("%s: listed %d + pruned %d (groups say %d) != %d paths", wf.Name, len(pl.List), under, sum, len(all.List))
+			}
+			groups += len(pl.Pruned)
+			checked++
+		}
+	}
+	if checked < 40 || groups == 0 {
+		t.Errorf("checked %d workflows, %d pruned groups", checked, groups)
+	}
+}
+
+func hasPrefix(p model.Path, prefix []model.Step) bool {
+	if len(p.Steps) < len(prefix) {
+		return false
+	}
+	for i, s := range prefix {
+		if p.Steps[i].Exit != s.Exit {
+			return false
+		}
+	}
+	return true
+}
+
+// bigflowWorkflow builds one workflow of the bigflow fixture.
+func bigflowWorkflow(t *testing.T, name string) (*model.Graph, *Analyzer) {
+	t.Helper()
+	res, err := load.Load("../../testdata/fixtures/bigflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wf := range discover.Find(res.Packages) {
+		if wf.Name == "bigflow."+name {
+			g, err := model.Build(wf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return g, New(g, Options{JSONDecode: true, ArgsCopied: true})
+		}
+	}
+	t.Fatalf("bigflow.%s not found", name)
+	return nil, nil
+}
+
+// verdictsOf collects the verdict of every stage path that takes the given
+// exit of the decision with this text, and none of the exits in not
+// ("decision text|exit").
+func verdictsOf(reps []StageReport, label, exit string, not ...string) map[Verdict]int {
+	out := map[Verdict]int{}
+	for _, rep := range reps {
+		for _, r := range rep.Results {
+			hit, skip := false, false
+			for _, s := range r.Path.Steps {
+				if s.Junction.Label == label && s.Exit.Label == exit {
+					hit = true
+				}
+				for _, n := range not {
+					if s.Junction.Label+"|"+s.Exit.Label == n {
+						skip = true
+					}
+				}
+			}
+			if hit && !skip {
+				out[r.Verdict]++
+			}
+		}
+	}
+	return out
+}
+
+// Facts across stages: a value the earlier stages leave the same way makes a
+// later impossible answer impossible in every incoming state; a value they
+// leave in different ways makes an answer possible in one state possible; and
+// when there are more incoming states than the limit, an answer that no
+// examined state allows is only pending.
+func TestStageContexts(t *testing.T) {
+	g, a := bigflowWorkflow(t, "ContextsAllImpossible")
+	reps := a.AnalyzeStages(g, g.Stages(256), 16)
+	if v := verdictsOf(reps, `if mode == "b"`, "true"); v[Impossible] == 0 || v[Possible] != 0 || v[Pending] != 0 {
+		t.Errorf("ContextsAllImpossible: verdicts for mode == b, true side: %v (want only impossible)", v)
+	}
+	if v := verdictsOf(reps, `if mode == "b"`, "false"); v[Possible] == 0 || v[Impossible] != 0 {
+		t.Errorf("ContextsAllImpossible: verdicts for mode == b, false side: %v (want only possible)", v)
+	}
+
+	g, a = bigflowWorkflow(t, "ContextsDiffer")
+	reps = a.AnalyzeStages(g, g.Stages(256), 16)
+	if v := verdictsOf(reps, `if v == "x"`, "true", `if v == "y"|true`); v[Possible] == 0 || v[Impossible] != 0 {
+		t.Errorf("ContextsDiffer: v == x, true side: %v (want possible: one incoming state has v = x)", v)
+	}
+	if v := verdictsOf(reps, `if v == "y"`, "true"); v[Impossible] == 0 || v[Possible] != 0 {
+		t.Errorf("ContextsDiffer: v == y, true side: %v (want impossible in every state)", v)
+	}
+	contexts := 0
+	for _, r := range reps {
+		contexts = max(contexts, r.Contexts)
+	}
+	if contexts != 2 {
+		t.Errorf("ContextsDiffer: %d incoming states, want 2 (v is empty or x)", contexts)
+	}
+
+	g, a = bigflowWorkflow(t, "ContextsCutOff")
+	cut := a.AnalyzeStages(g, g.Stages(256), 16)
+	if v := verdictsOf(cut, `if a1 == "z"`, "true"); v[Pending] == 0 || v[Impossible] != 0 || v[Possible] != 0 {
+		t.Errorf("ContextsCutOff with 16: %v (want only pending: 32 states, 16 followed)", v)
+	}
+	cutOff := false
+	for _, r := range cut {
+		cutOff = cutOff || r.CutOff
+	}
+	if !cutOff {
+		t.Error("ContextsCutOff with 16: no stage says its states were cut off")
+	}
+	wide := a.AnalyzeStages(g, g.Stages(256), 64)
+	if v := verdictsOf(wide, `if a1 == "z"`, "true"); v[Impossible] == 0 || v[Pending] != 0 {
+		t.Errorf("ContextsCutOff with 64: %v (want impossible in every one of the 32 states)", v)
+	}
+
+	// The cut is remembered by the stages after the next one: a path that is
+	// possible in a state that was left out is never called impossible.
+	g, a = bigflowWorkflow(t, "ContextsCutOffLater")
+	for _, limit := range []int{4, 16} {
+		reps := a.AnalyzeStages(g, g.Stages(256), limit)
+		if v := verdictsOf(reps, `if a1 == ""`, "true"); v[Impossible] != 0 {
+			t.Errorf("ContextsCutOffLater with %d states: a1 == empty, true side: %v (it is possible in a state that was left out)", limit, v)
+		}
+	}
+	// A stage with an early return leaves one state, but the cut stays.
+	g, a = bigflowWorkflow(t, "CutThenReturn")
+	if v := verdictsOf(a.AnalyzeStages(g, g.Stages(2), 1), `if sv == "b"`, "true"); v[Impossible] != 0 {
+		t.Errorf("CutThenReturn with 1 state: sv == b, true side: %v (possible when a is false, a state that was left out)", v)
+	}
+	if v := verdictsOf(a.AnalyzeStages(g, g.Stages(2), 16), `if sv == "b"`, "true"); v[Possible] == 0 {
+		t.Errorf("CutThenReturn with 16 states: %v (want possible)", v)
+	}
+	g, a = bigflowWorkflow(t, "ContextsCutOffLater")
+	reps = a.AnalyzeStages(g, g.Stages(256), 64)
+	if v := verdictsOf(reps, `if a1 == ""`, "true"); v[Possible] == 0 || v[Impossible] != 0 {
+		t.Errorf("ContextsCutOffLater with 64 states: %v (want possible)", v)
+	}
+}

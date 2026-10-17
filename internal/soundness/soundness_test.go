@@ -53,6 +53,12 @@ type observed struct {
 	eng      *classify.Engine                              // the classifier the claims came from (graphs added)
 	// helperPaths counts the paths a run took through a followed helper's code.
 	helperPaths int
+	// listings and plans are what a small path cap and small stages make of each
+	// program: the pruned groups, and the class of every stage path.
+	listings     map[string]*classify.Listing
+	plans        map[string]*classify.StagePlan
+	reachedPaths map[string][]model.Path
+	graphs       map[string]*model.Graph
 }
 
 // runBatch writes the programs into a throw-away module, records the paths
@@ -100,10 +106,14 @@ func runBatch(t *testing.T, programs []Program) *observed {
 	}
 	// PATHKIT_SOUNDNESS_ENGINE=off runs the same programs without the fact
 	// engine, to see how many claims it adds.
-	eng, err := classify.NewEngine(scope.Classification{Enabled: true, EngineOff: os.Getenv("PATHKIT_SOUNDNESS_ENGINE") == "off"})
+	// Small stages, few contexts and a small path cap make the programs (about
+	// fifty paths each) go through the stage and pruning code.
+	eng, err := classify.NewEngine(scope.Classification{Enabled: true, EngineOff: os.Getenv("PATHKIT_SOUNDNESS_ENGINE") == "off", StageMaxPaths: 6, MaxContexts: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
+	eng.SetPathCap(12)
+	obs.listings, obs.plans, obs.reachedPaths, obs.graphs = map[string]*classify.Listing{}, map[string]*classify.StagePlan{}, map[string][]model.Path{}, map[string]*model.Graph{}
 	obs.eng = eng
 	graphs := map[string]*model.Graph{}
 	hashes := map[string]string{}
@@ -124,6 +134,9 @@ func runBatch(t *testing.T, programs []Program) *observed {
 			obs.paths[wf.Name] = append(obs.paths[wf.Name], p)
 			obs.claims[wf.Name][p.Key()] = eng.Claim(wf.Name, p)
 		}
+		obs.listings[wf.Name] = eng.Listing(wf.Name, g)
+		obs.plans[wf.Name] = eng.PlanStages(wf.Name, g)
+		obs.graphs[wf.Name] = g
 	}
 	if len(targets) != len(programs) {
 		t.Fatalf("%d programs written but PathKit found %d workflows", len(programs), len(targets))
@@ -167,6 +180,7 @@ func runBatch(t *testing.T, programs []Program) *observed {
 				obs.reached[tf.Workflow] = map[string]bool{}
 			}
 			obs.reached[tf.Workflow][out.Path.Key()] = true
+			obs.reachedPaths[tf.Workflow] = append(obs.reachedPaths[tf.Workflow], out.Path)
 			for _, st := range out.Path.Steps {
 				if st.Junction.Site != nil {
 					obs.helperPaths++
@@ -210,6 +224,46 @@ func (o *observed) falseClaims(claim func(workflow string, p model.Path) classif
 	return out
 }
 
+// stageFalseClaims lists every place where a path a run took lies in a part of
+// the map the stages or the pruning call impossible: a pruned group the path
+// runs through, or a stage path the stage plan calls cannot-be-tested.
+func (o *observed) stageFalseClaims() (out []string, stageClaims, prunedGroups int) {
+	for wf, plan := range o.plans {
+		for k := range plan.Classes {
+			for _, sc := range plan.Classes[k] {
+				if sc.Class.Bucket == classify.CannotBeTested {
+					stageClaims++
+				}
+			}
+		}
+		prunedGroups += len(o.listings[wf].Pruned)
+		prog := o.programs[wf]
+		for _, p := range o.reachedPaths[wf] {
+			for gi, pg := range o.listings[wf].Pruned {
+				if len(p.Steps) >= len(pg.Group.Prefix) {
+					in := true
+					for i, s := range pg.Group.Prefix {
+						in = in && p.Steps[i].Exit == s.Exit
+					}
+					if in {
+						out = append(out, fmt.Sprintf("FALSE PRUNED GROUP %d: %s (seed %d, program %d) path %s was run, but is inside a part left out as impossible: %s\n%s", gi, wf, prog.Seed, prog.Number, p.Key(), pg.Class.Explanation, prog.Source))
+					}
+				}
+			}
+			stages := o.plans[wf].Stages
+			for _, pc := range o.graphs[wf].StagePieces(p, stages) {
+				for _, sc := range o.plans[wf].Classes[pc.Stage] {
+					if sc.Path.Key() == pc.Key() && sc.Class.Bucket == classify.CannotBeTested {
+						out = append(out, fmt.Sprintf("FALSE STAGE CLAIM: %s (seed %d, program %d) path %s was run, but its stage path %s is called %s (%s): %s\n%s", wf, prog.Seed, prog.Number, p.Key(), pc.Key(), sc.Class.Bucket, sc.Class.Label, sc.Class.Explanation, prog.Source))
+					}
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return
+}
+
 // stats counts what the run covered, so a green run can be told from one
 // that checked nothing.
 func (o *observed) stats() (programs, paths, reached, claimed int) {
@@ -247,7 +301,7 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		}
 	}
 
-	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths int
+	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups int
 	for start := 0; start < len(all); start += batchSize {
 		end := min(start+batchSize, len(all))
 		obs := runBatch(t, all[start:end])
@@ -258,11 +312,20 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 			falseCount++
 			t.Error(f)
 		}
+		sf, sc, pg := obs.stageFalseClaims()
+		for _, f := range sf {
+			falseCount++
+			t.Error(f)
+		}
+		stageClaims, prunedGroups = stageClaims+sc, prunedGroups+pg
 		helperPaths += obs.helperPaths
 		p, ps, r, c := obs.stats()
 		totalPrograms, totalPaths, totalReached, totalClaimed = totalPrograms+p, totalPaths+ps, totalReached+r, totalClaimed+c
 	}
-	t.Logf("SOUNDNESS: %d programs run, %d paths listed, %d paths really taken, %d paths claimed cannot-be-tested, %d false claims (%d runs went through helper code)", totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths)
+	t.Logf("SOUNDNESS: %d programs run, %d paths listed, %d paths really taken, %d paths claimed cannot-be-tested, %d false claims (%d runs went through helper code; %d stage paths and %d pruned groups were checked too)", totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups)
+	if stageClaims == 0 || prunedGroups == 0 {
+		t.Errorf("the stage and pruning code was not exercised: %d stage claims, %d pruned groups", stageClaims, prunedGroups)
+	}
 	if helperPaths == 0 {
 		t.Error("no run went through the code of a helper function: the helper probes were not exercised")
 	}

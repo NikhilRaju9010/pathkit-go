@@ -30,6 +30,11 @@
   function clear(e) {
     while (e.firstChild) { e.removeChild(e.firstChild); }
   }
+  function compareText(a, b) {
+    if (a < b) { return -1; }
+    if (a > b) { return 1; }
+    return 0;
+  }
   function str(i) {
     if (i < 0) { return ''; }
     return S[i] === '\u0000' ? '' : S[i];
@@ -209,9 +214,9 @@
         if (str(w.r[i][4]) !== '') { labels[str(w.r[i][4])] = true; }
       }
       var bo = [['', 'All']];
-      Object.keys(buckets).sort().forEach(function (k) { bo.push([k, k]); });
+      Object.keys(buckets).sort(compareText).forEach(function (k) { bo.push([k, k]); });
       var lo = [['', 'All']];
-      Object.keys(labels).sort().forEach(function (k) { lo.push([k, k]); });
+      Object.keys(labels).sort(compareText).forEach(function (k) { lo.push([k, k]); });
       add(ctl, select(id + 'b', 'Bucket', bo, st.bucket, function (v) { st.bucket = v; st.page = 1; draw(wi); }));
       add(ctl, select(id + 'l', 'Reason label', lo, st.label, function (v) { st.label = v; st.page = 1; draw(wi); }));
     }
@@ -321,8 +326,72 @@
     if (sum) { sum.textContent = query === '' ? '' : total + ' of ' + w.r.length + ' match'; }
   }
 
+  // ---- the stage paths of one workflow: pick a stage, page through its paths ----
+  function buildStages(wi) {
+    var w = W[wi];
+    var root = document.querySelector('[data-sg="' + wi + '"]');
+    if (!w.sg || !root || root.firstChild) { return; }
+    var st = { stage: 0, status: '', page: 1, size: 25 };
+    var ctl = el('div', 'controls');
+    var live = el('p', 'showing');
+    live.setAttribute('aria-live', 'polite');
+    var box = el('div', 'tablebox');
+    var pg = el('div', 'pagerbox');
+    var opts = [];
+    w.sg.forEach(function (s, k) { if (!s.b) { opts.push([String(k), 'Stage ' + (k + 1) + ' (' + s.n + ' paths)']); } });
+    if (opts.length === 0) { return; }
+    st.stage = parseInt(opts[0][0], 10);
+    function drawStage() {
+      var rows = w.sg[st.stage].p.filter(function (r) {
+        return st.status === '' || (st.status === 'covered' ? r[1] === 1 : r[1] === 0);
+      });
+      var pages = Math.max(1, Math.ceil(rows.length / st.size));
+      if (st.page > pages) { st.page = pages; }
+      live.textContent = showing(st, rows.length, 'No stage paths match the filters.');
+      clear(box);
+      clear(pg);
+      var chunk = printing ? rows : rows.slice((st.page - 1) * st.size, st.page * st.size);
+      if (chunk.length > 0) {
+        var table = el('table', 'paths');
+        add(table, el('caption', 'sr', 'Paths of stage ' + (st.stage + 1) + ' of ' + w.n));
+        var tr = el('tr');
+        ['Stage path id', 'Status', 'Bucket', 'Reason label', 'Path'].forEach(function (h) {
+          var th = el('th', null, h);
+          th.scope = 'col';
+          tr.appendChild(th);
+        });
+        add(table, add(el('thead'), tr));
+        var body = el('tbody');
+        chunk.forEach(function (r) {
+          var row = el('tr', 'p' + (r[1] === 0 ? ' missed' : ' covered'));
+          function cell(label, node) {
+            var td = el('td');
+            td.setAttribute('data-label', label);
+            if (typeof node === 'string') { td.textContent = node; } else { td.appendChild(node); }
+            row.appendChild(td);
+          }
+          cell('Stage path id', el('code', null, r[0]));
+          cell('Status', el('span', 'status s' + r[1], MARK[r[1]] + ' ' + STATUS[r[1]]));
+          cell('Bucket', r[2] < 0 ? '' : el('span', 'bucket b-' + str(r[2]), str(r[2])));
+          cell('Reason label', r[3] < 0 || str(r[3]) === '' ? 'none' : str(r[3]));
+          cell('Path', short(str(r[4])));
+          body.appendChild(row);
+        });
+        add(table, body);
+        box.appendChild(table);
+      }
+      if (!printing) { pg.appendChild(pager(rows.length, st, drawStage)); }
+    }
+    add(ctl, select('sg' + wi + 'k', 'Stage', opts, String(st.stage), function (v) { st.stage = parseInt(v, 10); st.page = 1; drawStage(); }));
+    add(ctl, select('sg' + wi + 's', 'Status', [['', 'All'], ['covered', 'Covered'], ['missed', 'Missed']], st.status, function (v) { st.status = v; st.page = 1; drawStage(); }));
+    add(ctl, select('sg' + wi + 'n', 'Rows per page', SIZES.map(function (n) { return [String(n), String(n)]; }), String(st.size), function (v) { st.size = parseInt(v, 10); st.page = 1; drawStage(); }));
+    add(root, ctl, live, box, pg);
+    drawStage();
+  }
+
   function buildWorkflow(wi) {
     var st = states[wi];
+    buildStages(wi);
     if (st.ui) { return; }
     var root = document.querySelector('[data-pt="' + wi + '"]');
     if (!root) { return; }

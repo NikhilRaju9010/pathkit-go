@@ -55,3 +55,6 @@ func TestInLoopTwice(t *testing.T) { _ = run(t, InLoop, nil, []string{"a", "b"})
 func TestInLoopFails(t *testing.T) { _ = run(t, InLoop, []string{"Charge"}, []string{"a"}) }
 
 func TestPureOK(t *testing.T) { _ = run(t, PureHelper, nil, 1) }
+
+func TestManyAllSucceed(t *testing.T) { _ = run(t, Many, nil) }
+func TestManyAllFail(t *testing.T)    { _ = run(t, Many, []string{"Charge"}) }

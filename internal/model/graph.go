@@ -182,11 +182,12 @@ type Graph struct {
 	// Marks are the //pathkit:untestable comments in the function.
 	Marks []Mark
 
-	byStmt map[ast.Node]*Junction // the workflow function's own junctions
-	byID   map[string]*Exit
-	sites  []*Site
-	// helperNote is set when helpers are not followed because of the path cap.
-	helperNote string
+	byStmt    map[ast.Node]*Junction // the workflow function's own junctions
+	byID      map[string]*Exit
+	sites     []*Site
+	stages    []Stage
+	stagesFor int
+	stageOf   map[*Junction]int
 
 	// info, fn and fset are what the fact engine needs to read the code.
 	info *types.Info

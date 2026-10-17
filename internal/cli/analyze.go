@@ -85,7 +85,11 @@ func runAnalyze(cmd *cobra.Command, arg string, opt analyzeOptions) error {
 		if opt.mermaid {
 			block = render.Mermaid(r.graph, ps, model.DefaultMaxPaths)
 		} else {
-			block = render.Text(r.graph, ps, model.DefaultMaxPaths, render.TextOptions{Summary: opt.summary, Limit: limit})
+			to := render.TextOptions{Summary: opt.summary, Limit: limit}
+			if ps.Truncated { // the exact count, instead of a silent cap
+				to.Exact = render.Big(r.graph.PathCount())
+			}
+			block = render.Text(r.graph, ps, model.DefaultMaxPaths, to)
 		}
 		if r.addedByConfig { // D8: always visible which workflows a person added
 			block = strings.Replace(block, "Workflow: "+r.wf.Name+"\n", "Workflow: "+r.wf.Name+" (added by config)\n", 1)
