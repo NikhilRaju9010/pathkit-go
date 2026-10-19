@@ -1,0 +1,27 @@
+{
+  "construct": "wrapper_activity",
+  "status": "handled",
+  "note": "A function of a company library that runs an activity is told to PathKit with classification.activity_wrappers: it is then a step with a success and a failure outcome. Without the entry it is listed as not read, with the entry to add.",
+  "config": {
+    "activityWrappers": [
+      "example.com/constructs/wrapper_activity/wrap.Run"
+    ],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "wrapper_activity.Run",
+      "paths": [
+        {
+          "text": "Start -> Run (activity) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Run (activity) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

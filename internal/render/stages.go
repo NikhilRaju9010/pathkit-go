@@ -67,6 +67,9 @@ func StageLines(w coverage.WorkflowResult) string {
 	} else {
 		fmt.Fprintf(&b, "Exact paths: %s\n", Big(w.Exact))
 	}
+	if w.OldVersionPaths != nil && w.OldVersionPaths.Sign() > 0 {
+		b.WriteString(oldVersionLine(w) + "\n")
+	}
 	if n := len(w.Pruned); n > 0 {
 		total, kept := new(big.Int), 0
 		for _, p := range w.Pruned {
@@ -84,7 +87,7 @@ func StageLines(w coverage.WorkflowResult) string {
 	}
 	if len(w.Stages) > 0 {
 		c, t, big := StageCoverage(w)
-		line := fmt.Sprintf("Stage coverage: %d/%d (%s) in %d stages", c, t, Pct(coverage.Percent(c, t), nil), len(w.Stages))
+		line := fmt.Sprintf("Stage coverage: %s in %d stages", Ratio(c, t, nil, "no stage paths to measure"), len(w.Stages))
 		if big > 0 {
 			line += fmt.Sprintf("; %d too big to list (branch coverage only)", big)
 		}
@@ -99,7 +102,11 @@ func StageLines(w coverage.WorkflowResult) string {
 // StageLine describes one stage on one line.
 func StageLine(s coverage.StageResult) string {
 	if s.Big {
-		return fmt.Sprintf("Stage %d: %s paths, too many to list; branches %d/%d", s.Index+1, Big(s.Count), s.BranchesTaken, s.Branches)
+		line := fmt.Sprintf("Stage %d: %s paths, too many to list; branches %d/%d", s.Index+1, Big(s.Count), s.BranchesTaken, s.Branches)
+		if s.SplitWhy != "" {
+			line += "; not cut further because " + s.SplitWhy
+		}
+		return line
 	}
 	line := fmt.Sprintf("Stage %d: %s paths, %d covered (%s); branches %d/%d", s.Index+1, Big(s.Count), s.Covered,
 		Pct(coverage.Percent(s.Covered, len(s.Paths)-s.CannotBeTested), nil), s.BranchesTaken, s.Branches)
@@ -111,6 +118,9 @@ func StageLine(s coverage.StageResult) string {
 	}
 	if s.CutOff {
 		line += "; more incoming states than the limit were cut off"
+	}
+	if s.Part && s.SplitFrom != nil {
+		line += fmt.Sprintf("; a piece of a stretch of %s paths, cut at the decisions of a nested region (its claims are made with nothing known on the way in)", Big(s.SplitFrom))
 	}
 	return line
 }
@@ -157,7 +167,7 @@ func ProjectStageLine(res coverage.Result) string {
 	if n == 0 {
 		return ""
 	}
-	line := fmt.Sprintf("Stage coverage: %d/%d (%s) over %s with stages (a stage is a stretch of the workflow between two decisions every path goes through; the paths of the stages multiply into the workflow's paths)", covered, total, Pct(coverage.Percent(covered, total), nil), count(n, "workflow"))
+	line := fmt.Sprintf("Stage coverage: %s over %s with stages (a stage is a stretch of the workflow between two decisions every path goes through; the paths of the stages multiply into the workflow's paths)", Ratio(covered, total, nil, "no stage paths to measure"), count(n, "workflow"))
 	if bigStages > 0 {
 		line += fmt.Sprintf("; %s too big to list left out (branch coverage only)", count(bigStages, "stage"))
 	}
@@ -187,13 +197,53 @@ func HeadlineLines(res coverage.Result, threshold *float64, classified bool) []s
 		}
 		return s
 	}
-	path := fmt.Sprintf("%s: %d/%d (%s) over %s; %s too big for path coverage, see stage coverage",
-		name("Path coverage"), h.PathCovered, h.PathTotal, Pct(coverage.Percent(h.PathCovered, h.PathTotal), threshold), count(h.PathWorkflows, "workflow"), count(h.TooBig, "workflow"))
-	stage := fmt.Sprintf("%s: %d/%d (%s) over the %s too big for path coverage (a stage is a stretch of the workflow between two decisions every path goes through)",
-		name("Stage coverage"), h.StageCovered, h.StageTotal, Pct(coverage.Percent(h.StageCovered, h.StageTotal), nil), count(h.TooBig, "workflow"))
+	var path string
+	if h.PathTotal == 0 {
+		path = fmt.Sprintf("%s: %s; %s too big for path coverage, see stage coverage",
+			name("Path coverage"), NotMeasured(count(h.PathWorkflows, "workflow")+" under the cap"), count(h.TooBig, "workflow"))
+	} else {
+		path = fmt.Sprintf("%s: %d/%d (%s) over %s; %s too big for path coverage, see stage coverage",
+			name("Path coverage"), h.PathCovered, h.PathTotal, Pct(coverage.Percent(h.PathCovered, h.PathTotal), threshold), count(h.PathWorkflows, "workflow"), count(h.TooBig, "workflow"))
+	}
+	stage := fmt.Sprintf("%s: %s over the %s too big for path coverage (a stage is a stretch of the workflow between two decisions every path goes through)",
+		name("Stage coverage"), Ratio(h.StageCovered, h.StageTotal, nil, "no stage paths to measure"), count(h.TooBig, "workflow"))
 	if h.StagesTooBig > 0 {
 		stage += fmt.Sprintf("; %s too big to list left out (branch coverage only)", count(h.StagesTooBig, "stage"))
 	}
-	branch := fmt.Sprintf("Branch coverage: %d/%d (%s) over all workflows, the whole map of each", h.BranchCovered, h.BranchTotal, Pct(coverage.Percent(h.BranchCovered, h.BranchTotal), nil))
+	branch := fmt.Sprintf("Branch coverage: %s over all workflows, the whole map of each", Ratio(h.BranchCovered, h.BranchTotal, nil, "no branches"))
 	return []string{path, stage, branch}
+}
+
+// HelperLines are the lines about a workflow's summarized helpers: why they
+// are summarized, then one line per helper with its branches (a branch counts
+// when any call takes it) and the places that call it. Nothing when the
+// workflow's helpers are copied into its paths.
+func HelperLines(w coverage.WorkflowResult) []string {
+	if !w.HelpersSummarized || len(w.Units) == 0 {
+		return nil
+	}
+	head := "Helper functions are counted once, not inside every path: a call of one is a single step, and a branch inside it counts as tested when any call took it"
+	if w.HelpersWhy != "" {
+		head += " (" + w.HelpersWhy + ")"
+	}
+	lines := []string{head}
+	for _, u := range w.Units {
+		lines = append(lines, "  "+UnitLine(u))
+	}
+	if !ShowStages(w) && w.OldVersionPaths != nil && w.OldVersionPaths.Sign() > 0 {
+		lines = append(lines, oldVersionLine(w)) // StageLines prints it for the others
+	}
+	return lines
+}
+
+// UnitLine is "charge: 1 of 2 branches tested; called from 4 places".
+func UnitLine(u coverage.UnitResult) string {
+	if u.Branches == 0 {
+		return fmt.Sprintf("%s: nothing to test inside it (no if or switch); called from %s", u.Name, count(u.Sites, "place"))
+	}
+	return fmt.Sprintf("%s: %d of %d branches tested; called from %s", u.Name, u.BranchesTaken, u.Branches, count(u.Sites, "place"))
+}
+
+func oldVersionLine(w coverage.WorkflowResult) string {
+	return fmt.Sprintf("Old version branches: %s paths (exact; they stay on the map, labelled version-gate-old-branch)", Big(w.OldVersionPaths))
 }

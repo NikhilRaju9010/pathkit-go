@@ -36,6 +36,9 @@ type Site struct {
 	Body *ast.BlockStmt
 	File *ast.File
 	Decl *ast.FuncDecl // nil for a function literal
+	// Unit, when set, makes this the one site of a summarized helper (see
+	// HelperUnit); it is not part of Graph.Sites.
+	Unit *HelperUnit
 	// Key names the helper in the recorder, so a copy of the code entered
 	// from anywhere else records nothing.
 	Key string
@@ -120,6 +123,22 @@ func (g *Graph) CodeHash() string {
 			extra = append(extra, filepath.Base(g.fset.Position(s.Decl.Pos()).Filename)+":"+FunctionHash(g.fset, s.Decl))
 		}
 	}
+	for _, u := range g.units {
+		if u.Site.Decl != nil && !seen[u.Site.Decl] {
+			seen[u.Site.Decl] = true
+			extra = append(extra, filepath.Base(g.fset.Position(u.Site.Decl.Pos()).Filename)+":"+FunctionHash(g.fset, u.Site.Decl))
+		}
+	}
+	if g.directReturnSteps {
+		// "return <call>" is a decision on this map; a trace recorded without it
+		// stops one step short and cannot be read against it.
+		extra = append(extra, "direct returns: step")
+	}
+	if g.summarized {
+		// Helpers mapped as units number the decisions differently from copies
+		// of them: a trace recorded the other way cannot be read against this map.
+		extra = append(extra, "helpers: summarized")
+	}
 	if len(extra) == 0 {
 		return h
 	}
@@ -156,6 +175,25 @@ func (g *Graph) RecorderTable() map[string]string {
 	for _, e := range g.SiteExits() {
 		t[TableKey(e.Site.ID, e.LocalKey)] = e.ID.String()
 	}
+	for _, u := range g.units {
+		for _, c := range u.Calls {
+			parent := ""
+			if c.From != nil {
+				parent = c.From.ID
+			}
+			t[TableKey(parent, g.CallKey(c.Call))] = u.ID
+		}
+		t[TableKey(u.ID, "")] = u.Site.Key
+		for _, j := range u.Junctions {
+			exits := j.Exits
+			if j.Retry != nil {
+				exits = append(exits[:len(exits):len(exits)], j.Retry)
+			}
+			for _, e := range exits {
+				t[TableKey(u.ID, g.LocalKey(j.Stmt, e.Label))] = e.ID.String()
+			}
+		}
+	}
 	return t
 }
 
@@ -168,6 +206,12 @@ func (g *Graph) Helpers() []*Site {
 		if !seen[s.Body] {
 			seen[s.Body] = true
 			out = append(out, s)
+		}
+	}
+	for _, u := range g.units {
+		if !seen[u.Site.Body] {
+			seen[u.Site.Body] = true
+			out = append(out, u.Site)
 		}
 	}
 	return out

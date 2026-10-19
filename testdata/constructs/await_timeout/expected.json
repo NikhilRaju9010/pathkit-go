@@ -1,0 +1,31 @@
+{
+  "construct": "await_timeout",
+  "status": "handled",
+  "note": "workflow.AwaitWithTimeout gives three outcomes: error (failure), signaled (the condition was met) and timeout (ok is false). The goroutine that sets the condition is a closure PathKit does not map, so it is listed as not read.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "await_timeout.Run",
+      "paths": [
+        {
+          "text": "Start -> AwaitWithTimeout (wait) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --timeout--> End",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": [
+    "closure not mapped"
+  ]
+}

@@ -43,6 +43,26 @@ type Classification struct {
 	// StageMaxPaths is classification.stages.max_paths: neighbouring stages are
 	// merged while the merged stage has at most this many paths (default 256).
 	StageMaxPaths int
+	// HelperMode is classification.helpers.mode: how the code of helper
+	// functions is put on the map: "inline" (copied in at every call),
+	// "summarize" (one step per call, the helper mapped once) or "auto" (the
+	// default: inline while the workflow stays within the path cap).
+	HelperMode string
+	// DirectReturns is classification.direct_returns: what PathKit does with
+	// "return fut.Get(...)", "return workflow.Sleep(...)" and
+	// "return workflow.Await(...)". "report" (the default) leaves the return a
+	// path of its own, as always, and lists it in the "could not fully read"
+	// panel; "step" makes the call a decision with a failure and a success
+	// outcome (which changes the stable id of every path through it).
+	DirectReturns string
+	// LoopsModel is classification.loops.model: "one" (the default: a path goes
+	// into a loop body once) or "zero-one-many". The second is reserved for a
+	// later version; PathKit says so and keeps the one-round model.
+	LoopsModel string
+	// ActivityWrappers are the functions classification.activity_wrappers
+	// tells PathKit to treat as a call that starts an activity, a child
+	// workflow or a Nexus operation and waits for it.
+	ActivityWrappers []ActivityWrapper
 	// MaxContexts is classification.engine.max_contexts: how many different
 	// incoming states of a stage the fact engine follows (default 16).
 	MaxContexts int
@@ -59,6 +79,23 @@ type CISettings struct {
 	// StageFloor is the floor for stage coverage (the stage paths a test ran, of
 	// those a test can run), in percent; nil means no floor.
 	StageFloor *float64
+	// CappedBasis is classification.ci.capped_basis: what fail_under_testable
+	// measures for a workflow over the path cap: "stage" (the default; its
+	// testable stage paths) or "branch" (its branches over the whole map).
+	CappedBasis string
+}
+
+// ActivityWrapper is one classification.activity_wrappers entry: a function
+// of the project (or of a library) that runs a Temporal call for its caller.
+type ActivityWrapper struct {
+	// Function names it as PathKit prints it: "example.com/lib/wrap.Run" for a
+	// function, "(*example.com/lib/wrap.Client).Run" for a method.
+	Function string
+	// Kind is "activity" (the default), "child_workflow" or "nexus".
+	Kind string
+	// Label is the name the step gets in the paths; the function's own name
+	// when empty.
+	Label string
 }
 
 // ExplainedTrace is one explained_traces entry.
@@ -122,6 +159,24 @@ type classificationPart struct {
 	Engine             *enginePart       `json:"engine"`
 	Stages             *stagesPart       `json:"stages"`
 	Assumptions        *assumptionsPart  `json:"assumptions"`
+	Helpers            *helpersPart      `json:"helpers"`
+	ActivityWrappers   []json.RawMessage `json:"activity_wrappers"`
+	DirectReturns      *string           `json:"direct_returns"`
+	Loops              *loopsPart        `json:"loops"`
+}
+
+type loopsPart struct {
+	Model *string `json:"model"`
+}
+
+type wrapperEntry struct {
+	Function *string `json:"function"`
+	Kind     *string `json:"kind"`
+	Label    *string `json:"label"`
+}
+
+type helpersPart struct {
+	Mode *string `json:"mode"`
 }
 
 type assumptionsPart struct {
@@ -142,6 +197,7 @@ type ciEntry struct {
 	Baseline          *string  `json:"baseline"`
 	FailUnderTestable *float64 `json:"fail_under_testable"`
 	StageFloor        *float64 `json:"stage_floor"`
+	CappedBasis       *string  `json:"capped_basis"`
 }
 
 type explainedEntry struct {
@@ -356,6 +412,15 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 		c.EngineOff = true
 	}
 	c.MaxContexts, c.StageMaxPaths = 16, 256
+	c.HelperMode = "auto"
+	if p.Helpers != nil && p.Helpers.Mode != nil {
+		switch v := *p.Helpers.Mode; v {
+		case "inline", "summarize", "auto":
+			c.HelperMode = v
+		default:
+			return c, fail(`classification.helpers.mode must be "inline", "summarize" or "auto", got %q`, v)
+		}
+	}
 	if p.Engine != nil && p.Engine.MaxContexts != nil {
 		if v := *p.Engine.MaxContexts; v < 1 || v > 1024 {
 			return c, fail(`classification.engine.max_contexts must be a whole number from 1 to 1024, got %d`, v)
@@ -369,6 +434,50 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 		} else {
 			c.StageMaxPaths = v
 		}
+	}
+	c.LoopsModel = "one"
+	if p.Loops != nil && p.Loops.Model != nil {
+		switch *p.Loops.Model {
+		case "one", "zero-one-many":
+			c.LoopsModel = *p.Loops.Model
+		default:
+			return c, fail(`classification.loops.model must be "one" or "zero-one-many", got %q`, *p.Loops.Model)
+		}
+	}
+	c.DirectReturns = "report"
+	if p.DirectReturns != nil {
+		switch *p.DirectReturns {
+		case "report", "step":
+			c.DirectReturns = *p.DirectReturns
+		default:
+			return c, fail(`classification.direct_returns must be "report" or "step", got %q`, *p.DirectReturns)
+		}
+	}
+	for i, raw := range p.ActivityWrappers {
+		where := fmt.Sprintf("classification.activity_wrappers[%d]", i)
+		var e wrapperEntry
+		var str string
+		if json.Unmarshal(raw, &str) == nil {
+			e.Function = &str
+		} else if err := strict(raw, &e); err != nil {
+			return c, fail(`%s must be a function name like "example.com/lib/wrap.Run", or look like {"function": "(*example.com/lib/wrap.Client).Run", "kind": "activity"} (%s)`, where, jsonProblem(raw, err))
+		}
+		if blank(e.Function) {
+			return c, fail(`%s needs a "function": the import path of the package, a dot and the function ("example.com/lib/wrap.Run"), or "(*example.com/lib/wrap.Client).Run" for a method`, where)
+		}
+		w := ActivityWrapper{Function: strings.TrimSpace(*e.Function), Kind: "activity"}
+		if e.Kind != nil {
+			switch *e.Kind {
+			case "activity", "child_workflow", "nexus":
+				w.Kind = *e.Kind
+			default:
+				return c, fail(`%s: "kind" must be "activity", "child_workflow" or "nexus", got %q`, where, *e.Kind)
+			}
+		}
+		if e.Label != nil {
+			w.Label = strings.TrimSpace(*e.Label)
+		}
+		c.ActivityWrappers = append(c.ActivityWrappers, w)
 	}
 	c.JSONConverter = "auto"
 	if p.Assumptions != nil && p.Assumptions.DefaultJSONConverter != nil {
@@ -442,7 +551,7 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 	if p.CI != nil {
 		var e ciEntry
 		if err := strict(p.CI, &e); err != nil {
-			return c, fail(`classification.ci must look like {"baseline": "pathkit-baseline.json", "fail_under_testable": 80, "stage_floor": 70} (%s)`, jsonProblem(p.CI, err))
+			return c, fail(`classification.ci must look like {"baseline": "pathkit-baseline.json", "fail_under_testable": 80, "stage_floor": 70, "capped_basis": "stage"} (%s)`, jsonProblem(p.CI, err))
 		}
 		if e.Baseline != nil {
 			if blank(e.Baseline) {
@@ -455,6 +564,13 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 				return c, fail(`classification.ci.fail_under_testable must be a number from 0 to 100, got %v`, *v)
 			}
 			c.CI.FailUnderTestable = v
+		}
+		c.CI.CappedBasis = "stage"
+		if v := e.CappedBasis; v != nil {
+			if *v != "stage" && *v != "branch" {
+				return c, fail(`classification.ci.capped_basis must be "stage" or "branch", got %q`, *v)
+			}
+			c.CI.CappedBasis = *v
 		}
 		if v := e.StageFloor; v != nil {
 			if *v < 0 || *v > 100 {

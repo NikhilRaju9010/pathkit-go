@@ -52,9 +52,13 @@ jobs:
         if: runner.os == 'Linux'
         run: go test -race -p 2 -timeout 30m ./...
 
-      - name: go test (with race detector)
-        if: runner.os != 'Linux'
+      - name: go test (with race detector, macOS)
+        if: runner.os == 'macOS'
         run: go test -race -timeout 30m ./...
+
+      - name: go test (with race detector, Windows)
+        if: runner.os == 'Windows'
+        run: go test -race -p 2 -timeout 30m ./...
 
       # The pilot project (testdata/pilot) is a separate Go module, so the
       # commands above skip it. It is checked on its own here.

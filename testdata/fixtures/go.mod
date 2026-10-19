@@ -3,6 +3,7 @@ module example.com/fixtures
 go 1.26.0
 
 require (
+	example.com/ext v0.0.0
 	github.com/stretchr/testify v1.10.0
 	go.temporal.io/sdk v1.49.0
 )
@@ -32,3 +33,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace example.com/ext => ../extmod

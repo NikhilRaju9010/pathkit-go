@@ -10,11 +10,18 @@ import (
 
 // Workflows that call helper functions are recorded through the helpers: every
 // run's trace, with the decisions made inside the helpers, lands on a path.
+// This is the helpers-copied-in mode (classification.helpers.mode "inline"), the
+// one that gives the exact paths through each copy; summarize_test.go has the
+// summarized one.
 func TestHelperTracesMatch(t *testing.T) {
 	root := abs(t, "../../testdata/fixtures/helperrun")
 	t.Chdir(t.TempDir())
 	traces := t.TempDir()
-	if stdout, stderr, code := pathkit(t, "test", root, "--traces", traces); code != 0 {
+	cfg := filepath.Join(t.TempDir(), "inline.json")
+	if err := os.WriteFile(cfg, []byte(`{"classification": {"helpers": {"mode": "inline"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if stdout, stderr, code := pathkit(t, "test", root, "--traces", traces, "--config", cfg); code != 0 {
 		t.Fatalf("pathkit test: exit %d\n%s\n%s", code, stdout, stderr)
 	}
 	files, _ := filepath.Glob(filepath.Join(traces, "*.trace.json"))
@@ -53,7 +60,7 @@ func TestHelperTracesMatch(t *testing.T) {
 		t.Error("no trace went through a helper")
 	}
 
-	out, errOut, code := pathkit(t, "report", root, "--traces", traces, "--json")
+	out, errOut, code := pathkit(t, "report", root, "--traces", traces, "--json", "--config", cfg)
 	if code != 0 {
 		t.Fatalf("report: exit %d\n%s", code, errOut)
 	}

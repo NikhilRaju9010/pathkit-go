@@ -270,6 +270,16 @@ func workflowEdits(t Target) (map[string][]Edit, error) {
 			Edit{Offset: off(s.Ctx), Text: fmt.Sprintf("pathkitSite(%s, ", recv)},
 			Edit{Offset: end(s.Ctx), Order: 3, Text: fmt.Sprintf(", %q)", g.CallKey(s.Call))})
 	}
+	for _, uc := range g.UnitCalls() {
+		recv := recVar
+		if uc.From != nil {
+			recv = frameVar
+		}
+		file := fset.Position(uc.Call.Pos()).Filename
+		out[file] = append(out[file],
+			Edit{Offset: off(uc.Ctx), Text: fmt.Sprintf("pathkitSite(%s, ", recv)},
+			Edit{Offset: end(uc.Ctx), Order: 3, Text: fmt.Sprintf(", %q)", g.CallKey(uc.Call))})
+	}
 	done := map[ast.Node]bool{}
 	for _, s := range g.Helpers() {
 		file := fset.Position(s.Body.Pos()).Filename
@@ -284,7 +294,7 @@ func workflowEdits(t Target) (map[string][]Edit, error) {
 			Text:   fmt.Sprintf(" %s, %s := pathkitEnter(%s, %q); defer %s.exit();", frameVar, ctxIdent, ctxIdent, s.Key, frameVar),
 		})
 		hlabels := labelsOf(s.Body)
-		for _, j := range g.Junctions {
+		for _, j := range g.AllJunctions() {
 			if j.Site == nil || j.Site.Body != s.Body {
 				continue
 			}
@@ -311,6 +321,9 @@ func junctionEdits(sc scope, g *model.Graph, j *model.Junction, labels map[ast.S
 	end := func(n ast.Node) int { return fset.Position(n.End()).Offset }
 	if j.Kind == model.Loop {
 		return loopEdits(sc, g, j, labels, off, end)
+	}
+	if rs, ok := j.Stmt.(*ast.ReturnStmt); ok {
+		return returnCallEdits(sc, j, rs, off, end)
 	}
 	var edits []Edit
 	var fellInto map[*ast.CaseClause]bool
@@ -353,6 +366,24 @@ func junctionEdits(sc scope, g *model.Graph, j *model.Junction, labels map[ast.S
 		}
 	}
 	return edits, nil
+}
+
+// returnCallEdits records the decision of a "return <call>" (an error check
+// that is a return): the last result is wrapped, so the run records the
+// failure or the success exit as the error comes back. The wrap sits inside
+// the one returnEdits puts around the results (a lower Order is written first
+// at the start and, here, also at the end).
+func returnCallEdits(sc scope, j *model.Junction, rs *ast.ReturnStmt, off, end func(ast.Node) int) ([]Edit, error) {
+	failure, ok1 := sc.exitKey(j, "failure")
+	success, ok2 := sc.exitKey(j, "success")
+	if !ok1 || !ok2 {
+		return nil, fmt.Errorf("internal error: no ID for the exits of %s", j.ID)
+	}
+	last := rs.Results[len(rs.Results)-1]
+	return []Edit{
+		{Offset: off(last), Order: 1, Text: fmt.Sprintf("%s.errExit(%q, %q, ", sc.recv, failure, success)},
+		{Offset: end(last), Order: 2, Text: ")"},
+	}, nil
 }
 
 // switchBody returns the { case ... } block of a switch or type switch,
@@ -687,6 +718,7 @@ type pathkitTrace struct {
 	Steps         []string ` + "`json:\"steps\"`" + `
 	WorkflowID    string   ` + "`json:\"workflowId\"`" + `
 	RunID         string   ` + "`json:\"runId\"`" + `
+	Recorder      int      ` + "`json:\"recorder,omitempty\"`" + `
 	RecordedAt    string   ` + "`json:\"recordedAt\"`" + `
 }
 
@@ -714,7 +746,7 @@ var pathkitTables = map[string]map[string]string{
 {{end}}}
 
 func pathkitStart(ctx pathkitworkflow.Context, workflow, hash, pkg string) *pathkitRecorder {
-	r := &pathkitRecorder{table: pathkitTables[workflow], trace: pathkitTrace{SchemaVersion: 2, Tool: "pathkit-go", Workflow: workflow, Package: pkg, FunctionHash: hash, Steps: []string{}}}
+	r := &pathkitRecorder{table: pathkitTables[workflow], trace: pathkitTrace{SchemaVersion: 2, Recorder: 3, Tool: "pathkit-go", Workflow: workflow, Package: pkg, FunctionHash: hash, Steps: []string{}}}
 	if info := pathkitworkflow.GetInfo(ctx); info != nil {
 		r.trace.WorkflowID, r.trace.RunID = info.WorkflowExecution.ID, info.WorkflowExecution.RunID
 	}
@@ -723,6 +755,18 @@ func pathkitStart(ctx pathkitworkflow.Context, workflow, hash, pkg string) *path
 
 // hit records one junction exit, at the moment the decision is made.
 func (r *pathkitRecorder) hit(id string) { r.trace.Steps = append(r.trace.Steps, id) }
+
+// errExit records the decision of a "return <call>": the call's error is the
+// failure exit when it is not nil, the success exit when it is. It hands the
+// error back unchanged.
+func (r *pathkitRecorder) errExit(failure, success string, err error) error {
+	if err != nil {
+		r.hit(failure)
+	} else {
+		r.hit(success)
+	}
+	return err
+}
 
 // fell and hitUnlessFell handle fallthrough: the case a switch falls into
 // is not a new decision, so its exit is recorded only when the switch

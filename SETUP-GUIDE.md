@@ -244,6 +244,8 @@ Traces: 21 read · 21 counted · 0 unmatched · 0 stale · 0 incomplete · 0 exc
 | --- | --- |
 | `--traces <dir>` | Trace folder (default: the config's `"traces"`, else `.pathkit/traces`, the same place `pathkit test` writes). |
 | `--function <name>` | Only this workflow. |
+| `--module <name>` | When the folder holds several Go modules, only this one (its module path, or its folder name). See "Folders with several Go modules". |
+| `--paths` | List the paths of a workflow with more paths than the list holds (by default only its counts, stages and groups are printed). `report` and `coverage` only. |
 | `--fail-under <percent>` | Exit code **2** when path coverage is below it (config: `"failUnder"`; the flag wins). The report is still printed first. |
 | `--coverage-basis testable\|overall` | Which coverage `--fail-under` checks (see "Testable and overall coverage" below). Default: `overall`, or `testable` when the config switches classification on. |
 | `--allow-stale` | Also count traces recorded for an older version of a workflow, when they still fit a path (config: `"allowStale"`). |
@@ -492,7 +494,7 @@ What changes for you:
 A workflow with more than 2000 paths used to be cut off silently. Now:
 
 - **Exact paths.** The text shows `Exact paths: 16,777,216 (2000 listed; path coverage is incomplete)`. The count is exact however big it is.
-- **Stages.** PathKit finds the decisions that every path past them goes through and cuts the workflow into *stages* between them; stages next to each other are merged while a stage has at most `classification.stages.max_paths` paths (default 256). `Stage coverage: 9/768 (1.2%) in 3 stages` is the stage paths a test ran, out of those a test can run. A trace is cut into its stage pieces, so no extra test run is needed, and a test that ran a path beyond the list counts. A stage that is bigger than the limit on its own is not listed: the report says `too many to list` and shows its branch coverage.
+- **Stages.** PathKit finds the decisions that every path past them goes through and cuts the workflow into *stages* between them; stages next to each other are merged while a stage has at most `classification.stages.max_paths` paths (default 256). `Stage coverage: 9/768 (1.2%) in 3 stages` is the stage paths a test ran, out of those a test can run. A trace is cut into its stage pieces, so no extra test run is needed, and a test that ran a path beyond the list counts. A stage that is bigger than the limit on its own is cut further, at the decisions that every path through a nested region passes (an `if` that opens a long run of decisions, say): the pieces are small stages, marked `a piece of a stretch of N paths`; a fact engine claim inside a piece is made with nothing known on the way in. Only a stretch that cannot be cut is not listed: the report says `too many to list`, why it was not cut, and shows its branch coverage.
 - **Stage path ids** look like `g2:3fa94c0d17ab` (stage 2, a hash of the stage's decisions in words). They stay the same when unrelated code changes, like `stableId`.
 - **Facts across stages.** A stage is checked from every different state the stages before it can leave (at most `classification.engine.max_contexts`, default 16). A stage path is `cannot-be-tested` when it is impossible in every one of them, `testable` when one allows it, and `needs-review` when there were more states than the limit.
 - **Left out of the list as impossible.** The path list is filled with paths that can be taken: parts the fact engine shows impossible are left out, counted exactly, and shown as groups with their proof (`prunedGroups` in the JSON). If a test ever runs a path inside such a part, the proof was wrong: PathKit warns, lists the path, and moves that part to `needs-review`.
@@ -501,6 +503,71 @@ A workflow with more than 2000 paths used to be cut off silently. Now:
 ```json
 "classification": { "enabled": true, "stages": { "max_paths": 256 }, "engine": { "max_contexts": 16 }, "ci": { "stage_floor": 70 } }
 ```
+
+### Honest numbers on huge workflows
+
+A ratio with nothing to divide by is never printed as `0/0 (0.0%)`. It reads `not measured (<reason>)` in the text, `--summary` and the HTML cards, and in the JSON the same ratio gets `"measured": false` and a `"reason"` next to the old keys (`percent` stays as it was). Example: `Path coverage (testable): not measured (0 workflows under the cap)`.
+
+For a workflow with more paths than the list holds (the cap, 2000):
+
+- **The classification block says what it counts.** Its title reads `Classification (listed paths only; 1 workflow over the cap):`. The paths left out of the list as impossible are added on their own lines: `Left out of the lists as impossible: 4,206,513 paths in 2176 groups (not in the numbers above)`, split by label, and the `Cannot be tested` line says `0 listed, plus N left out of the list as impossible`. A `Cannot be tested: 0` next to pruned paths cannot happen. The JSON has `leftOutImpossible` (exact counts as strings).
+- **The denominator is spelled out.** When testable coverage counts the needs-review paths too (the default policy), the block says `Testable 723 + needs-review 38 = 761 in the denominator (policy: count_as_testable)`.
+- **The text report does not print the paths of such a workflow** (it prints its counts, its stages, its helpers and its groups). `--paths` prints them as before. Workflows under the cap print exactly as they did.
+- **The CI floor uses stages for these workflows.** `classification.ci.fail_under_testable` is checked against the path coverage of the workflows under the cap together with, for each workflow over it, its stage coverage (`"ci": {"capped_basis": "stage"}`, the default) or its branch coverage (`"branch"`). The text says which was used for each workflow (`CI floor basis ...`) and the JSON `ci.floor` has `cappedBasis` and `parts`. Exit codes do not change.
+- **Old-version branches** (the old side of a `workflow.GetVersion` check) stay on the map and keep their label `version-gate-old-branch`. Each workflow prints `Old version branches: N paths (exact; ...)` on its own line (`oldVersionPaths` in the JSON), and a stage path through an old side is labelled too. A version check written as a yes/no variable (`useNew := workflow.GetVersion(...) != workflow.DefaultVersion`), with `!`, or as a one-line function of the package is read like the plain comparison.
+
+### Helpers: copied in, or summarized (`classification.helpers.mode`)
+
+By default (`"auto"`) PathKit copies the code of a helper into the map at every call, as described under "Helper functions", while the workflow stays within the path cap. When copying would pass the cap, it **summarizes** instead: a helper call is **one step** of the workflow (the call, and the error check on its result when there is one, with the outcomes success and failure), and the helper's own decisions are mapped **once**, whatever the number of calls. A helper's branches are covered by any call of it. The report says so, per workflow:
+
+```
+Helper functions are counted once, not inside every path: a call of one is a single step, and a branch inside it counts as tested when any call took it (copying the helpers into the map gives 8,191 paths, more than the path cap of 2000)
+  pause: 2 of 2 branches tested; called from 12 places
+```
+
+- `"inline"` always copies (what earlier versions did), `"summarize"` always summarizes, `"auto"` (the default) chooses per workflow. The JSON workflow has `helpersSummarized`, `helpersReason` and `helpers` (name, file, line, branches, `sites`).
+- **A workflow under the cap keeps every path id.** A workflow that was over the cap and calls helpers changes (it is a different, much smaller map). Traces recorded before the change still count: PathKit reads them against the old shape and converts the steps (only while the workflow code has not changed since).
+- **What it costs in precision:** claims made inside a summarized helper use no knowledge of what the caller passed in, so fewer paths are shown as impossible there. They are never wrongly shown as impossible.
+
+### The "PathKit could not fully read" panel
+
+Every report says what PathKit did not read, so nobody takes the numbers for more than they are. The text and `--summary` show the count and the first 10 entries; the JSON (`unread`) and the HTML page list every one. With nothing to list: `PathKit read everything in scope`. An entry has a file and line, a kind and what PathKit did instead:
+
+| Kind | What it is | What PathKit did |
+| --- | --- | --- |
+| interface method call | `n.Send(ctx, x)` through an interface | not followed |
+| function value call | a call through a variable or parameter that holds a function | not followed |
+| function in another package / from another module | a function that takes a `workflow.Context` and is not in the workflow's own package | not followed; if it runs an activity, the entry to add to `classification.activity_wrappers` is shown |
+| helper not followed | a function of the package that calls the Temporal SDK but was not followed (with the reason: too deep, in an `if` condition, a construct PathKit cannot map ...) | not followed |
+| started by a computed name | `ExecuteActivity(ctx, name)` where `name` is a variable | one step named after the expression |
+| result never read | a future (the handle for an activity, child workflow or timer that you read later with `Get`) that nothing reads | not a step |
+| result returned directly | `return fut.Get(ctx, nil)`, `return workflow.Sleep(...)` | one path (see below) |
+| closure not mapped | a function literal with Temporal calls that is not a selector callback or handler (a goroutine, say) | its calls are not steps |
+| path cap, context cut-off | the list holds only 2000 paths; a stage had more incoming states than `max_contexts` | counted exactly / less precise claims |
+| workflow not mapped | a construct PathKit cannot map (`goto`, a `select` statement, a selector shape it cannot read) | the whole workflow is left out |
+| validator rejects by panic | an update validator that panics to reject | not a path |
+
+### Reading more code shapes
+
+`docs/CONSTRUCTS.md` lists every Temporal code shape PathKit has been checked against and whether it is *handled* or *reported*. The settings that go with them:
+
+- **`classification.activity_wrappers`**: functions of your company library (or generated code) that run an activity, a child workflow or a Nexus operation for their caller. Each entry is `"example.com/lib/wrap.Run"` or `"(*example.com/lib/wrap.Client).Run"`, or an object with `function`, `kind` (`activity`, `child_workflow`, `nexus`) and `label`. A call of one is a step with the outcomes success and failure, like an activity. A function that is not listed and is not followed shows in the panel with the entry to add.
+- **`classification.direct_returns`**: `"report"` (default) or `"step"`. A function that ends with `return fut.Get(ctx, nil)` (or `workflow.Sleep`, `workflow.Await`) has one path by default, as always, and the panel lists it. `"step"` makes the call a decision with a failure and a success outcome. This changes the stable ids of the paths through such a return, which is why it is not the default.
+- **Update handlers and validators**: the code of a handler registered with `workflow.SetUpdateHandler` / `SetUpdateHandlerWithOptions`, and of its validator, is mapped like a small workflow of its own (named `orders.Run.update[add]` and `orders.Run.validator[add]`). A test that sends the update records it. A validator accepts when it returns nil and rejects when it returns an error.
+- **Nexus operations** (`workflow.NewNexusClient(...).ExecuteOperation(...)`) are read like a child workflow: the result is a decision, success or failure.
+- **`classification.loops.model`**: `"one"` (default). `"zero-one-many"` is reserved for a later version; PathKit warns and keeps the one-round model.
+
+### The outcome table, the handler table and the loop rounds
+
+Three tables are added to every report (text, `--json`, HTML). In `--summary` they show only the gaps.
+
+- **Call outcomes** (`callOutcomes`): for each activity, child workflow or Nexus call whose result the code checks, its outcomes (`success`, `failure`, and a kind of failure the code tells apart: `failure: timeout`, `failure: cancelled`, `failure: application error`, `failure: non-retryable application error`) and whether a recorded test saw each. A failure kind is listed only when the code branches on it (`temporal.IsTimeoutError(err)`, `errors.As(err, &appErr)`, ...); it is not a path of its own.
+- **Handlers** (`handlers`): each signal, query, update and update validator a workflow registers, where, whether a test exercised it (`yes`, `no`, or `not recorded` when a trace cannot show it: a query handler, a signal read with a plain `Receive`, or traces from an older recorder), and how many of its branches a test took (update handlers and validators).
+- **Loop rounds** (`loopRounds`): for each loop, which of 0, 1 and 2 or more rounds can happen and which a recorded test ran. A path still goes into a loop once; the table is read from the recorded runs. A loop never run with two or more rounds is a gap.
+
+### Folders with several Go modules
+
+If the folder you give holds several Go modules and no `go.mod` of its own (or has a `go.work`), PathKit reads every module, produces one combined report and names the module of each workflow (the text header `[module example.com/a]`, the JSON key `module`). `pathkit test` runs the tests of each module with one overlay and one trace folder. `--module <path or folder name>` limits any command to one module. A module *inside* the module you are in is not read; run PathKit in its folder.
 
 ### Two workflows with the same name in different folders
 
@@ -942,7 +1009,7 @@ Workflow: scope.lowerFlow (added by config)
 | `workflows.include` / `workflows.exclude` | See above. |
 | `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). |
 | `out`, `json`, `noColor` | `report` output: write to a file (relative to the config file), print JSON, no colour (section 6). A flag always wins. |
-| `classification` | Marking paths yourself, and switching on the testable/overall block (`enabled`). See "Marking paths as untestable" in section 5. The section's `ci` key is described in "The CI check" in section 5. |
+| `classification` | Marking paths yourself, and switching on the testable/overall block (`enabled`). See "Marking paths as untestable" in section 5. The section's `ci` key is described in "The CI check" in section 5. Newer keys: `helpers.mode` (`inline`, `summarize`, `auto`), `activity_wrappers`, `direct_returns` (`report`, `step`), `loops.model` (`one`; `zero-one-many` is reserved), `ci.capped_basis` (`stage`, `branch`), `stages.max_paths`, `engine.max_contexts`. See "Helpers: copied in, or summarized", "Reading more code shapes" and "Honest numbers on huge workflows". |
 | `html` | `report` only: `true` writes `.pathkit/report.html` (from the current folder), a path writes there (relative to the config file), `false` writes none (section 7). `--html` always wins, including `--html=false`. |
 
 Every key is used and covered by a test. (`out`, `json`, `noColor` and `html` in the config are for `report` only; `coverage` and `analyze` use only their own flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.

@@ -53,6 +53,8 @@ type observed struct {
 	eng      *classify.Engine                              // the classifier the claims came from (graphs added)
 	// helperPaths counts the paths a run took through a followed helper's code.
 	helperPaths int
+	// unitRuns counts the runs that went through a summarized helper's code.
+	unitRuns int
 	// listings and plans are what a small path cap and small stages make of each
 	// program: the pruned groups, and the class of every stage path.
 	listings     map[string]*classify.Listing
@@ -119,7 +121,14 @@ func runBatch(t *testing.T, programs []Program) *observed {
 	hashes := map[string]string{}
 	var targets []instrument.Target
 	for _, wf := range discover.Find(res.Packages) {
-		g, err := model.Build(wf)
+		// Every second program has its helpers summarized (mapped once as
+		// units), the others have them copied in: both ways must agree with
+		// the recorder and make no false claim.
+		mode := model.HelpersInline
+		if byName[wf.Name].Number%2 == 0 {
+			mode = model.HelpersSummarize
+		}
+		g, err := model.BuildWith(wf, model.Options{Helpers: mode})
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", wf.Name, err, byName[wf.Name].Source)
 		}
@@ -181,6 +190,9 @@ func runBatch(t *testing.T, programs []Program) *observed {
 			}
 			obs.reached[tf.Workflow][out.Path.Key()] = true
 			obs.reachedPaths[tf.Workflow] = append(obs.reachedPaths[tf.Workflow], out.Path)
+			if len(graphs[tf.Workflow].UnitHits(out.Steps)) > 0 {
+				obs.unitRuns++
+			}
 			for _, st := range out.Path.Steps {
 				if st.Junction.Site != nil {
 					obs.helperPaths++
@@ -301,7 +313,7 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		}
 	}
 
-	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups int
+	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups, unitRuns int
 	for start := 0; start < len(all); start += batchSize {
 		end := min(start+batchSize, len(all))
 		obs := runBatch(t, all[start:end])
@@ -319,12 +331,16 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		}
 		stageClaims, prunedGroups = stageClaims+sc, prunedGroups+pg
 		helperPaths += obs.helperPaths
+		unitRuns += obs.unitRuns
 		p, ps, r, c := obs.stats()
 		totalPrograms, totalPaths, totalReached, totalClaimed = totalPrograms+p, totalPaths+ps, totalReached+r, totalClaimed+c
 	}
-	t.Logf("SOUNDNESS: %d programs run, %d paths listed, %d paths really taken, %d paths claimed cannot-be-tested, %d false claims (%d runs went through helper code; %d stage paths and %d pruned groups were checked too)", totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups)
+	t.Logf("SOUNDNESS: %d programs run, %d paths listed, %d paths really taken, %d paths claimed cannot-be-tested, %d false claims (%d runs went through helper code, %d through summarized helpers; %d stage paths and %d pruned groups were checked too)", totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, unitRuns, stageClaims, prunedGroups)
 	if stageClaims == 0 || prunedGroups == 0 {
 		t.Errorf("the stage and pruning code was not exercised: %d stage claims, %d pruned groups", stageClaims, prunedGroups)
+	}
+	if unitRuns == 0 && n >= 100 {
+		t.Error("no run went through the code of a summarized helper: the summarized helpers were not exercised")
 	}
 	if helperPaths == 0 {
 		t.Error("no run went through the code of a helper function: the helper probes were not exercised")

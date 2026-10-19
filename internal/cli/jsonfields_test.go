@@ -42,7 +42,7 @@ func TestJSONKeySets(t *testing.T) {
 			topOriginal = append(topOriginal, "excludedBy")
 			wfOriginal = append(wfOriginal, "file", "priority")
 		}
-		check(t, cmd+" top level", m, topOriginal, []string{"classification", "coverageBasis", "classificationShown"})
+		check(t, cmd+" top level", m, topOriginal, []string{"classification", "coverageBasis", "classificationShown", "unread", "callOutcomes"})
 		wf := m["workflows"].([]any)[0].(map[string]any)
 		check(t, cmd+" workflow", wf, wfOriginal, []string{"classification"})
 		path := wf["pathList"].([]any)[0].(map[string]any)

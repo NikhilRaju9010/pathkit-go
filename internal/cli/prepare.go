@@ -75,9 +75,17 @@ func runPrepare(cmd *cobra.Command, target, traceDir string, sf scopeFlags) erro
 	if err != nil {
 		return userError("%s", err)
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "go test -overlay=%s -count=1 %s\n", overlay, pattern)
-	if cwd, _ := os.Getwd(); !sameDir(cwd, dir) {
-		fmt.Fprintf(stderr, "pathkit prepare: run it in %s\n", dir)
+	if len(sc.res.Modules) > 0 {
+		// Several modules: the same command, once in each module's folder.
+		for _, m := range sc.res.Modules {
+			fmt.Fprintf(cmd.OutOrStdout(), "go test -overlay=%s -count=1 ./...\n", overlay)
+			fmt.Fprintf(stderr, "pathkit prepare: run the command above in %s\n", load.DisplayPath(m))
+		}
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "go test -overlay=%s -count=1 %s\n", overlay, pattern)
+		if cwd, _ := os.Getwd(); !sameDir(cwd, dir) {
+			fmt.Fprintf(stderr, "pathkit prepare: run it in %s\n", dir)
+		}
 	}
 	fmt.Fprintf(stderr, "pathkit prepare: traces go to %s. A plain \"go test\" without -overlay records nothing; run prepare again after you change a workflow.\n", absTraces)
 	return nil

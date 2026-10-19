@@ -19,10 +19,14 @@ type Result struct {
 	// File is the absolute path of the one file the user named, or "" when
 	// they named a folder or a "..." pattern.
 	File string
+	// Modules are the folders of the Go modules the packages come from when the
+	// named folder holds several modules and is not inside one (nil
+	// otherwise). Commands that run Go tools run them once in each.
+	Modules []string
 }
 
 const mode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-	packages.NeedImports | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedSyntax
+	packages.NeedImports | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedSyntax | packages.NeedModule
 
 // Load accepts a .go file, a package folder, or "<folder>/..." for every
 // package under a folder. Packages are loaded from the named folder, so the
@@ -33,7 +37,11 @@ func Load(arg string) (*Result, error) {
 		return nil, err
 	}
 	if file == "" && !insideModule(dir) {
-		return nil, fmt.Errorf("no go.mod found in %s or any folder above it; PathKit reads a Go module, so run it from inside your project (the folder that holds go.mod), or name a folder inside it", DisplayPath(dir))
+		mods := FindModules(dir)
+		if len(mods) == 0 {
+			return nil, fmt.Errorf("no go.mod found in %s or any folder above it; PathKit reads a Go module, so run it from inside your project (the folder that holds go.mod), or name a folder inside it", DisplayPath(dir))
+		}
+		return loadModules(mods, pattern, arg)
 	}
 	cfg := &packages.Config{Mode: mode, Dir: dir}
 	pkgs, err := packages.Load(cfg, pattern)
@@ -47,6 +55,72 @@ func Load(arg string) (*Result, error) {
 		return nil, err
 	}
 	return &Result{Packages: pkgs, File: file}, nil
+}
+
+// loadModules loads every module of a folder that holds several, and puts the
+// packages together.
+func loadModules(mods []string, pattern, arg string) (*Result, error) {
+	res := &Result{Modules: mods}
+	for _, m := range mods {
+		pkgs, err := packages.Load(&packages.Config{Mode: mode, Dir: m}, pattern)
+		if err != nil {
+			return nil, fmt.Errorf("could not load the module in %s: %v", DisplayPath(m), err)
+		}
+		if err := compileErrors(pkgs); err != nil {
+			return nil, err
+		}
+		res.Packages = append(res.Packages, pkgs...)
+	}
+	if len(res.Packages) == 0 {
+		return nil, fmt.Errorf("no Go packages found in the modules under %s", arg)
+	}
+	return res, nil
+}
+
+// maxModuleDepth is how many folders below the named one FindModules looks.
+const maxModuleDepth = 4
+
+// FindModules lists the folders at or below dir that hold a go.mod, not
+// looking inside a module that was found (its own nested modules are not
+// followed) nor in hidden folders, vendor, node_modules or testdata. A folder
+// with a go.work lists just itself: the Go tools then handle all its modules.
+func FindModules(dir string) []string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil
+	}
+	// The Go tools name files by their real path (macOS temp folders are reached
+	// through a link), and the overlay must use those names.
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
+	var out []string
+	var walk func(d string, depth int)
+	walk = func(d string, depth int) {
+		for _, f := range []string{"go.work", "go.mod"} {
+			if info, err := os.Stat(filepath.Join(d, f)); err == nil && !info.IsDir() {
+				out = append(out, d)
+				return
+			}
+		}
+		if depth >= maxModuleDepth {
+			return
+		}
+		entries, err := os.ReadDir(d)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			n := e.Name()
+			if !e.IsDir() || strings.HasPrefix(n, ".") || strings.HasPrefix(n, "_") || n == "vendor" || n == "node_modules" || n == "testdata" {
+				continue
+			}
+			walk(filepath.Join(d, n), depth+1)
+		}
+	}
+	walk(abs, 0)
+	sort.Strings(out)
+	return out
 }
 
 // compileErrors names every package that doesn't compile, each with its

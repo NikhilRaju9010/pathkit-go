@@ -1,0 +1,25 @@
+{
+  "construct": "nexus_op",
+  "status": "handled",
+  "note": "workflow.NewNexusClient(...).ExecuteOperation is read like a child workflow: the result of the operation is a decision, success or failure (cancelled when the code checks for it).",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "nexus_op.Run",
+      "paths": [
+        {
+          "text": "Start -> echo (nexus operation) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> echo (nexus operation) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

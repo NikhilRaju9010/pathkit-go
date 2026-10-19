@@ -326,7 +326,9 @@ func (g *gen) action(depth int) {
 
 // topDecl declares something new at the top level of the function.
 func (g *gen) topDecl() {
-	switch g.r.Intn(18) {
+	switch g.r.Intn(20) {
+	case 18, 19: // a timer, a wait, or the kind of an error
+		g.temporalProbe()
 	case 16, 17: // a value encoding/json decodes here
 		g.jsonProbe()
 	case 13, 14, 15: // a helper function and calls of it

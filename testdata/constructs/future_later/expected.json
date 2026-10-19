@@ -1,0 +1,29 @@
+{
+  "construct": "future_later",
+  "status": "handled",
+  "note": "A step happens where the future is read (Get), not where the activity is started: the early return before the Get has no activity step.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "future_later.Run",
+      "paths": [
+        {
+          "text": "Start -> if quick --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if quick --false--> Charge (activity) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if quick --false--> Charge (activity) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

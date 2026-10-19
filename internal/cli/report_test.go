@@ -19,6 +19,11 @@ const ordersReport = `orders.OrderWorkflow (orders/orders.go)
 3 paths total · 2 covered · 1 missed · 66.7% project coverage
 Branches: 3/4 (75.0%)
 
+Call outcomes: 1 activity, child workflow or Nexus call checked, 1 outcome no test saw:
+  orders/orders.go:41: ChargeCard (activity) in orders.OrderWorkflow: success not seen, failure seen
+
+PathKit read everything in scope
+
 0 workflows excluded (no scope in use)
 Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
 `
@@ -27,6 +32,11 @@ const ordersReportSummary = `orders.OrderWorkflow  2/3 paths · 66.7% · priorit
 
 3 paths total · 2 covered · 1 missed · 66.7% project coverage
 Branches: 3/4 (75.0%)
+
+Call outcomes: 1 activity, child workflow or Nexus call checked, 1 outcome no test saw:
+  orders/orders.go:41: ChargeCard (activity) in orders.OrderWorkflow: not seen: success
+
+PathKit read everything in scope
 
 0 workflows excluded (no scope in use)
 Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
@@ -90,6 +100,7 @@ func TestReportJSONGolden(t *testing.T) {
 	golden := absPath(t, "testdata/report_orders.classified.json")
 	inPilot(t)
 	stdout, _, code := run(t, "report", "./orders", "--traces", traces, "--json", "--fail-under", "60")
+	updateGolden(t, golden, stdout)
 	want, err := os.ReadFile(golden)
 	if err != nil {
 		t.Fatal(err)
@@ -298,7 +309,7 @@ func TestReportEveryConfiguredPackage(t *testing.T) {
 	t.Chdir(t.TempDir())
 	cfg := writeConfig(t, `{"packages": [`+jsonString(p+"/orders")+`, `+jsonString(p+"/billing")+`, `+jsonString(p+"/...")+`]}`)
 	stdout, _, code := run(t, "report", "--config", cfg, "--traces", traces, "--summary")
-	if code != ExitOK || !strings.Contains(stdout, "38 paths total · 2 covered") || strings.Count(stdout, "orders.OrderWorkflow") != 1 {
+	if code != ExitOK || !strings.Contains(stdout, "38 paths total · 2 covered") || strings.Count("\n"+stdout, "\norders.OrderWorkflow  ") != 1 { // its summary line, once
 		t.Errorf("code=%d (overlapping entries must count each workflow once)\n%s", code, stdout)
 	}
 }

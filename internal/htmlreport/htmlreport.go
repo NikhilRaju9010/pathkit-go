@@ -28,6 +28,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
+	"fmt"
 	"html/template"
 	"math"
 	"path/filepath"
@@ -136,7 +137,19 @@ type (
 		// Groups are the testable paths no test ran, grouped by the first step
 		// no test took (biggest first, at most maxGroupsHTML); GroupsMore is
 		// how many more groups there are.
-		Panel                   []panelRow
+		Panel []panelRow
+		// Unread are the places PathKit could not fully read (every one);
+		// UnreadNone is the line shown when there are none.
+		Unread     []unreadRowView
+		UnreadNone string
+		// Handlers is the handler table: signals, queries, updates and update validators.
+		Handlers []handlerRowView
+		// CallOutcomes is the outcome table: the outcomes of every checked call
+		// and whether a test saw them.
+		CallOutcomes []callRowView
+		// LoopRounds is the loop rounds table: which of 0, 1 and 2+ rounds each
+		// loop can run and which a test ran.
+		LoopRounds              []loopRowView
 		Groups                  []groupRowView
 		GroupsPaths             int
 		GroupsTotal, GroupsMore int
@@ -164,15 +177,47 @@ type (
 		// row per stage.
 		Exact, ExactLine string
 		Stages           []stageRowView
-		PrunedLine       string
+		// Helpers are the summarized helpers (each mapped once, covered by any
+		// call); HelpersNote says why they are summarized.
+		Helpers     []helperRowView
+		HelpersNote string
+		PrunedLine  string
 	}
 	panelRow struct {
 		Name, Status, Claims string
 		On                   bool
 	}
+	loopRowView struct {
+		Where, Loop, Workflow string
+		Rounds                []loopRoundView
+		Gap                   bool
+	}
+	loopRoundView struct {
+		Bucket string
+		State  string // "seen", "not seen" or "cannot happen"
+	}
+	callRowView struct {
+		Where, Call, Workflow string
+		Outcomes              []callOutcomeView
+		Gap                   bool
+	}
+	callOutcomeView struct {
+		Name string
+		Seen bool
+	}
+	handlerRowView struct {
+		Kind, Name, Owner, Where, Exercised, Branches string
+		Gap                                           bool
+	}
+	unreadRowView struct {
+		Workflow, Where, Kind, Call, Effect, Suggestion string
+	}
 	groupRowView struct {
 		Workflow, Step, Where, After, Hint string
 		Paths                              int
+	}
+	helperRowView struct {
+		Name, Where, Branches, Sites string
 	}
 	stageRowView struct {
 		Number, Paths, Covered, Pct, Branches, Note string
@@ -237,6 +282,45 @@ func Report(in ReportInput) ([]byte, error) {
 		v.Glossary = buildGlossary(res, in.CustomLabels, shown)
 	}
 	v.buildGroups(res)
+	for _, h := range res.Handlers {
+		row := handlerRowView{Kind: h.Kind, Name: render.HandlerName(h), Owner: h.Owner, Where: filepath.ToSlash(h.Where), Exercised: h.Exercised, Gap: h.IsGap(), Branches: "-"}
+		if h.Workflow != "" {
+			row.Branches = itoa(h.BranchesTaken) + "/" + itoa(h.Branches)
+			if h.Branches == 0 {
+				row.Branches = "no branches"
+			}
+		}
+		v.Handlers = append(v.Handlers, row)
+	}
+	for _, r := range res.CallOutcomes {
+		row := callRowView{Where: fmt.Sprintf("%s:%d", filepath.ToSlash(r.File), r.Line), Call: r.Name + " (" + r.Kind + ")", Workflow: r.Workflow, Gap: len(r.Gaps()) > 0}
+		for _, o := range r.Outcomes {
+			row.Outcomes = append(row.Outcomes, callOutcomeView{Name: o.Outcome, Seen: o.Seen})
+		}
+		v.CallOutcomes = append(v.CallOutcomes, row)
+	}
+	for _, r := range res.LoopRounds {
+		row := loopRowView{Where: fmt.Sprintf("%s:%d", filepath.ToSlash(r.File), r.Line), Loop: r.Loop, Workflow: r.Workflow, Gap: len(r.Gaps()) > 0}
+		for _, c := range r.Rounds {
+			state := "seen"
+			switch {
+			case !c.Possible:
+				state = "cannot happen"
+			case !c.Seen:
+				state = "not seen"
+			}
+			row.Rounds = append(row.Rounds, loopRoundView{Bucket: c.Bucket, State: state})
+		}
+		v.LoopRounds = append(v.LoopRounds, row)
+	}
+	v.UnreadNone = render.UnreadNone
+	for _, u := range res.Unread {
+		where := filepath.ToSlash(u.File)
+		if u.Line > 0 {
+			where = fmt.Sprintf("%s:%d", where, u.Line)
+		}
+		v.Unread = append(v.Unread, unreadRowView{Workflow: u.Workflow, Where: where, Kind: u.Kind, Call: u.Call, Effect: u.Effect, Suggestion: u.Suggestion})
+	}
 	for _, a := range in.Panel {
 		status := "on"
 		if !a.On {
@@ -251,6 +335,16 @@ func Report(in ReportInput) ([]byte, error) {
 			Stats: render.WorkflowStats(w), Covered: w.Covered, Total: len(w.Paths), Missed: len(w.Paths) - w.Covered,
 			TotalPathsLine: render.TotalLine(model.PathList{List: make([]model.Path, len(w.Paths)), Truncated: w.Truncated}, model.DefaultMaxPaths),
 			Open:           wi == 0,
+		}
+		if lines := render.HelperLines(w); len(lines) > 0 {
+			wv.HelpersNote = lines[0]
+			for _, u := range w.Units {
+				row := helperRowView{Name: u.Name, Where: fmt.Sprintf("%s:%d", filepath.ToSlash(u.File), u.Line), Branches: itoa(u.BranchesTaken) + "/" + itoa(u.Branches), Sites: itoa(u.Sites)}
+				if u.Branches == 0 {
+					row.Branches = "no branches"
+				}
+				wv.Helpers = append(wv.Helpers, row)
+			}
 		}
 		if render.ShowStages(w) {
 			wv.Exact = render.Big(w.Exact)
@@ -309,7 +403,12 @@ func Report(in ReportInput) ([]byte, error) {
 // numbers coverage.Compute made; nothing is recomputed here.
 func (v *view) buildCards(res coverage.Result, classified bool) {
 	b := res.Breakdown
-	pct := func(c, p int) string { return render.Pct(coverage.Percent(c, p), nil) }
+	pct := func(c, p int) string {
+		if p == 0 {
+			return "not measured"
+		}
+		return render.Pct(coverage.Percent(c, p), nil)
+	}
 	if h, capped := res.Headline(); capped {
 		// A workflow over the cap: the listed-path numbers stay out of the cards.
 		name := func(s string) string {

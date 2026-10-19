@@ -1,0 +1,33 @@
+{
+  "construct": "timer_selector",
+  "status": "handled",
+  "note": "A timer future in a workflow.Selector is an exit (\"timeout\") next to the signal case.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "timer_selector.Run",
+      "paths": [
+        {
+          "text": "Start -> select (Selector) --signal \"go\"--> if !got --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --signal \"go\"--> if !got --false--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --timeout--> if !got --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --timeout--> if !got --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

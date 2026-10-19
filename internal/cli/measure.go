@@ -71,6 +71,10 @@ type measured struct {
 	// engine is the classifier (nil when classification is off); explain
 	// asks it what was claimed about a path a test ran anyway.
 	engine *classify.Engine
+	// emitWarnings prints the warnings of the run on stderr: all of them
+	// (nil), or only those of the named workflows. Every command but explain
+	// calls it at once; explain calls it for the workflow that owns the path.
+	emitWarnings func(only map[string]bool)
 }
 
 // classView is what the classification block prints, or nil when it is off.
@@ -176,7 +180,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	var workflows []coverage.Workflow
 	var others []string
 	for _, r := range sc.mapped {
-		workflows = append(workflows, coverage.Workflow{Name: r.wf.Name, File: load.DisplayPath(r.wf.Filename), Graph: r.graph, Hash: r.hash, Package: r.wf.Pkg.PkgPath, AddedByConfig: r.addedByConfig})
+		workflows = append(workflows, coverage.Workflow{Name: r.wf.Name, File: load.DisplayPath(r.wf.Filename), Graph: r.graph, Hash: r.hash, Package: r.wf.Pkg.PkgPath, AddedByConfig: r.addedByConfig, Module: moduleIfSeveral(sc, r.wf)})
 	}
 	if opt.function != "" {
 		var names []string
@@ -202,6 +206,9 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		return nil, userError("no workflows in scope to measure: the packages have no exported workflow functions (workflow.Context first, error last), or the scope (.pathkitrc.json, --include, --exclude) leaves none; the excluded ones are listed above")
 	}
 
+	if cfg := sc.cfg; cfg != nil && cfg.Classification.LoopsModel == "zero-one-many" {
+		fmt.Fprintf(stderr, "pathkit %s: warning: classification.loops.model \"zero-one-many\" in %s is reserved for a later version; the one-round model is used (the loop rounds table still shows 0, 1 and 2+ rounds)\n", cmdName, cfg.Path)
+	}
 	m.traceDir = traceDirFor(cmd, opt.traces, sc.cfg)
 	m.tracePaths, err = trace.List(m.traceDir)
 	if err != nil {
@@ -221,7 +228,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		return nil, err
 	}
 	m.engine = engine
-	in := coverage.Input{Workflows: workflows, Excluded: sc.excluded, Others: others, Traces: files, AllowStale: allowStale}
+	in := coverage.Input{Workflows: workflows, Excluded: sc.excluded, Others: others, Traces: files, AllowStale: allowStale, Display: load.DisplayPath, Handlers: sc.handlers}
 	if engine != nil {
 		in.Classifier, in.Policy, in.Explained = engine.Classify, engine.Policy(), engine.Explained()
 		in.Listing, in.Plan = engine.Listing, engine.PlanStages
@@ -230,6 +237,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	if m.res.InternalError != nil {
 		return nil, userError("%v", m.res.InternalError)
 	}
+	m.res.Unread = append(m.res.Unread, notMappedUnread(sc)...)
 	if m.ci != nil && engine != nil {
 		m.ci.anchors = ruleAnchors(engine.Anchors())
 	}
@@ -244,22 +252,29 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, strings.Join(lw, "\n"))
 		}
 	}
-	for _, w := range m.res.Warnings {
-		fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, w.Message)
-		if w.Entry != "" {
-			fmt.Fprintf(stderr, "  to accept it after looking at it, add this to classification.explained_traces and replace the reason: %s\n", w.Entry)
+	// The warnings come in this order: the traces that did not count, the
+	// zero-path notice, then what the classification found. explain prints
+	// them later, for the one workflow that owns the path.
+	warnRun := func(only map[string]bool) {
+		for _, w := range m.res.Warnings {
+			if only != nil && w.Workflow != "" && !only[w.Workflow] {
+				continue
+			}
+			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, w.Message)
+			if w.Entry != "" {
+				fmt.Fprintf(stderr, "  to accept it after looking at it, add this to classification.explained_traces and replace the reason: %s\n", w.Entry)
+			}
 		}
 	}
-	if names := render.ZeroPathNames(m.res); len(names) > 0 && cmdName != "explain" {
-		fmt.Fprintln(stderr, "pathkit "+cmdName+": "+render.ZeroPathHeadline(names))
-		for _, l := range render.ZeroPathAdvice() {
-			fmt.Fprintln(stderr, "  "+l)
+	warnFindings := func(only map[string]bool) {
+		if engine == nil {
+			return
 		}
-	}
-	if engine != nil {
 		var measured []string
 		for _, w := range workflows {
-			measured = append(measured, w.Name)
+			if only == nil || only[w.Name] {
+				measured = append(measured, w.Name)
+			}
 		}
 		truncated := map[string]bool{}
 		for _, w := range m.res.Workflows {
@@ -271,6 +286,23 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 				continue
 			}
 			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, f)
+		}
+	}
+	m.emitWarnings = func(only map[string]bool) { warnRun(only); warnFindings(only) }
+	if cmdName != "explain" {
+		warnRun(nil)
+		if names := render.ZeroPathNames(m.res); len(names) > 0 {
+			fmt.Fprintln(stderr, "pathkit "+cmdName+": "+render.ZeroPathHeadline(names))
+			for _, l := range render.ZeroPathAdvice() {
+				fmt.Fprintln(stderr, "  "+l)
+			}
+		}
+		warnFindings(nil)
+	}
+	if engine != nil {
+		var measured []string
+		for _, w := range workflows {
+			measured = append(measured, w.Name)
 		}
 		var final []classify.Classification
 		for _, w := range m.res.Workflows {

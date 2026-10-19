@@ -1,0 +1,33 @@
+{
+  "construct": "cancel_done_selector",
+  "status": "handled",
+  "note": "ctx.Done() as a workflow.Selector case is an exit of the selector (\"receive ctx.Done()\"), next to the other cases.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "cancel_done_selector.Run",
+      "paths": [
+        {
+          "text": "Start -> select (Selector) --signal \"go\"--> if cancelled --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --signal \"go\"--> if cancelled --false--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --receive ctx.Done()--> if cancelled --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --receive ctx.Done()--> if cancelled --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

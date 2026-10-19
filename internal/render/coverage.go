@@ -23,6 +23,18 @@ func Pct(value float64, threshold *float64) string {
 	return strconv.FormatFloat(value, 'f', d, 64) + "%"
 }
 
+// NotMeasured is how a ratio with nothing to divide by reads: "not measured
+// (0 workflows under the cap)". It never reads as 0/0 or 0.0%.
+func NotMeasured(reason string) string { return "not measured (" + reason + ")" }
+
+// Ratio is "1/4 (25.0%)", or NotMeasured(reason) when total is 0.
+func Ratio(covered, total int, threshold *float64, reason string) string {
+	if total == 0 {
+		return NotMeasured(reason)
+	}
+	return fmt.Sprintf("%d/%d (%s)", covered, total, Pct(coverage.Percent(covered, total), threshold))
+}
+
 // Threshold prints a --fail-under value as the user wrote it: "80%", "52.6%".
 func Threshold(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) + "%" }
 
@@ -42,6 +54,18 @@ func CoverageTextTagged(res coverage.Result, threshold *float64, tags bool) stri
 // CoverageTextHints is CoverageTextTagged with, when hints is true, "how
 // to cover it" under every testable untested path (--hints).
 func CoverageTextHints(res coverage.Result, threshold *float64, tags, hints bool) string {
+	return CoverageTextFull(res, threshold, tags, hints, false)
+}
+
+// CappedPathsNote is the line that stands where a capped workflow's path list would be.
+func CappedPathsNote(w coverage.WorkflowResult) string {
+	return fmt.Sprintf("Paths: not listed (the first %d of %s are in the list; --paths prints them)\n", len(w.Paths), Big(w.Exact))
+}
+
+// CoverageTextFull is CoverageTextHints that, when omitCapped is true, leaves
+// the covered and untested lists out of a workflow over the cap (--paths
+// brings them back).
+func CoverageTextFull(res coverage.Result, threshold *float64, tags, hints, omitCapped bool) string {
 	var b strings.Builder
 	b.WriteString(CapWarning(res))
 	b.WriteString(ZeroPathWarning(res))
@@ -54,6 +78,9 @@ func CoverageTextHints(res coverage.Result, threshold *float64, tags, hints bool
 		if w.AddedByConfig {
 			name += " (added by config)"
 		}
+		if w.Module != "" {
+			name += " [module " + w.Module + "]"
+		}
 		fmt.Fprintf(&b, "Workflow: %s\n", name)
 		fmt.Fprintf(&b, "%s\n", TotalLine(model.PathList{List: make([]model.Path, len(w.Paths)), Truncated: w.Truncated}, model.DefaultMaxPaths))
 		var th *float64
@@ -63,6 +90,13 @@ func CoverageTextHints(res coverage.Result, threshold *float64, tags, hints bool
 		fmt.Fprintf(&b, "Covered: %d/%d (%s)\n", w.Covered, len(w.Paths), Pct(coverage.Percent(w.Covered, len(w.Paths)), th))
 		fmt.Fprintf(&b, "Branches: %d/%d (%s)\n", w.BranchesTaken, w.Branches, Pct(coverage.Percent(w.BranchesTaken, w.Branches), nil))
 		b.WriteString(StageLines(w))
+		for _, l := range HelperLines(w) {
+			b.WriteString(l + "\n")
+		}
+		if w.Capped && omitCapped {
+			b.WriteString(CappedPathsNote(w))
+			continue
+		}
 
 		var covered, untested []string
 		for _, p := range w.Paths {

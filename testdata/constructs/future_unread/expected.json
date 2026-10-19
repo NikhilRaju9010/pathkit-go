@@ -1,0 +1,27 @@
+{
+  "construct": "future_unread",
+  "status": "reported",
+  "note": "A future that is started and never read is not a step of any path, and its failure is not a decision; the panel lists it as \"result never read\".",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "future_unread.Run",
+      "paths": [
+        {
+          "text": "Start -> if notify --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if notify --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": [
+    "result never read"
+  ]
+}

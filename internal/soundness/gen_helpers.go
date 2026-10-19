@@ -304,3 +304,42 @@ func (g *gen) stageProbe() {
 	}
 	g.sinks = append(g.sinks, vars...)
 }
+
+// temporalProbe writes a Temporal shape whose steps are decisions the map must
+// agree with the recorder about: a timer read later, a wait, a wait with a
+// timeout, and a check of the kind of an error (milestone M8). None can fail in
+// the test environment, so the failure branches are paths no run takes.
+func (g *gen) temporalProbe() {
+	switch g.r.Intn(4) {
+	case 0: // a timer, read later
+		tm, er := g.fresh("tm"), g.fresh("er")
+		g.line(0, "%s := workflow.NewTimer(ctx, time.Nanosecond)", tm)
+		g.line(0, "noop()")
+		g.line(0, "if %s := %s.Get(ctx, nil); %s != nil {", er, tm, er)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	case 1: // a wait that is already over
+		er := g.fresh("er")
+		g.line(0, "if %s := workflow.Await(ctx, func() bool { return true }); %s != nil {", er, er)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	case 2: // a wait with a timeout that is not needed
+		ok, er := g.fresh("ok"), g.fresh("er")
+		g.line(0, "%s, %s := workflow.AwaitWithTimeout(ctx, time.Second, func() bool { return true })", ok, er)
+		g.line(0, "if %s != nil {", er)
+		g.line(1, "noop()")
+		g.line(0, "}")
+		g.line(0, "if !%s {", ok)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	default: // the kind of an error
+		er := g.fresh("er")
+		g.line(0, "if %s := workflow.Sleep(ctx, time.Nanosecond); %s != nil {", er, er)
+		g.line(1, "if temporal.IsCanceledError(%s) {", er)
+		g.line(2, "noop()")
+		g.line(1, "} else if temporal.IsTimeoutError(%s) {", er)
+		g.line(2, "noop()")
+		g.line(1, "}")
+		g.line(0, "}")
+	}
+}

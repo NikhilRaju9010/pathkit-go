@@ -25,6 +25,9 @@ type Workflow struct {
 	File     *ast.File
 	Filename string
 	Pkg      *packages.Package
+	// Role is "" for a workflow, or what a small workflow made of a handler's
+	// code is ("update validator"): set by model.FindHandlers, never by Find.
+	Role string
 }
 
 // Namer decides the names of functions. Two functions of different

@@ -1,0 +1,25 @@
+{
+  "construct": "signal_timeout",
+  "status": "handled",
+  "note": "ReceiveWithTimeout is a decision: a signal came in time (received) or not (not received).",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "signal_timeout.Run",
+      "paths": [
+        {
+          "text": "Start -> if !ok (ReceiveWithTimeout) --received--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if !ok (ReceiveWithTimeout) --not received--> End",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

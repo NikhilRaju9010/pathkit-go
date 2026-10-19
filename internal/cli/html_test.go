@@ -418,3 +418,28 @@ func TestNoColorConfigKey(t *testing.T) {
 		}
 	}
 }
+
+// The "Missed paths" section and its menu entry appear only when some
+// testable path has no test; with every path covered the page has neither.
+func TestReportHTMLHidesEmptyGroups(t *testing.T) {
+	fixedClock(t)
+	out := filepath.Join(t.TempDir(), "report.html")
+	partial := filepath.Join(t.TempDir(), "partial.html")
+	inPilot(t)
+	all := writeTracesFor(t, pilot+"/orders", "orders.OrderWorkflow",
+		[]string{"J1.true"}, []string{"J1.false", "J2.failure"}, []string{"J1.false", "J2.success"})
+	if _, _, code := run(t, "report", "./orders", "--traces", all, "--html="+out); code != ExitOK {
+		t.Fatalf("code=%d", code)
+	}
+	page := readFile(t, out)
+	if strings.Contains(page, `id="groups"`) || strings.Contains(page, `href="#groups"`) {
+		t.Errorf("the page shows a missed-paths section though every path is covered")
+	}
+	// Near miss: with a missed path the section is there.
+	if _, _, code := run(t, "report", "./orders", "--traces", ordersTraces(t), "--html="+partial); code != ExitOK {
+		t.Fatalf("code=%d", code)
+	}
+	if page := readFile(t, partial); !strings.Contains(page, `id="groups"`) {
+		t.Errorf("the page lost the missed-paths section")
+	}
+}

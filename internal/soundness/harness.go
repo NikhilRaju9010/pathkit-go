@@ -19,9 +19,11 @@ import (
 	"errors"
 	"time"
 
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
+var _ = temporal.IsCanceledError
 var _ = errors.New
 var _ = bytes.NewReader
 var _ = context.Background

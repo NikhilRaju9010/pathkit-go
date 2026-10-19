@@ -289,6 +289,9 @@ func (b *builder) callErrorLabels(call *ast.CallExpr, depth int, seen map[ast.No
 	case isPkgFunc(f, workflowPkg, "Await", "AwaitWithTimeout"):
 		return []string{f.Name() + " (wait)"}, true
 	}
+	if w, ok := b.wrapperFor(call); ok {
+		return []string{w.step(f)}, true
+	}
 	if h := b.calleeOf(call); h != nil && b.isHelper(h) {
 		s := b.summarize(h, depth+1, seen)
 		if len(s.calls) > 0 {
@@ -394,6 +397,12 @@ func (b *builder) inlineAt(n ast.Node) *inlineCall {
 // followed into from the code being walked, and returns the function with
 // the call's argument that carries the workflow context.
 func (b *builder) inlinable(call *ast.CallExpr) (*helperFn, ast.Expr) {
+	if b.unitMode {
+		return nil, nil // helpers are units, not copies
+	}
+	if _, ok := b.wrappers[wrapperName(b.calledFunc(call))]; ok && len(b.wrappers) > 0 {
+		return nil, nil // told to be a Temporal call, not a helper to read
+	}
 	h := b.calleeOf(call)
 	if h == nil || call.Ellipsis != token.NoPos {
 		return nil, nil

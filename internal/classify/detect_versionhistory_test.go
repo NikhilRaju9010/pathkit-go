@@ -23,6 +23,11 @@ func TestVersionGateOldBranch(t *testing.T) {
 		{"SwitchLatestOnly", "", "", ""},
 		{"NotTheSDK", "", "", ""},
 		{"Incremented", "", "", ""},
+		{"CatchBoolVar", "J1.false", sp, "version-gate-old-branch"},
+		{"CatchBoolVarNegated", "J1.true", sp, "version-gate-old-branch"},
+		{"CatchHelperGate", "J1.false", sp, "version-gate-old-branch"},
+		{"NotAGateFunction", "", "", ""},
+		{"GateFunctionWithMore", "", "", ""},
 	})
 }
 

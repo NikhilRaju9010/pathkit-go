@@ -1,0 +1,29 @@
+{
+  "construct": "errkind_application",
+  "status": "handled",
+  "note": "errors.As to *temporal.ApplicationError after a failure is a decision of the code (true: an application error). The call outcome table lists it as a kind of failure of the call.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "errkind_application.Run",
+      "paths": [
+        {
+          "text": "Start -> Charge (activity) --failure--> if errors.As(err, &appErr) --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Charge (activity) --failure--> if errors.As(err, &appErr) --false--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Charge (activity) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

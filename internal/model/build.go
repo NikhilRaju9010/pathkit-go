@@ -56,6 +56,18 @@ type builder struct {
 	worthCycles int
 	// siteList is every site, in the order they were made.
 	siteList []*Site
+
+	// summarize: helper calls become one step each and the helpers are mapped
+	// once, as units (see HelperUnit), instead of being copied in.
+	unitMode bool
+	// wrappers are the functions classification.activity_wrappers names.
+	wrappers map[string]Wrapper
+	// directReturns: a "return <call>" is a decision (Options.DirectReturns).
+	directReturns bool
+	// sawDirectReturn: a "return <call>" became a decision.
+	sawDirectReturn bool
+	units           []*HelperUnit
+	unitOf          map[*ast.BlockStmt]*HelperUnit
 }
 
 // jkey names a junction: a decision in the code, in one copy of it.
@@ -84,8 +96,19 @@ type blockPos struct {
 // workflow's package are followed (docs/DESIGN.md D15), however many paths
 // that gives: the map is counted, cut into stages and covered without listing
 // every path (D16).
-func Build(wf discover.Workflow) (*Graph, error) {
+func Build(wf discover.Workflow) (*Graph, error) { return buildWith(wf, false, Options{}) }
+
+// discoverWorkflow lets units.go name the type without a second import.
+type discoverWorkflow = discover.Workflow
+
+func buildWith(wf discover.Workflow, summarize bool, opt Options) (*Graph, error) {
 	b := newBuilder(wf)
+	b.unitMode = summarize
+	b.wrappers = map[string]Wrapper{}
+	for _, w := range opt.Wrappers {
+		b.wrappers[w.Function] = w
+	}
+	b.directReturns = opt.DirectReturns
 	if u := b.findUnsupported(); u != nil {
 		return nil, u
 	}
@@ -96,11 +119,20 @@ func Build(wf discover.Workflow) (*Graph, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
+	if b.unitMode {
+		b.buildUnits()
+		if b.err != nil {
+			return nil, b.err
+		}
+	}
 	g := b.finish(start)
+	g.summarized = b.unitMode
+	g.directReturnSteps = b.sawDirectReturn
 	if err := b.attachMarks(g); err != nil {
 		return nil, err
 	}
 	b.attachFacts(g)
+	g.unread = b.collectUnread()
 	return g, nil
 }
 
@@ -132,6 +164,9 @@ func (b *builder) finish(start Target) *Graph {
 	g := &Graph{Workflow: b.wf.Name, Start: start, byStmt: map[ast.Node]*Junction{}, byID: map[string]*Exit{}, info: b.info, fn: b.wf.Func, fset: b.fset, pkg: b.wf.Pkg.Types,
 		trusted: func(e ast.Expr) bool { return b.trustedConstant(e, map[types.Object]bool{}) }}
 	for _, j := range b.junctions {
+		if j.Site != nil && j.Site.Unit != nil {
+			continue // a summarized helper's decision: numbered with its unit
+		}
 		g.Junctions = append(g.Junctions, j)
 		if j.Site == nil {
 			g.byStmt[j.Stmt] = j
@@ -156,6 +191,7 @@ func (b *builder) finish(start Target) *Graph {
 		s.ID = fmt.Sprintf("S%d", i+1)
 	}
 	g.assignStable()
+	b.finishUnits(g)
 	return g
 }
 
@@ -267,6 +303,9 @@ func (b *builder) roadThrough(blk *cfg.Block, from int, det determined) (t Targe
 			if ic := b.inlineAt(n); ic != nil {
 				return b.intoHelper(ic, blk, from+i), passed, from + i + 1
 			}
+			if t, ok := b.returnCallJunction(ret, cont, blk); ok {
+				return t, passed, from + i + 1
+			}
 			if cont != nil {
 				return cont(b.returnedKind(blk, ret)), passed, from + i + 1 // returns from the callback or helper, not the workflow
 			}
@@ -315,6 +354,7 @@ func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block, det determined
 		if j == nil {
 			j = b.newJunction(ifs, ErrCheck, label)
 			j.viaHelper = viaHelper
+			j.call = b.callPos(obj, ifs)
 			failure, success := then, other
 			failureRoad, successRoad := ast.Stmt(ifs.Body), ifs.Else
 			if !neq {

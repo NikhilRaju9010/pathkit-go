@@ -1,0 +1,29 @@
+{
+  "construct": "errkind_nonretryable",
+  "status": "handled",
+  "note": "errors.As to *temporal.ApplicationError together with NonRetryable() is a decision (true: a non-retryable application error). The call outcome table lists it as a kind of failure.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "errkind_nonretryable.Run",
+      "paths": [
+        {
+          "text": "Start -> Charge (activity) --failure--> if errors.As(err, &appErr) && appErr.NonRetryable() --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Charge (activity) --failure--> if errors.As(err, &appErr) && appErr.NonRetryable() --false--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Charge (activity) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

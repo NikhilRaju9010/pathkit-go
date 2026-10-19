@@ -1355,5 +1355,329 @@
     }
   },
   "coverageBasis": "testable",
-  "classificationShown": true
+  "classificationShown": true,
+  "unread": [
+    {
+      "workflow": "approval.ApprovalWorkflow",
+      "file": "approval/approval.go",
+      "line": 29,
+      "kind": "closure not mapped",
+      "call": "func literal",
+      "effect": "its Temporal calls are not steps of any path (a goroutine, a deferred cleanup or a function stored for later is not followed)",
+      "suggestion": null
+    }
+  ],
+  "handlers": [
+    {
+      "workflow": "approval.ApprovalWorkflow",
+      "kind": "query",
+      "name": "status",
+      "file": "approval/approval.go",
+      "line": 22,
+      "exercised": "not recorded",
+      "handlerWorkflow": null,
+      "branches": null,
+      "why": "a query handler takes no workflow.Context, so a run cannot be recorded in it"
+    },
+    {
+      "workflow": "approval.ApprovalWorkflow",
+      "kind": "signal",
+      "name": "decision",
+      "file": "approval/approval.go",
+      "line": 30,
+      "exercised": "not recorded",
+      "handlerWorkflow": null,
+      "branches": null,
+      "why": null
+    },
+    {
+      "workflow": "shipment.ShipmentWorkflow",
+      "kind": "signal",
+      "name": "delivery-update",
+      "file": "shipment/shipment.go",
+      "line": 37,
+      "exercised": "yes",
+      "handlerWorkflow": null,
+      "branches": null,
+      "why": null
+    }
+  ],
+  "callOutcomes": [
+    {
+      "workflow": "billing.SubscriptionWorkflow",
+      "file": "billing/subscription.go",
+      "line": 21,
+      "kind": "activity",
+      "name": "ChargeMonthly",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    },
+    {
+      "workflow": "fulfillment.OrderFulfillmentWorkflow",
+      "file": "fulfillment/fulfillment.go",
+      "line": 23,
+      "kind": "activity",
+      "name": "ReserveInventory",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": false
+        }
+      ]
+    },
+    {
+      "workflow": "fulfillment.OrderFulfillmentWorkflow",
+      "file": "fulfillment/fulfillment.go",
+      "line": 35,
+      "kind": "child workflow",
+      "name": "PaymentWorkflow",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    },
+    {
+      "workflow": "fulfillment.OrderFulfillmentWorkflow",
+      "file": "fulfillment/fulfillment.go",
+      "line": 40,
+      "kind": "activity",
+      "name": "ShipOrder",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": false
+        }
+      ]
+    },
+    {
+      "workflow": "fulfillment.PaymentWorkflow",
+      "file": "fulfillment/payment.go",
+      "line": 15,
+      "kind": "activity",
+      "name": "AuthorizeCard",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": false
+        }
+      ]
+    },
+    {
+      "workflow": "fulfillment.PaymentWorkflow",
+      "file": "fulfillment/payment.go",
+      "line": 21,
+      "kind": "activity",
+      "name": "FraudReview",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": false
+        }
+      ]
+    },
+    {
+      "workflow": "orders.OrderWorkflow",
+      "file": "orders/orders.go",
+      "line": 41,
+      "kind": "activity",
+      "name": "ChargeCard",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    },
+    {
+      "workflow": "polling.ReportPollingWorkflow",
+      "file": "polling/polling.go",
+      "line": 23,
+      "kind": "activity",
+      "name": "CheckStatus",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": false
+        }
+      ]
+    },
+    {
+      "workflow": "reports.DailyReportWorkflow",
+      "file": "reports/dailyreport.go",
+      "line": 32,
+      "kind": "activity",
+      "name": "BuildReport",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    },
+    {
+      "workflow": "reports.DailyReportWorkflow",
+      "file": "reports/dailyreport.go",
+      "line": 36,
+      "kind": "activity",
+      "name": "EmailReport",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": false
+        }
+      ]
+    },
+    {
+      "workflow": "shipment.ShipmentWorkflow",
+      "file": "shipment/shipment.go",
+      "line": 27,
+      "kind": "activity",
+      "name": "CreateLabel",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    },
+    {
+      "workflow": "shipment.ShipmentWorkflow",
+      "file": "shipment/shipment.go",
+      "line": 55,
+      "kind": "activity",
+      "name": "NotifyCustomer",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": false
+        }
+      ]
+    }
+  ],
+  "loopRounds": [
+    {
+      "workflow": "billing.SubscriptionWorkflow",
+      "file": "billing/subscription.go",
+      "line": 20,
+      "loop": "for i < s.CyclesPerRun",
+      "rounds": [
+        {
+          "rounds": "0 rounds",
+          "possible": true,
+          "seen": false
+        },
+        {
+          "rounds": "1 round",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "rounds": "2+ rounds",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    },
+    {
+      "workflow": "polling.ReportPollingWorkflow",
+      "file": "polling/polling.go",
+      "line": 21,
+      "loop": "for attempt <= in.MaxPolls",
+      "rounds": [
+        {
+          "rounds": "0 rounds",
+          "possible": true,
+          "seen": false
+        },
+        {
+          "rounds": "1 round",
+          "possible": true,
+          "seen": true
+        },
+        {
+          "rounds": "2+ rounds",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    }
+  ]
 }

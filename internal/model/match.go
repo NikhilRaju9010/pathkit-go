@@ -79,7 +79,7 @@ func (m *Mismatch) Error() string { return m.Reason }
 // carries on from the new "iterate". Only the last trip through the body
 // is kept. The number of trips is never counted.
 func (g *Graph) Match(raw []string) (Path, *Mismatch) {
-	steps, inSite, bad := g.splitMarkers(raw)
+	steps, inSite, _, bad := g.splitMarkers(raw)
 	if bad != "" {
 		return Path{}, &Mismatch{Step: 0, Reason: bad, At: g.Start}
 	}
@@ -172,22 +172,27 @@ func where(site string) string {
 // recorded trace. It returns the steps without them, the site each step was
 // recorded in, and a reason when the markers do not fit each other or the
 // graph (a helper left that was not entered, or never left).
-func (g *Graph) splitMarkers(raw []string) (steps, inSite []string, bad string) {
+func (g *Graph) splitMarkers(raw []string) (steps, inSite, unitHits []string, bad string) {
 	var stack []string
 	known := map[string]bool{}
 	for _, s := range g.sites {
 		known[s.ID] = true
 	}
+	isUnit := map[string]bool{}
+	for _, u := range g.units {
+		known[u.ID] = true
+		isUnit[u.ID] = true
+	}
 	for _, s := range raw {
 		switch {
 		case len(s) > 1 && s[0] == '>':
 			if !known[s[1:]] {
-				return nil, nil, fmt.Sprintf("the trace enters %q, a copy of helper code that is not in %s", s[1:], g.Workflow)
+				return nil, nil, nil, fmt.Sprintf("the trace enters %q, a copy of helper code that is not in %s", s[1:], g.Workflow)
 			}
 			stack = append(stack, s[1:])
 		case len(s) > 1 && s[0] == '<':
 			if len(stack) == 0 || stack[len(stack)-1] != s[1:] {
-				return nil, nil, fmt.Sprintf("the trace leaves %q, which it is not in", s[1:])
+				return nil, nil, nil, fmt.Sprintf("the trace leaves %q, which it is not in", s[1:])
 			}
 			stack = stack[:len(stack)-1]
 		default:
@@ -195,12 +200,29 @@ func (g *Graph) splitMarkers(raw []string) (steps, inSite []string, bad string) 
 			if len(stack) > 0 {
 				top = stack[len(stack)-1]
 			}
+			if isUnit[top] {
+				// A decision of a summarized helper: it is not a step of the
+				// workflow's path; it only marks the helper's branch as taken.
+				unitHits = append(unitHits, s)
+				continue
+			}
 			steps = append(steps, s)
 			inSite = append(inSite, top)
 		}
 	}
 	if len(stack) > 0 {
-		return nil, nil, fmt.Sprintf("the trace enters %q and never leaves it", stack[len(stack)-1])
+		return nil, nil, nil, fmt.Sprintf("the trace enters %q and never leaves it", stack[len(stack)-1])
 	}
-	return steps, inSite, ""
+	return steps, inSite, unitHits, ""
+}
+
+// UnitHits are the exits of summarized helpers a recorded trace took
+// ("H1.J2.true"), each as often as it was recorded. Nil when the trace does
+// not fit the markers (Match says why).
+func (g *Graph) UnitHits(raw []string) []string {
+	_, _, hits, bad := g.splitMarkers(raw)
+	if bad != "" {
+		return nil
+	}
+	return hits
 }

@@ -1,0 +1,27 @@
+{
+  "construct": "await_plain",
+  "status": "handled",
+  "note": "workflow.Await is a decision: the condition was met (success) or the wait ended with an error such as cancellation (failure), when the code checks the error. The goroutine that sets the condition is a closure PathKit does not map, so it is listed as not read.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "await_plain.Run",
+      "paths": [
+        {
+          "text": "Start -> Await (wait) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Await (wait) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": [
+    "closure not mapped"
+  ]
+}

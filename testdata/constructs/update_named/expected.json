@@ -1,0 +1,34 @@
+{
+  "construct": "update_named",
+  "status": "handled",
+  "note": "An update handler that is a method or function of the workflow's own package (not a function literal) is mapped like a small workflow of its own too (\"<workflow>.update[add]\"), recorded when a test sends the update.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "update_named.Run",
+      "paths": [
+        {
+          "text": "Start -> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    },
+    {
+      "name": "update_named.Run.update[add]",
+      "paths": [
+        {
+          "text": "Start -> if n < 0 --true--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if n < 0 --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}
