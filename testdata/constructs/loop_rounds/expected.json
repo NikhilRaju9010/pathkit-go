@@ -1,0 +1,29 @@
+{
+  "construct": "loop_rounds",
+  "status": "handled",
+  "note": "A loop is one round per path (the path model stays as it is). The loop rounds table tells from the recorded runs whether the loop ran with 0, 1 and 2 or more rounds.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "loop_rounds.Run",
+      "paths": [
+        {
+          "text": "Start -> for range items --iterate--> Process (activity) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> for range items --iterate--> Process (activity) --success--> retry --> for range items --exit--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> for range items --exit--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

@@ -1,0 +1,43 @@
+{
+  "construct": "update_validator",
+  "status": "handled",
+  "note": "An update validator is mapped like a small workflow (\"<workflow>.validator[add]\"): returning nil accepts the update, returning an error rejects it. It has a row in the handler table.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "update_validator.Run",
+      "paths": [
+        {
+          "text": "Start -> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    },
+    {
+      "name": "update_validator.Run.update[add]",
+      "paths": [
+        {
+          "text": "Start -> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    },
+    {
+      "name": "update_validator.Run.validator[add]",
+      "paths": [
+        {
+          "text": "Start -> if n < 0 --true--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if n < 0 --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

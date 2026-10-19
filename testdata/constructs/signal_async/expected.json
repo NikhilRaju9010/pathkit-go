@@ -1,0 +1,25 @@
+{
+  "construct": "signal_async",
+  "status": "handled",
+  "note": "ReceiveAsync is a decision: a signal was waiting (received) or not (not received).",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "signal_async.Run",
+      "paths": [
+        {
+          "text": "Start -> if workflow.GetSignalChannel(ctx, \"msg\").ReceiveAsync(&msg) (ReceiveAsync) --received--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if workflow.GetSignalChannel(ctx, \"msg\").ReceiveAsync(&msg) (ReceiveAsync) --not received--> End",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

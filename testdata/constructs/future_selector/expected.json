@@ -1,0 +1,33 @@
+{
+  "construct": "future_selector",
+  "status": "handled",
+  "note": "workflow.Selector.AddFuture gives one exit per future (\"activity FastPath\", \"activity SlowPath\").",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "future_selector.Run",
+      "paths": [
+        {
+          "text": "Start -> select (Selector) --activity FastPath--> if winner == \"a\" --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --activity FastPath--> if winner == \"a\" --false--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --activity SlowPath--> if winner == \"a\" --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --activity SlowPath--> if winner == \"a\" --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

@@ -1,0 +1,29 @@
+{
+  "construct": "errkind_timeout",
+  "status": "handled",
+  "note": "temporal.IsTimeoutError(err) after a failure is a decision (true: a timeout). The call outcome table lists it as a kind of failure of the call.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "errkind_timeout.Run",
+      "paths": [
+        {
+          "text": "Start -> Charge (activity) --failure--> if temporal.IsTimeoutError(err) --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Charge (activity) --failure--> if temporal.IsTimeoutError(err) --false--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Charge (activity) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

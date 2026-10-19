@@ -1,0 +1,38 @@
+{
+  "construct": "update_handler",
+  "status": "handled",
+  "note": "The code of an update handler is mapped like a small workflow of its own (\"<workflow>.update[add]\"): its decisions are its paths, a test that sends the update records a trace for it, and it has a row in the handler table.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "update_handler.Run",
+      "paths": [
+        {
+          "text": "Start -> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    },
+    {
+      "name": "update_handler.Run.update[add]",
+      "paths": [
+        {
+          "text": "Start -> if n < 0 --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if n < 0 --false--> Record (activity) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if n < 0 --false--> Record (activity) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

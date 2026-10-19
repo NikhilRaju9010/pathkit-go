@@ -1,0 +1,41 @@
+{
+  "construct": "update_validator_panic",
+  "status": "reported",
+  "note": "A validator that rejects by panicking: a path that panics is not a path, so the rejection is missing from the validator's map. The panel lists the panic; reject by returning an error to have it mapped.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "update_validator_panic.Run",
+      "paths": [
+        {
+          "text": "Start -> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    },
+    {
+      "name": "update_validator_panic.Run.update[add]",
+      "paths": [
+        {
+          "text": "Start -> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    },
+    {
+      "name": "update_validator_panic.Run.validator[add]",
+      "paths": [
+        {
+          "text": "Start -> if n < 0 --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": [
+    "validator rejects by panic"
+  ]
+}

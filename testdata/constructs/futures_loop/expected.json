@@ -1,0 +1,41 @@
+{
+  "construct": "futures_loop",
+  "status": "handled",
+  "note": "Futures started in one loop and read in another: the read is the step (\"Future (future)\"). PathKit sees the second loop walks the futures built by the first, so the paths that skip one of them are shown as impossible.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "futures_loop.Run",
+      "paths": [
+        {
+          "text": "Start -> for range items --iterate--> retry --> for range items --exit--> for range futures --iterate--> Future (future) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> for range items --iterate--> retry --> for range items --exit--> for range futures --iterate--> Future (future) --success--> retry --> for range futures --exit--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> for range items --iterate--> retry --> for range items --exit--> for range futures --exit--> End (completed)",
+          "bucket": "cannot-be-tested"
+        },
+        {
+          "text": "Start -> for range items --exit--> for range futures --iterate--> Future (future) --failure--> End (failed)",
+          "bucket": "cannot-be-tested"
+        },
+        {
+          "text": "Start -> for range items --exit--> for range futures --iterate--> Future (future) --success--> retry --> for range futures --exit--> End (completed)",
+          "bucket": "cannot-be-tested"
+        },
+        {
+          "text": "Start -> for range items --exit--> for range futures --exit--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

@@ -1,0 +1,25 @@
+{
+  "construct": "cancel_disconnected",
+  "status": "handled",
+  "note": "workflow.NewDisconnectedContext and its cancel function are plain calls, not decisions. The work before the cleanup and the cleanup after a failure are on the path; a cleanup activity whose error the code ignores is not a decision.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "cancel_disconnected.Run",
+      "paths": [
+        {
+          "text": "Start -> Work (activity) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Work (activity) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

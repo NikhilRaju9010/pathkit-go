@@ -1,0 +1,25 @@
+{
+  "construct": "timer_sleep",
+  "status": "handled",
+  "note": "workflow.Sleep is a decision when the code checks the error: the timer fired (success) or ended with an error such as cancellation (failure).",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "timer_sleep.Run",
+      "paths": [
+        {
+          "text": "Start -> Sleep (timer) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Sleep (timer) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

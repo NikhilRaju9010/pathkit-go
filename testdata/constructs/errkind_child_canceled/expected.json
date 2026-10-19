@@ -1,0 +1,29 @@
+{
+  "construct": "errkind_child_canceled",
+  "status": "handled",
+  "note": "temporal.IsCanceledError(err) after a child workflow failed is a decision (true: cancelled). The call outcome table lists \"cancelled\" as a kind of failure of the child workflow call.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "errkind_child_canceled.Run",
+      "paths": [
+        {
+          "text": "Start -> Child (child workflow) --failure--> if temporal.IsCanceledError(err) --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Child (child workflow) --failure--> if temporal.IsCanceledError(err) --false--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Child (child workflow) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

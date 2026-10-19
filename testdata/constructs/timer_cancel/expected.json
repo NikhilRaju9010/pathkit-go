@@ -1,0 +1,33 @@
+{
+  "construct": "timer_cancel",
+  "status": "handled",
+  "note": "workflow.NewTimer is read where the timer future is read: fired (success) or ended with an error such as being cancelled (failure). Cancelling the timer with its cancel function is a plain call.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "timer_cancel.Run",
+      "paths": [
+        {
+          "text": "Start -> if skip --true--> NewTimer (timer) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if skip --true--> NewTimer (timer) --success--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if skip --false--> NewTimer (timer) --failure--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if skip --false--> NewTimer (timer) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

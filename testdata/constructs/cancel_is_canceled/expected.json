@@ -1,0 +1,29 @@
+{
+  "construct": "cancel_is_canceled",
+  "status": "handled",
+  "note": "temporal.IsCanceledError(err) after a call that failed is a decision of its own: cancelled (true) or another error (false).",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "cancel_is_canceled.Run",
+      "paths": [
+        {
+          "text": "Start -> Sleep (timer) --failure--> if temporal.IsCanceledError(err) --true--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Sleep (timer) --failure--> if temporal.IsCanceledError(err) --false--> End (failed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> Sleep (timer) --success--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": []
+}

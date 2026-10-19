@@ -1,0 +1,27 @@
+{
+  "construct": "cancel_with_cancel",
+  "status": "reported",
+  "note": "workflow.WithCancel and calling cancel() are plain calls. The activity read by \"return f.Get(ctx, nil)\" is returned directly, so by default its failure and success are one path; the panel lists it. With classification.direct_returns set to \"step\" they are two paths.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "cancel_with_cancel.Run",
+      "paths": [
+        {
+          "text": "Start -> if abort --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> if abort --false--> End",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": [
+    "result returned directly"
+  ]
+}
