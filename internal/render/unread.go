@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
@@ -39,9 +40,9 @@ func UnreadLines(res coverage.Result, top int) []string {
 // UnreadLine is one entry on one line: where, what kind, the code and what
 // PathKit did.
 func UnreadLine(u coverage.UnreadEntry) string {
-	where := u.File
+	where := filepath.ToSlash(u.File)
 	if u.Line > 0 {
-		where = fmt.Sprintf("%s:%d", u.File, u.Line)
+		where = fmt.Sprintf("%s:%d", filepath.ToSlash(u.File), u.Line)
 	}
 	s := where + ": " + u.Kind
 	if u.Call != "" {

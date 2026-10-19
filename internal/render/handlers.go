@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
@@ -17,7 +18,7 @@ func HandlerName(h coverage.HandlerResult) string {
 
 // HandlerLine is one row of the handler table on one line.
 func HandlerLine(h coverage.HandlerResult) string {
-	s := fmt.Sprintf("%s %s (%s, registered at %s): exercised by a test: %s", h.Kind, HandlerName(h), h.Owner, h.Where, h.Exercised)
+	s := fmt.Sprintf("%s %s (%s, registered at %s): exercised by a test: %s", h.Kind, HandlerName(h), h.Owner, filepath.ToSlash(h.Where), h.Exercised)
 	if h.Branches > 0 || h.Workflow != "" {
 		if h.Branches == 0 {
 			s += "; no branches of its own"
@@ -87,7 +88,7 @@ func CallOutcomeLine(r coverage.CallOutcomeRow) string {
 		}
 		parts = append(parts, o.Outcome+" "+state)
 	}
-	return fmt.Sprintf("%s:%d: %s (%s) in %s: %s", r.File, r.Line, r.Name, r.Kind, r.Workflow, strings.Join(parts, ", "))
+	return fmt.Sprintf("%s:%d: %s (%s) in %s: %s", filepath.ToSlash(r.File), r.Line, r.Name, r.Kind, r.Workflow, strings.Join(parts, ", "))
 }
 
 // CallOutcomeLines is the outcome table as text: a heading and a line per call
@@ -119,7 +120,7 @@ func CallOutcomeLines(res coverage.Result, gapsOnly bool) []string {
 	lines := []string{head + ":"}
 	for _, r := range res.CallOutcomes {
 		if g := r.Gaps(); len(g) > 0 {
-			lines = append(lines, fmt.Sprintf("  %s:%d: %s (%s) in %s: not seen: %s", r.File, r.Line, r.Name, r.Kind, r.Workflow, strings.Join(g, ", ")))
+			lines = append(lines, fmt.Sprintf("  %s:%d: %s (%s) in %s: not seen: %s", filepath.ToSlash(r.File), r.Line, r.Name, r.Kind, r.Workflow, strings.Join(g, ", ")))
 		}
 	}
 	return lines
@@ -147,7 +148,7 @@ func LoopRoundLine(r coverage.LoopRoundsRow) string {
 			parts = append(parts, c.Bucket+" not seen")
 		}
 	}
-	return fmt.Sprintf("%s:%d: %s in %s: %s", r.File, r.Line, r.Loop, r.Workflow, strings.Join(parts, ", "))
+	return fmt.Sprintf("%s:%d: %s in %s: %s", filepath.ToSlash(r.File), r.Line, r.Loop, r.Workflow, strings.Join(parts, ", "))
 }
 
 // LoopRoundLines is the loop rounds table as text, or with gapsOnly only the
@@ -175,7 +176,7 @@ func LoopRoundLines(res coverage.Result, gapsOnly bool) []string {
 			continue
 		}
 		if gapsOnly {
-			lines = append(lines, fmt.Sprintf("  %s:%d: %s in %s: no test ran it with: %s", r.File, r.Line, r.Loop, r.Workflow, strings.Join(g, ", ")))
+			lines = append(lines, fmt.Sprintf("  %s:%d: %s in %s: no test ran it with: %s", filepath.ToSlash(r.File), r.Line, r.Loop, r.Workflow, strings.Join(g, ", ")))
 		} else {
 			lines = append(lines, "  "+LoopRoundLine(r))
 		}
