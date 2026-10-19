@@ -36,7 +36,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:b8399a8d47"
         },
         {
           "number": 2,
@@ -58,7 +59,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:752834cc39"
         },
         {
           "number": 3,
@@ -80,7 +82,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:ca5dfe627e"
         }
       ],
       "classification": {
@@ -117,6 +120,79 @@
           "covered": 2,
           "percent": 66.7
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 2,
+        "total": 3,
+        "percent": 66.7,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "3",
+        "covered": 2,
+        "testable": 3,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:b8399a8d47",
+            "steps": [
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:752834cc39",
+            "steps": [
+              "ChargeCard (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              2
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:ca5dfe627e",
+            "steps": [
+              "ChargeCard (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              3
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "decisionPairs": {
+        "total": 2,
+        "covered": 1,
+        "percent": 50,
+        "exact": true
       },
       "file": "orders/orders.go",
       "priority": "Medium"
@@ -187,6 +263,46 @@
   },
   "coverageBasis": "overall",
   "classificationShown": false,
+  "mainHeadline": {
+    "workflowsMeetingTarget": 0,
+    "workflows": 1,
+    "target": 80,
+    "branches": {
+      "total": 4,
+      "covered": 3,
+      "percent": 75
+    }
+  },
+  "tests": [
+    {
+      "name": "(test name not recorded)",
+      "traces": 2,
+      "workflows": [
+        "orders.OrderWorkflow"
+      ],
+      "scenarios": 2,
+      "branches": 3,
+      "uniqueScenarios": 2,
+      "uniqueBranches": 3,
+      "addsNothingNew": false
+    }
+  ],
+  "testsToWriteFirst": [
+    {
+      "rank": 1,
+      "id": "sc:ca5dfe627e",
+      "workflow": "orders.OrderWorkflow",
+      "tag": "plain logic",
+      "file": "orders/orders.go",
+      "line": 42,
+      "hint": "Let ChargeCard succeed",
+      "testName": "TestOrder_ChargeCardSucceeds",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 3
+    }
+  ],
   "unread": [],
   "callOutcomes": [
     {

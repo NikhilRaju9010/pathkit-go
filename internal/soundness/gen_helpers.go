@@ -116,6 +116,10 @@ func (g *gen) helperProbe() {
 		g.line(0, "}")
 		g.addLocal(flag, kBool)
 	case 5: // a pointer to the caller's variable
+		if g.next%4 != 0 {
+			g.writeProbe(name, g.next%4-1+1)
+			break
+		}
 		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, p *string) error {
 	*p = "z"
 	return workflow.Sleep(ctx, time.Nanosecond)
@@ -158,6 +162,10 @@ func (g *gen) helperProbe() {
 		g.line(0, "}")
 		g.addLocal(r, kString)
 	case 8: // a method of a struct
+		if g.next%3 == 0 {
+			g.writeProbe(name, 0)
+			break
+		}
 		if r, ok := g.pick(kStruct); ok {
 			g.helpers = append(g.helpers, fmt.Sprintf(`func (r *Rec) %s(ctx workflow.Context) error {
 	_ = workflow.GetInfo(ctx)
@@ -341,5 +349,68 @@ func (g *gen) temporalProbe() {
 		g.line(2, "noop()")
 		g.line(1, "}")
 		g.line(0, "}")
+	}
+}
+
+// writeProbe declares a helper that writes to a value it was given (through a
+// pointer receiver, a map, a slice or a pointer to a struct) and reads the
+// value in the caller's next decision: the caller must forget what it knew.
+// It is picked inside the pointer and method probes without drawing more random
+// numbers, so the programs of the other probes stay as they were.
+func (g *gen) writeProbe(name string, variant int) {
+	switch variant {
+	case 0: // a pointer receiver writes a field the caller reads next
+		if r, ok := g.pick(kStruct); ok {
+			g.helpers = append(g.helpers, fmt.Sprintf(`func (r *Rec) %s(ctx workflow.Context) error {
+	r.A = "z"
+	return workflow.Sleep(ctx, time.Nanosecond)
+}
+`, name))
+			g.line(0, "_ = %s.%s(ctx)", r.name, name)
+			g.line(0, "if %s.A == \"\" {", r.name)
+			g.line(1, "noop()")
+			g.line(0, "}")
+		} else {
+			g.line(0, "noop()")
+		}
+	case 1: // a map argument is written by the helper
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, m map[string]string) error {
+	m["k"] = "z"
+	return workflow.Sleep(ctx, time.Nanosecond)
+}
+`, name))
+		m := g.fresh("mv")
+		g.line(0, "%s := map[string]string{\"k\": %s}", m, g.strConst())
+		g.line(0, "_ = %s(ctx, %s)", name, m)
+		g.line(0, "if %s[\"k\"] == \"\" {", m)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	case 2: // a slice argument is written by the helper
+		g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, s []int) error {
+	s[0] = 9
+	return workflow.Sleep(ctx, time.Nanosecond)
+}
+`, name))
+		sl := g.fresh("sv")
+		g.line(0, "%s := []int{%s}", sl, g.intConst())
+		g.line(0, "_ = %s(ctx, %s)", name, sl)
+		g.line(0, "if %s[0] == 0 {", sl)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	default: // a pointer to a struct is written through, field by field
+		if r, ok := g.pick(kStruct); ok {
+			g.helpers = append(g.helpers, fmt.Sprintf(`func %s(ctx workflow.Context, p *Rec) error {
+	p.B = 7
+	p.C = true
+	return workflow.Sleep(ctx, time.Nanosecond)
+}
+`, name))
+			g.line(0, "_ = %s(ctx, &%s)", name, r.name)
+			g.line(0, "if %s.B == 0 || !%s.C {", r.name, r.name)
+			g.line(1, "noop()")
+			g.line(0, "}")
+		} else {
+			g.line(0, "noop()")
+		}
 	}
 }

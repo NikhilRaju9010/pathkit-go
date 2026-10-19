@@ -161,6 +161,14 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
   details.wf, details.wf > summary { border: 0; } details.wf > summary { background: none; }
   tr.det { display: table-row; } table { font-size: 9pt; }
 }
+.trend-chart { max-width: 100%; height: auto; }
+.trend-chart .grid { stroke: var(--line); }
+.trend-chart .axis { fill: var(--muted); font-size: 10px; }
+.trend-chart .line { stroke-width: 2; }
+.trend-chart .line.main { stroke: var(--ok); }
+.trend-chart .line.branch { stroke: var(--accent); }
+.trend-chart .dot.main { fill: var(--ok); }
+.trend-chart .dot.branch { fill: var(--accent); }
 
 </style>
 </head>
@@ -177,6 +185,8 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 <a href="#workflows">Workflows</a>
 <a href="#unread">Could not read (0)</a>
 <a href="#call-outcomes">Call outcomes (1)</a>
+<a href="#tests">Tests (1)</a>
+<a href="#write-first">Tests to write first (1)</a>
 <a href="#groups">Missed paths (1 groups)</a>
 <a href="#paths">Paths</a>
 </nav>
@@ -190,6 +200,18 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 
 <section id="summary" aria-labelledby="h-summary">
 <h2 id="h-summary">Summary</h2>
+<p class="total headline main-headline">0 of 1 workflows meet their target (main number ≥ 80%)</p>
+<p class="total headline main-headline">Branch coverage (all workflows): 3/4 (75.0%)</p>
+<p class="total headline main-headline">Decision pairs (all workflows): 1/2 (50.0%) — an outcome of one decision followed by an outcome of the next</p>
+<div class="tablebox">
+<table class="over main-numbers">
+<caption>The main number of each workflow: the one number it is judged by</caption>
+<thead><tr><th scope="col">Workflow</th><th scope="col">Main number</th><th scope="col">Target</th><th scope="col">Why this number</th></tr></thead>
+<tbody>
+<tr data-main-met="false"><th scope="row">orders.OrderWorkflow</th><td>path coverage 2/3 (66.7%) · not met</td><td>80%</td><td>the workflow has few enough paths to list them all, so path coverage is the number</td></tr>
+</tbody>
+</table>
+</div>
 <p class="total" data-total-paths="3" data-total-covered="2">3 paths total · 2 covered · 1 missed · 66.7% project coverage</p>
 <p class="branches">Branches: 3/4 (75.0%)</p>
 <div class="cards">
@@ -258,6 +280,48 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 </table>
 </div>
 </section>
+<section id="tests" aria-labelledby="h-tests" data-tests="1">
+<h2 id="h-tests">Which test covers what</h2>
+<p class="note">Tests: test names not recorded in these traces (run pathkit test again to record them) A "unique" scenario or branch is covered by this test and no other.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">What each Go test covered</caption>
+<thead><tr><th scope="col">Test</th><th scope="col">Runs</th><th scope="col">Scenarios</th><th scope="col">Unique scenarios</th><th scope="col">Branches</th><th scope="col">Unique branches</th><th scope="col">Workflows</th></tr></thead>
+<tbody>
+<tr data-adds-nothing="false">
+<td data-label="Test"><code>(test name not recorded)</code></td>
+<td data-label="Runs">2</td>
+<td data-label="Scenarios">2</td>
+<td data-label="Unique scenarios">2</td>
+<td data-label="Branches">3</td>
+<td data-label="Unique branches">3</td>
+<td data-label="Workflows">orders.OrderWorkflow</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="write-first" aria-labelledby="h-write-first" data-advice="1">
+<h2 id="h-write-first">Tests to write first</h2>
+<p class="note">The riskiest missed scenarios, riskiest first: cancel, then compensation, activity failure, continue-as-new, timers and timeouts, signals and updates, plain logic, old version branches. This only orders the list; it changes no number.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Tests worth writing first</caption>
+<thead><tr><th scope="col">#</th><th scope="col">Risk</th><th scope="col">Workflow</th><th scope="col">Where</th><th scope="col">What the test must do</th><th scope="col">Suggested test</th><th scope="col">Covers</th></tr></thead>
+<tbody>
+<tr data-advice-tag="plain logic">
+<td data-label="#">1</td>
+<td data-label="Risk">plain logic</td>
+<td data-label="Workflow">orders.OrderWorkflow</td>
+<td data-label="Where" class="file">orders/orders.go:42</td>
+<td data-label="What the test must do">Let ChargeCard succeed</td>
+<td data-label="Suggested test"><code>TestOrder_ChargeCardSucceeds</code><br><span class="file">id sc:ca5dfe627e</span></td>
+<td data-label="Covers">1 path and 1 branch no test has taken</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
 <section id="groups" aria-labelledby="h-groups" data-groups="1">
 <h2 id="h-groups">Missed paths by first untested step</h2>
 <p class="note">Testable paths with no test: 1. A group is the paths that leave the road the tests walked at the same step, so one new test that takes that step usually covers several of them. Biggest groups first. A workflow with more paths than the list holds counts only its listed paths.</p>
@@ -285,6 +349,9 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 <summary><h3>orders.OrderWorkflow</h3><span class="badge prio-Medium">Medium</span><span class="bar-mini" aria-hidden="true"><i style="width:66.7%"></i></span><span>2 of 3 covered</span><span class="match" id="match-0"></span></summary>
 <div class="wbody">
 <p class="file">orders/orders.go</p>
+<p class="main-line">Main number: path coverage 2/3 (66.7%) · target 80% not met</p>
+<p class="main-line">  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.</p>
+<p class="main-line">Scenarios: 3 (2 covered) — different things the workflow can do, counted by what it does outside itself</p>
 <p class="stats">2/3 paths · 66.7% · branches 3/4 · priority Medium</p>
 <div class="pt" data-pt="0"></div>
 </div>

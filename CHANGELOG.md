@@ -1,6 +1,28 @@
 # Changelog
 
-All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is part of the version being prepared, v0.2.0 (not tagged). The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
+All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is part of the versions being prepared (v0.2.0 to v0.4.0, not tagged). The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
+
+## v0.4.0 (not tagged yet)
+
+Two milestones: scenarios and the main number (M9), and advice and adoption (M10). Nothing is tagged yet. Every existing JSON key keeps its name, value and meaning; new keys are added. Traces from v0.2.0 and v0.3.0 are still read and counted.
+
+### Scenarios and the main number
+
+- **Scenarios**: paths grouped by what the workflow does outside itself (activity, child workflow, Nexus and timer outcomes, signals, version side, cancel, loop 0 / 1+ rounds, end). Counted exactly even over the path cap (JSON `scenarios`, path `scenarioId`). A path through a place PathKit could not read is never merged. Paths that repeat another path's behaviour say `same behaviour as path N` (JSON `sameBehaviourAs`); no number changes because of it.
+- **The main number of each workflow** (handler, path, scenario or branch coverage, chosen by rules; JSON `mainNumber`), with one sentence on why, config `classification.main_number.force`, per-kind `classification.targets`, and **the project headline** as the first lines of the text, `--summary` and the page (`N of M workflows meet their target`; JSON `mainHeadline`). The `--summary` line of each workflow ends with its main number. Split advice for workflows not measured by paths.
+- **Decision pairs** (JSON `decisionPairs`, one headline line). **Handler coverage** per workflow (`handlerCoverage`).
+- **CI gate on the main number**: the baseline stores it; `classification.ci.tolerance` and `ci.main_floor`. Old baselines work as before.
+- **Carry-overs**: dedicated soundness probes for helpers that write through pointer receivers, maps, slices and struct pointers (no false claim found); `cancel()` is a step; clearer reasons for the three selector shapes the sample corpus still excludes; `classification.direct_returns` stays `report`, now documented with when to turn on `step`.
+- **A baseline written by this version has `mainNumber` entries that an older PathKit refuses to read** (it checks for unknown keys); write it again with the older binary if you need both.
+- **Changed output (listed on purpose)**: the headline lines at the top of `report` and `coverage` text; the main-number lines under each workflow; ` (same behaviour as path N)` after a path; the ` · main number: …` suffix of each `--summary` line; the new JSON keys; the HTML main-number table. The CI check prints one more line when a main number falls below the baseline.
+
+### Advice and adoption
+
+- **Tests to write first**: the 10 riskiest missed scenarios, tagged (cancel, compensation, activity failure, continue-as-new, timers, signals and updates, plain logic, old versions), with hint, place, suggested name and id (`--summary`, full text, JSON `testsToWriteFirst`, first section of the HTML missed area).
+- **`pathkit scaffold`** writes a Go test skeleton for an item (mocks, signals, cancel, input, assertions, TODO lines); `--out` never overwrites. **`pathkit init`**, **`pathkit doctor`**, **`pathkit diff --base`** (`--markdown`, `--json`, `--fail-on-untested-new`).
+- **`pathkit test --no-network`** (Linux `unshare -rn`, refuses without it) and **`--skip-file`**.
+- **Which test covers what**: traces carry `testName`; the report shows per test the scenarios and branches it covers and the tests that add nothing (JSON `tests`).
+- **`report --format junit|cobertura|sarif --output <file>`**; the **trend chart** in the page; the **nightly public-corpus job** and **duplicate removal** in the code.
 
 ## v0.3.0 (not tagged yet)
 

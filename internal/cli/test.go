@@ -26,6 +26,7 @@ func newTestCommand() *cobra.Command {
 	var traceDir string
 	var keep bool
 	var sf scopeFlags
+	var safe runnerOptions
 	cmd := &cobra.Command{
 		Use:     "test [folder | folder/...] [-- go test flags]",
 		Short:   "Run your Go tests and record which workflow paths they take",
@@ -41,7 +42,14 @@ Only workflows in scope are recorded (.pathkitrc.json, --include,
 never what is tested.
 
 Everything after "--" is passed to go test, for example:
-  pathkit test ./... -- -run TestOrder -count=1`,
+  pathkit test ./... -- -run TestOrder -count=1
+
+--no-network runs the tests in a network namespace with no network (Linux,
+through "unshare -rn"), so a test that reaches for a real service fails
+instead of reaching it. If unshare is not available PathKit refuses; it never
+runs the tests with the network on after you asked for it off.
+--skip-file <file> skips the tests named in a file: one regular expression
+per line, blank lines and lines starting with # are ignored.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, goArgs := "", []string{} // "": the config's package, else ./...
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
@@ -55,11 +63,13 @@ Everything after "--" is passed to go test, for example:
 			default:
 				return userError("expected at most one folder argument, got %d", len(args))
 			}
-			return runTest(cmd, target, goArgs, traceDir, keep, sf)
+			return runTest(cmd, target, goArgs, traceDir, keep, sf, safe)
 		},
 	}
 	cmd.Flags().StringVar(&traceDir, "traces", defaultTraceDir, "folder to write trace files into (the config's \"traces\" sets another default)")
 	cmd.Flags().BoolVar(&keep, "keep-traces", false, "keep old trace files instead of clearing them first")
+	cmd.Flags().BoolVar(&safe.noNetwork, "no-network", false, "run the tests with no network (Linux: through unshare -rn); refuses if that is not available")
+	cmd.Flags().StringVar(&safe.skipFile, "skip-file", "", "skip the tests named in this `file` (one regular expression per line, # for comments)")
 	addScopeFlags(cmd, &sf, false)
 	return cmd
 }
@@ -98,8 +108,16 @@ func traceDirFor(cmd *cobra.Command, flagValue string, cfg *scope.Config) string
 	return flagValue
 }
 
-func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string, keep bool, sf scopeFlags) error {
+func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string, keep bool, sf scopeFlags, safe runnerOptions) error {
 	stdout, stderr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	goArgs, err := safe.apply(goArgs)
+	if err != nil {
+		return err
+	}
+	goBin, goPrefix, err := safe.command()
+	if err != nil {
+		return err
+	}
 	if target != "" {
 		if _, _, file, err := load.Resolve(target); err != nil {
 			return userError("%s", err)
@@ -171,7 +189,7 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 			}
 			fmt.Fprintf(stderr, "pathkit test: running the tests of the module in %s\n", load.DisplayPath(d))
 		}
-		run := exec.Command("go", args...)
+		run := exec.Command(goBin, append(append([]string(nil), goPrefix...), args...)...)
 		run.Dir = d
 		run.Stdout, run.Stderr = stdout, stderr
 		run.Env = os.Environ()

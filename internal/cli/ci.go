@@ -56,6 +56,12 @@ type ciState struct {
 	lost         []baseline.Finding
 	allowLost    bool
 	checked      bool // a baseline was read and compared
+	// mainFloor and tolerance are classification.ci.main_floor and tolerance;
+	// drops are the workflows whose main number fell below the baseline's.
+	mainFloor    *float64
+	tolerance    float64
+	drops        []baseline.MainDrop
+	kindsChanged []string
 	// anchors are this run's numbered rule entries (written with the
 	// baseline); anchorWarnings are the ones that moved since it was.
 	anchors        []baseline.RuleAnchor
@@ -87,6 +93,10 @@ func prepareCI(cmd *cobra.Command, opt ciOptions, sc *scoped, sf scopeFlags, fun
 		st.floor, st.floorFrom = ci.FailUnderTestable, cfg.Path
 	}
 	st.cappedBasis = ci.CappedBasis
+	st.mainFloor, st.tolerance = ci.MainFloor, ci.Tolerance
+	if ci.MainFloor != nil {
+		st.floorFrom = cfg.Path
+	}
 	if st.cappedBasis == "" {
 		st.cappedBasis = "stage"
 	}
@@ -131,7 +141,7 @@ func prepareCI(cmd *cobra.Command, opt ciOptions, sc *scoped, sf scopeFlags, fun
 	if opt.allowLostTests && st.write {
 		return nil, userError("--allow-lost-tests has no effect with --write-baseline (nothing is checked while the baseline is written)")
 	}
-	if st.baselinePath == "" && st.floor == nil && st.stageFloor == nil {
+	if st.baselinePath == "" && st.floor == nil && st.stageFloor == nil && st.mainFloor == nil {
 		return nil, nil
 	}
 	return st, nil
@@ -147,6 +157,7 @@ func (st *ciState) compare(res coverage.Result) error {
 		return userError("%s", err)
 	}
 	st.untested, st.review, st.lost = baseline.Check(b, res)
+	st.drops, st.kindsChanged = baseline.CheckMain(b, res, st.tolerance)
 	st.checked = true
 	st.anchorWarnings = baseline.AnchorChanges(b.RuleAnchors, st.anchors)
 	return nil
@@ -194,6 +205,13 @@ func (st *ciState) failures(res coverage.Result) [][]string {
 			out = append(out, []string{fmt.Sprintf("stage coverage %s (%d of %d stage paths%s) is below classification.ci.stage_floor %s (in %s)", render.Pct(v, st.stageFloor), covered, total, left, render.Threshold(*st.stageFloor), st.floorFrom)})
 		}
 	}
+	if st.mainFloor != nil {
+		for _, w := range res.Workflows {
+			if w.Main.Measured && w.Main.Percent < *st.mainFloor {
+				out = append(out, []string{fmt.Sprintf("%s: main number (%s coverage %d/%d) %s is below classification.ci.main_floor %s (in %s)", w.Name, w.Main.Kind, w.Main.Covered, w.Main.Total, render.Pct(w.Main.Percent, nil), render.Threshold(*st.mainFloor), st.floorFrom)})
+			}
+		}
+	}
 	text := pathTexts(res)
 	list := func(fs []baseline.Finding, what func(int) string) {
 		if len(fs) == 0 {
@@ -213,6 +231,17 @@ func (st *ciState) failures(res coverage.Result) [][]string {
 	list(st.review, func(n int) string { return count(n, "needs-review path") })
 	if !st.allowLost {
 		st.listLost(&out, text)
+	}
+	for _, d := range st.mainDrops() {
+		if d.NotMeasured {
+			out = append(out, []string{fmt.Sprintf("%s: the baseline %s has a main number (%s coverage %d/%d, %s) and the workflow has nothing to measure now", d.Workflow, st.baselinePath, d.Kind, d.Was.Covered, d.Was.Total, render.Pct(d.Was.Percent, nil))})
+			continue
+		}
+		tol := ""
+		if st.tolerance > 0 {
+			tol = fmt.Sprintf(" by more than classification.ci.tolerance %s", render.Threshold(st.tolerance))
+		}
+		out = append(out, []string{fmt.Sprintf("%s: main number (%s coverage) fell from %s (%d/%d) in the baseline %s to %s (%d/%d)%s", d.Workflow, d.Kind, render.Pct(d.Was.Percent, nil), d.Was.Covered, d.Was.Total, st.baselinePath, render.Pct(d.Now.Percent, nil), d.Now.Covered, d.Now.Total, tol)})
 	}
 	return out
 }
@@ -373,4 +402,14 @@ func (st *ciState) json(res coverage.Result) *jsonCI {
 		out.Passed = false
 	}
 	return out
+}
+
+// mainDrops are the main-number drops that fail the check. With
+// --allow-lost-tests they are only warned about: a lost test is the usual
+// reason a main number falls, and the flag says that is fine.
+func (st *ciState) mainDrops() []baseline.MainDrop {
+	if st.allowLost {
+		return nil
+	}
+	return st.drops
 }

@@ -30,7 +30,14 @@ func ordersTraces(t *testing.T) string {
 	return dir
 }
 
-const ordersCoverage = `Workflow: orders.OrderWorkflow
+const ordersCoverage = `0 of 1 workflows meet their target (main number ≥ 80%)
+Branch coverage (all workflows): 3/4 (75.0%)
+Decision pairs (all workflows): 1/2 (50.0%) — an outcome of one decision followed by an outcome of the next
+
+Workflow: orders.OrderWorkflow
+Main number: path coverage 2/3 (66.7%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 3 (2 covered) — different things the workflow can do, counted by what it does outside itself
 Total paths: 3
 Covered: 2/3 (66.7%)
 Branches: 3/4 (75.0%)

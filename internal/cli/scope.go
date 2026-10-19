@@ -299,7 +299,7 @@ func notMappedUnread(sc *scoped) []coverage.UnreadEntry {
 			continue
 		}
 		out = append(out, coverage.UnreadEntry{Workflow: n.name, File: load.DisplayPath(u.Pos.Filename), Line: u.Pos.Line, Kind: coverage.UnreadNotMapped,
-			Call: u.Construct, Effect: "the whole workflow is left out of the report: " + u.Reason})
+			Call: u.Construct, Effect: "the whole workflow is left out of the report: " + u.Reason + selectorAdvice(u.Reason)})
 	}
 	return out
 }
@@ -375,6 +375,22 @@ func moduleOf(wf discover.Workflow) string {
 func moduleIfSeveral(sc *scoped, wf discover.Workflow) string {
 	if len(sc.res.Modules) > 1 {
 		return moduleOf(wf)
+	}
+	return ""
+}
+
+// selectorAdvice adds, to the reason a selector cannot be mapped, why that
+// shape is out of reach and what to write instead (the model's own message is
+// frozen; this is the explanation next to it in the "could not fully read"
+// panel).
+func selectorAdvice(reason string) string {
+	switch {
+	case strings.Contains(reason, "Select calls; PathKit maps exactly one"):
+		return " — a second Select on the same selector only sees the exits the first one did not take, which PathKit cannot draw; use one selector for each wait"
+	case strings.Contains(reason, "must be kept in a variable created with workflow.NewSelector"):
+		return " — if it is built and used in one chained expression, NewSelector(…).AddFuture(…).Select(…), write sel := workflow.NewSelector(ctx), then the Add… calls, then sel.Select(ctx), and PathKit can map it"
+	case strings.Contains(reason, "is inside a loop; PathKit needs every Add"):
+		return " — an Add… call in a loop adds a number of exits that is only known when the workflow runs, so no fixed map of them can be drawn"
 	}
 	return ""
 }

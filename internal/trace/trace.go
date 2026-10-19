@@ -54,6 +54,10 @@ type File struct {
 	// is "not recorded by this trace", never a missing or an unmatched step.
 	Recorder   int    `json:"recorder,omitempty"`
 	RecordedAt string `json:"recordedAt"`
+	// TestName is the Go test that ran the workflow ("" in traces recorded
+	// before it was recorded, and when the recorder could not tell which of
+	// several parallel tests it was).
+	TestName string `json:"testName,omitempty"`
 
 	Path string `json:"-"` // where it was read from
 }

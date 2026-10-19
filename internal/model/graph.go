@@ -82,7 +82,8 @@ type Junction struct {
 
 	// call is where the Temporal call this decision reads is (the activity,
 	// child workflow or Nexus operation that is started); nil if not known.
-	call *token.Position
+	call     *token.Position
+	callExpr *ast.CallExpr // the call itself (see CallExpr)
 
 	// stable is the junction's description for stable path IDs (see
 	// assignStable): its label, made unique within the workflow.
@@ -217,6 +218,9 @@ type Graph struct {
 
 	// unread are the places PathKit did not follow (see Unread).
 	unread []Unread
+
+	// fp is the behaviour fingerprint helper, made on first use.
+	fp *fingerprinter
 }
 
 // TrustedConstant reports whether expr is a constant whose value is the

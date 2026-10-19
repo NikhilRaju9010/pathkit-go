@@ -354,7 +354,7 @@ func (b *builder) decide(ifs *ast.IfStmt, then, other *cfg.Block, det determined
 		if j == nil {
 			j = b.newJunction(ifs, ErrCheck, label)
 			j.viaHelper = viaHelper
-			j.call = b.callPos(obj, ifs)
+			j.call, j.callExpr = b.callPos(obj, ifs)
 			failure, success := then, other
 			failureRoad, successRoad := ast.Stmt(ifs.Body), ifs.Else
 			if !neq {

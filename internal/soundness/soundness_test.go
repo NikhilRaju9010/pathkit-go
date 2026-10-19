@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,6 +62,12 @@ type observed struct {
 	plans        map[string]*classify.StagePlan
 	reachedPaths map[string][]model.Path
 	graphs       map[string]*model.Graph
+	// scenarioErrs are the places where the scenarios disagree with what the
+	// runs really did outside the workflow (the Skeptic property); stepRuns
+	// counts the runs checked.
+	scenarioErrs []string
+	scenarioSeen map[string]string
+	stepRuns     int
 }
 
 // runBatch writes the programs into a throw-away module, records the paths
@@ -99,7 +106,7 @@ func runBatch(t *testing.T, programs []Program) *observed {
 
 	res, err := load.Load(dir)
 	if err != nil {
-		t.Fatalf("the generated programs do not compile: %v\n%s", err, firstLines(File(programs), 40))
+		t.Fatalf("the generated programs do not compile: %v\n%s", err, aroundError(err.Error(), File(programs)))
 	}
 	obs := &observed{programs: map[string]Program{}, reached: map[string]map[string]bool{}, paths: map[string][]model.Path{}, claims: map[string]map[string]classify.Classification{}}
 	byName := map[string]Program{}
@@ -162,6 +169,7 @@ func runBatch(t *testing.T, programs []Program) *observed {
 	}
 	cmd := exec.Command("go", "test", "-vet=off", "-overlay="+overlay, "-count=1", "./progs")
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "PK_TRACES="+traces)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("running the generated programs failed: %v\n%s", err, firstLines(string(out), 60))
 	}
@@ -193,6 +201,7 @@ func runBatch(t *testing.T, programs []Program) *observed {
 			if len(graphs[tf.Workflow].UnitHits(out.Steps)) > 0 {
 				obs.unitRuns++
 			}
+			obs.checkScenario(graphs[tf.Workflow], tf, f, out.Path)
 			for _, st := range out.Path.Steps {
 				if st.Junction.Site != nil {
 					obs.helperPaths++
@@ -313,7 +322,7 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		}
 	}
 
-	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups, unitRuns int
+	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups, unitRuns, scenarioErrors, stepRuns int
 	for start := 0; start < len(all); start += batchSize {
 		end := min(start+batchSize, len(all))
 		obs := runBatch(t, all[start:end])
@@ -324,6 +333,11 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 			falseCount++
 			t.Error(f)
 		}
+		for _, e := range obs.scenarioErrs {
+			scenarioErrors++
+			t.Error(e)
+		}
+		stepRuns += obs.stepRuns
 		sf, sc, pg := obs.stageFalseClaims()
 		for _, f := range sf {
 			falseCount++
@@ -344,6 +358,10 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 	}
 	if helperPaths == 0 {
 		t.Error("no run went through the code of a helper function: the helper probes were not exercised")
+	}
+	t.Logf("SCENARIOS: %d runs checked against their scenario's external steps, %d disagreements", stepRuns, scenarioErrors)
+	if stepRuns == 0 && n >= 50 {
+		t.Error("no run was checked against its scenario: the scenario check looked at nothing")
 	}
 	if totalReached == 0 {
 		t.Error("no path was recorded as taken: the harness checked nothing")
@@ -399,4 +417,64 @@ func TestGroundTruthIsComplete(t *testing.T) {
 	if _, paths, reached, claimed := obs.stats(); paths != 4 || reached != 4 || claimed != 0 {
 		t.Errorf("want 4 paths, all 4 taken and none claimed impossible; got %d paths, %d taken, %d claimed", paths, reached, claimed)
 	}
+}
+
+// checkScenario checks a run against its scenario (docs/DESIGN.md D25): the
+// external steps the path says (its fingerprint) must be the ones the run really
+// made (activities, local activities, timers, in order), and two runs of one
+// scenario must have made the same ones. Only for programs whose helpers are
+// copied in: a summarized helper's own steps are not part of the path.
+func (o *observed) checkScenario(g *model.Graph, tf trace.File, file string, p model.Path) {
+	if g.Summarized() {
+		return
+	}
+	raw, err := os.ReadFile(file + ".events")
+	if err != nil {
+		return
+	}
+	actual := strings.TrimSpace(string(raw))
+	fp := g.Fingerprint(p)
+	if strings.HasPrefix(fp[len(fp)-1], "unknown ") {
+		return // a place PathKit did not read: the path has a scenario of its own
+	}
+	var said []string
+	for _, st := range fp {
+		if strings.HasSuffix(st, ": 1+ rounds") {
+			return // a loop is read once per path: how many rounds a run made is the loop table's business
+		}
+		switch {
+		case strings.Contains(st, " (activity)"):
+			said = append(said, "A:"+st[:strings.Index(st, " (activity)")])
+		case strings.Contains(st, " (local activity)"):
+			said = append(said, "L:"+st[:strings.Index(st, " (local activity)")])
+		case strings.HasPrefix(st, "timer"), strings.Contains(st, "(timer)"), strings.HasPrefix(st, "AwaitWithTimeout (wait)"), strings.HasPrefix(st, "wait with timeout"):
+			said = append(said, "T")
+		}
+	}
+	o.stepRuns++
+	if got := strings.Join(said, "\n"); got != actual {
+		o.scenarioErrs = append(o.scenarioErrs, fmt.Sprintf("%s: path %s says the run makes %q, the run made %q\n%s\n%s", tf.Workflow, p.Key(), got, actual, strings.Join(fp, " | "), firstLines(o.programs[tf.Workflow].Source, 70)))
+		return
+	}
+	if o.scenarioSeen == nil {
+		o.scenarioSeen = map[string]string{}
+	}
+	id := tf.Workflow + "/" + model.ScenarioID(fp)
+	if prev, ok := o.scenarioSeen[id]; ok && prev != actual {
+		o.scenarioErrs = append(o.scenarioErrs, fmt.Sprintf("%s: two runs of scenario %s made different steps: %q and %q", tf.Workflow, id, prev, actual))
+	}
+	o.scenarioSeen[id] = actual
+}
+
+// aroundError shows the lines of src near the line a compile error names
+// ("progs.go:7528:37"), or the first lines when there is none.
+func aroundError(msg, src string) string {
+	m := regexp.MustCompile(`progs\.go:(\d+):`).FindStringSubmatch(msg)
+	if m == nil {
+		return firstLines(src, 40)
+	}
+	n, _ := strconv.Atoi(m[1])
+	lines := strings.Split(src, "\n")
+	lo, hi := max(0, n-6), min(len(lines), n+4)
+	return strings.Join(lines[lo:hi], "\n")
 }

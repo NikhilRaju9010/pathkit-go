@@ -328,7 +328,22 @@ func TestStageSettingsRead(t *testing.T) {
 	if err != nil || c.StageMaxPaths != 64 || c.MaxContexts != 4 || c.CI.StageFloor == nil || *c.CI.StageFloor != 70 {
 		t.Errorf("set: %+v %v", c, err)
 	}
+	c, err = read(`{"classification": {"enabled": true, "scenarios": {"max_listed": 20, "max_states": 500}, "targets": {"default": 70, "branch": 50}, "main_number": {"force": [{"workflow": "a.B", "kind": "branch", "reason": "why"}]}, "ci": {"tolerance": 2, "main_floor": 40}}}`)
+	if err != nil || c.ScenarioMaxListed != 20 || c.ScenarioMaxStates != 500 || c.Targets.For("path") != 70 || c.Targets.For("branch") != 50 ||
+		len(c.MainForce) != 1 || c.MainForce[0].Kind != "branch" || c.CI.Tolerance != 2 || c.CI.MainFloor == nil || *c.CI.MainFloor != 40 {
+		t.Errorf("M9 keys: %+v %v", c, err)
+	}
+	if c, err = read(`{"classification": {"enabled": true}}`); err != nil || c.Targets.For("scenario") != DefaultTarget {
+		t.Errorf("default target: %+v %v", c, err)
+	}
 	for _, bad := range []string{
+		`{"classification": {"enabled": true, "scenarios": {"max_listed": 0}}}`,
+		`{"classification": {"enabled": true, "scenarios": {"max_states": 3}}}`,
+		`{"classification": {"enabled": true, "targets": {"default": 120}}}`,
+		`{"classification": {"enabled": true, "targets": {"loop": 50}}}`,
+		`{"classification": {"enabled": true, "main_number": {"force": [{"workflow": "a.B", "kind": "branch"}]}}}`,
+		`{"classification": {"enabled": true, "main_number": {"force": [{"workflow": "a.B", "kind": "all", "reason": "x"}]}}}`,
+		`{"classification": {"enabled": true, "ci": {"tolerance": -1}}}`,
 		`{"classification": {"enabled": true, "stages": {"max_paths": 1}}}`,
 		`{"classification": {"enabled": true, "engine": {"max_contexts": 0}}}`,
 		`{"classification": {"enabled": true, "ci": {"stage_floor": 101}}}`,

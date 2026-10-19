@@ -51,58 +51,24 @@ func ModuleRoot(path string) string {
 // Folders named vendor, testdata, node_modules, .git and .pathkit, symbolic
 // links to folders, and files that cannot be read or parsed are skipped.
 func CustomConverterUse(root string) []string {
-	var hits []string
 	methods := map[string]map[string]bool{} // folder + "\x00" + receiver type -> method names that look like a converter's
 	firstAt := map[string]string{}          // the same key -> where the first of those methods is
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if len(hits) >= 5 {
-			return filepath.SkipAll
-		}
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case "vendor", ".git", ".pathkit", "node_modules", "testdata":
-				if path != root {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, path, data, 0)
-		if err != nil {
-			return nil
-		}
-		lines := strings.Split(string(data), "\n")
-		rel, _ := filepath.Rel(root, path)
-		where := func(p token.Pos) string {
-			n := fset.Position(p).Line
-			return fmt.Sprintf("%s:%d: %s", filepath.ToSlash(rel), n, strings.TrimSpace(lines[n-1]))
-		}
+	hits := scanGoFiles(root, func(path string, f *ast.File, where func(token.Pos) string, hit func(string)) {
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.KeyValueExpr:
 				if id, ok := x.Key.(*ast.Ident); ok && id.Name == "DataConverter" {
-					hits = append(hits, where(x.Pos()))
+					hit(where(x.Pos()))
 				}
 			case *ast.AssignStmt:
 				for _, l := range x.Lhs {
 					if sel, ok := l.(*ast.SelectorExpr); ok && sel.Sel.Name == "DataConverter" {
-						hits = append(hits, where(x.Pos()))
+						hit(where(x.Pos()))
 					}
 				}
 			case *ast.SelectorExpr:
 				if x.Sel.Name == "NewCodecDataConverter" || x.Sel.Name == "NewCompositeDataConverter" {
-					hits = append(hits, where(x.Pos()))
+					hit(where(x.Pos()))
 				}
 			case *ast.FuncDecl:
 				if x.Recv == nil || len(x.Recv.List) == 0 {
@@ -121,7 +87,6 @@ func CustomConverterUse(root string) []string {
 			}
 			return true
 		})
-		return nil
 	})
 	var keys []string
 	for k := range methods {
@@ -174,6 +139,37 @@ func recvName(e ast.Expr) string {
 // before the SDK encodes them, and may keep or change them. The same folders
 // are skipped as in CustomConverterUse.
 func CustomInterceptorUse(root string) []string {
+	return scanGoFiles(root, func(path string, f *ast.File, where func(token.Pos) string, hit func(string)) {
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.KeyValueExpr:
+				if id, ok := x.Key.(*ast.Ident); ok && id.Name == "Interceptors" {
+					hit(where(x.Pos()))
+				}
+			case *ast.AssignStmt:
+				for _, l := range x.Lhs {
+					if sel, ok := l.(*ast.SelectorExpr); ok && sel.Sel.Name == "Interceptors" {
+						hit(where(x.Pos()))
+					}
+				}
+			case *ast.Field:
+				if len(x.Names) == 0 && isInterceptorBase(x.Type) { // an embedded field
+					hit(where(x.Pos()))
+				}
+			case *ast.FuncDecl:
+				if x.Recv != nil && x.Name.Name == "InterceptWorkflow" {
+					hit(where(x.Pos()))
+				}
+			}
+			return true
+		})
+	})
+}
+
+// scanGoFiles walks the Go files below root (the folders CustomConverterUse
+// lists are skipped), parses each and lets visit add hits; where writes a place
+// as "file:line: the line". It stops after five hits and returns at most five.
+func scanGoFiles(root string, visit func(path string, f *ast.File, where func(token.Pos) string, hit func(string))) []string {
 	var hits []string
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if len(hits) >= 5 {
@@ -209,29 +205,7 @@ func CustomInterceptorUse(root string) []string {
 			n := fset.Position(p).Line
 			return fmt.Sprintf("%s:%d: %s", filepath.ToSlash(rel), n, strings.TrimSpace(lines[n-1]))
 		}
-		ast.Inspect(f, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.KeyValueExpr:
-				if id, ok := x.Key.(*ast.Ident); ok && id.Name == "Interceptors" {
-					hits = append(hits, where(x.Pos()))
-				}
-			case *ast.AssignStmt:
-				for _, l := range x.Lhs {
-					if sel, ok := l.(*ast.SelectorExpr); ok && sel.Sel.Name == "Interceptors" {
-						hits = append(hits, where(x.Pos()))
-					}
-				}
-			case *ast.Field:
-				if len(x.Names) == 0 && isInterceptorBase(x.Type) { // an embedded field
-					hits = append(hits, where(x.Pos()))
-				}
-			case *ast.FuncDecl:
-				if x.Recv != nil && x.Name.Name == "InterceptWorkflow" {
-					hits = append(hits, where(x.Pos()))
-				}
-			}
-			return true
-		})
+		visit(path, f, where, func(h string) { hits = append(hits, h) })
 		return nil
 	})
 	if len(hits) > 5 {

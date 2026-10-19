@@ -21,6 +21,10 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 | `pathkit explain <stableId> [folder]` | Says why one path got its bucket and label, and who decided (section 5). |
 | `pathkit rules check [folder]` | Shows how many paths each rule, override, comment and explained trace hits, and refuses the ones a test disproves (section 5). |
 | `pathkit suggest [folder]` | Drafts config rules for the needs-review paths; every draft has the reason `TODO` (section 5). |
+| `pathkit scaffold <item-id> \| --top N` | Writes a Go test skeleton for a test worth writing first (section 10). |
+| `pathkit init` | Writes a starting `.pathkitrc.json` (only if there is none) and lists the modules and workflows it finds (section 10). |
+| `pathkit doctor` | Checks the setup and the traces in plain words; exit `1` when it finds problems (section 10). |
+| `pathkit diff --base <git-ref>` | What a change adds to the workflows, and whether tests cover it (section 10). |
 | `pathkit --version` | Prints the installed version. |
 
 ## 1. Requirements
@@ -529,6 +533,46 @@ Helper functions are counted once, not inside every path: a call of one is a sin
 - **A workflow under the cap keeps every path id.** A workflow that was over the cap and calls helpers changes (it is a different, much smaller map). Traces recorded before the change still count: PathKit reads them against the old shape and converts the steps (only while the workflow code has not changed since).
 - **What it costs in precision:** claims made inside a summarized helper use no knowledge of what the caller passed in, so fewer paths are shown as impossible there. They are never wrongly shown as impossible.
 
+### Scenarios, the main number and the project headline
+
+A workflow can have thousands of paths that all do the same thing as seen from outside: two `if`s that only compute something add paths, but not one extra activity call. PathKit therefore also groups the paths by **what the workflow does outside itself**, and calls each different group a **scenario**.
+
+- **What counts as "outside":** an activity, local activity, child workflow or Nexus operation (with its outcome: success, or failure, and the kind of failure when the code tells kinds apart), a timer, a signal sent or received, a side effect, a search attribute or memo update, a version check (old or new side), continue-as-new, the cancel of a context, and how the workflow ends. Logging, metrics, local computation and query handlers do not count. A loop counts as "0 rounds" or "1 or more rounds, with its body once".
+- **Two paths with the same such steps are one scenario.** A scenario id is `sc:` and ten letters and digits made from those steps, so it stays the same when unrelated code moves. (Two workflows that make the same steps have the same id; the id is only unique inside one workflow.) Each path in the report says `same behaviour as path 3` when it only repeats what path 3 does; this is a label, no number changes because of it.
+- **A path through a place PathKit could not read** (the "could not fully read" panel) is never merged with another path: its scenario is its own.
+- **How they are counted.** Under the path cap PathKit groups the listed paths. Over the cap it builds a small machine from the shape of the map and counts the scenarios exactly without listing the paths. If the workflow has places it could not read, or the machine gets too big (`classification.scenarios.max_states`, default 100000), the scenarios are `not measured` with the reason. Over the cap, scenarios no listed path makes are counted as testable (PathKit does not know better), so the number can only be pessimistic.
+- **Bucket of a scenario:** testable if any of its paths is; else needs-review if any is; else needs-special-test if any is; else cannot-be-tested. A scenario a test ran is always testable.
+
+**The main number of a workflow** is the one number it is judged by, chosen by these rules, in order:
+
+| Rule | Main number | Because |
+| --- | --- | --- |
+| 1. An event-loop workflow: an unbounded `for` whose body has a Selector or a signal receive | **handler coverage**: the handlers and Selector exits a test used, and the branches inside handlers (an update validator counts accept and reject) | each trip round the loop handles one event; paths mean little |
+| 2. Under the path cap | **path coverage** (testable) | every path is listed |
+| 3. Scenarios counted, and at most `classification.scenarios.max_listed` (default 500) | **scenario coverage** (testable) | too many paths, few different behaviours |
+| 4. Otherwise | **branch coverage** (every decision taken both ways, over the whole map) | nothing finer can be counted |
+
+Every workflow prints its main number first, with one plain sentence on why that one. `classification.main_number.force` chooses another for one workflow (a reason is required):
+
+```json
+{"classification": {"main_number": {"force": [{"workflow": "orders.OrderWorkflow", "kind": "branch", "reason": "we care about every decision here"}]}}}
+```
+
+**The coverage ladder**, from finest to coarsest: paths, scenarios, decision pairs, branches. Branch coverage is the weakest check and always exists; paths the strongest and only possible for small workflows. **Decision pairs** count an outcome of one decision followed by an outcome of the next decision (not a main number; JSON `decisionPairs`, one line in the headline).
+
+**The headline** is the first thing in the text report, `--summary` and the HTML page:
+
+```
+3 of 8 workflows meet their target (main number ≥ 80%)
+Branch coverage (all workflows): 35/50 (70.0%)
+```
+
+`classification.targets` sets the target: `{"default": 80, "path": 90, "scenario": 80, "branch": 60, "handler": 80}` (every key optional). A workflow with nothing to measure is listed ("Not measured, so not counted as meeting their target") and never counted as passing. The earlier headline lines stay below. For a workflow whose main number is not path coverage, `--summary` and the HTML add one line of split advice: the stage with most paths, with its file and lines, as a candidate for a child workflow. Advice only.
+
+JSON: per workflow `mainNumber`, `scenarios` (count, buckets, `list` of up to `max_listed` with `paths` (first ten) and `pathCount`), `handlerCoverage`, `decisionPairs`; per path `scenarioId` and `sameBehaviourAs` (the main path's id); at the top `mainHeadline`.
+
+**The CI gate on the main number.** `report --write-baseline` now also stores each workflow's main number. A later check fails (exit `2`) when a workflow's main number is lower than the baseline's by more than `classification.ci.tolerance` (percent points, default `0`), or has nothing to measure any more. `classification.ci.main_floor` (optional) is the lowest main number any workflow may have. `--allow-lost-tests` lets the drop pass (the usual cause is a lost test). Baselines written before this have no main numbers and are checked as before; if the kind of main number changed, the two are not compared (a warning says so).
+
 ### The "PathKit could not fully read" panel
 
 Every report says what PathKit did not read, so nobody takes the numbers for more than they are. The text and `--summary` show the count and the first 10 entries; the JSON (`unread`) and the HTML page list every one. With nothing to list: `PathKit read everything in scope`. An entry has a file and line, a kind and what PathKit did instead:
@@ -553,6 +597,7 @@ Every report says what PathKit did not read, so nobody takes the numbers for mor
 
 - **`classification.activity_wrappers`**: functions of your company library (or generated code) that run an activity, a child workflow or a Nexus operation for their caller. Each entry is `"example.com/lib/wrap.Run"` or `"(*example.com/lib/wrap.Client).Run"`, or an object with `function`, `kind` (`activity`, `child_workflow`, `nexus`) and `label`. A call of one is a step with the outcomes success and failure, like an activity. A function that is not listed and is not followed shows in the panel with the entry to add.
 - **`classification.direct_returns`**: `"report"` (default) or `"step"`. A function that ends with `return fut.Get(ctx, nil)` (or `workflow.Sleep`, `workflow.Await`) has one path by default, as always, and the panel lists it. `"step"` makes the call a decision with a failure and a success outcome. This changes the stable ids of the paths through such a return, which is why it is not the default.
+  **When to turn on `"step"`:** when many of your workflows end with `return workflow.ExecuteActivity(...).Get(ctx, nil)` or `return workflow.Sleep(...)`, so the panel is full of them and each such workflow has one path that hides both outcomes. Example: with `return fut.Get(ctx, nil)` as the last line, a test that makes the activity fail and a test that makes it succeed both run "the one path"; with `"step"` they are two paths, and you can see that only one was tested. Turn it on in a branch, write the baseline again (the stable ids change), and commit both.
 - **Update handlers and validators**: the code of a handler registered with `workflow.SetUpdateHandler` / `SetUpdateHandlerWithOptions`, and of its validator, is mapped like a small workflow of its own (named `orders.Run.update[add]` and `orders.Run.validator[add]`). A test that sends the update records it. A validator accepts when it returns nil and rejects when it returns an error.
 - **Nexus operations** (`workflow.NewNexusClient(...).ExecuteOperation(...)`) are read like a child workflow: the result is a decision, success or failure.
 - **`classification.loops.model`**: `"one"` (default). `"zero-one-many"` is reserved for a later version; PathKit warns and keeps the one-round model.
@@ -1010,9 +1055,50 @@ Workflow: scope.lowerFlow (added by config)
 | `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). |
 | `out`, `json`, `noColor` | `report` output: write to a file (relative to the config file), print JSON, no colour (section 6). A flag always wins. |
 | `classification` | Marking paths yourself, and switching on the testable/overall block (`enabled`). See "Marking paths as untestable" in section 5. The section's `ci` key is described in "The CI check" in section 5. Newer keys: `helpers.mode` (`inline`, `summarize`, `auto`), `activity_wrappers`, `direct_returns` (`report`, `step`), `loops.model` (`one`; `zero-one-many` is reserved), `ci.capped_basis` (`stage`, `branch`), `stages.max_paths`, `engine.max_contexts`. See "Helpers: copied in, or summarized", "Reading more code shapes" and "Honest numbers on huge workflows". |
+| `classification` (newer keys) | `scenarios.max_listed` (default 500) and `scenarios.max_states` (default 100000); `targets` (`default` 80, and `path`, `scenario`, `branch`, `handler`); `main_number.force` (`workflow`, `kind`, `reason`); `ci.tolerance` and `ci.main_floor` (percent). See "Scenarios, the main number and the project headline" in section 5. |
 | `html` | `report` only: `true` writes `.pathkit/report.html` (from the current folder), a path writes there (relative to the config file), `false` writes none (section 7). `--html` always wins, including `--html=false`. |
 
 Every key is used and covered by a test. (`out`, `json`, `noColor` and `html` in the config are for `report` only; `coverage` and `analyze` use only their own flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
+
+## 10. Where to start: advice, scaffolds and adoption tools
+
+### Tests to write first
+
+The report lists the 10 tests worth writing first (`--summary`, the full text, the HTML page's first section of the missed area, and JSON `testsToWriteFirst`). The units are the missed scenarios (or, where scenarios are not measured, the groups of missed paths) and the handlers no test used. Each is tagged by the riskiest thing it does, riskiest first: **cancel**, **compensation** (cleanup calls after a failure that came after a success), **activity failure** (by kind of error), **continue-as-new**, **timers and timeouts**, **signals and updates** (including an update validator's reject), **plain logic**, **old version branches**. Inside one tag, the ones that cover more paths or branches come first. Each item has the workflow, the place of the first step no test took (`file:line`), a one-line hint ("Make SaveRecord fail with a timeout, then cancel the workflow"), a suggested name (`Test<Workflow>_<ShortScenario>`), what it covers and an id. This only orders and explains; it changes no number.
+
+### `pathkit scaffold`
+
+`pathkit scaffold sc:3fa94c0d17` (an id from the list; `--workflow` picks one when the same id fits several workflows) or `pathkit scaffold --top 3` writes a Go test with `go.temporal.io/sdk/testsuite`: the environment, the workflow registered, `OnActivity` / `OnWorkflow` mocks that return the outcome the scenario needs (a success with zero values; a failure of the needed kind: `NewTimeoutError`, `NewCanceledError`, `NewApplicationError`, or a non-retryable error), delayed signals and a delayed cancel, an input that makes the plain decisions go the way the scenario goes (when PathKit can work it out: a bool, `x == 3`, `s != "a"`, `&&`, `||`, `!`), and the assertions. Everything else is a `// TODO:` line. It is printed to the screen; `--out <folder>` writes `pathkit_scaffold_<workflow>_test.go` into that folder (use the workflow's own package folder so the test compiles) and **never overwrites a file**. The mocks use `github.com/stretchr/testify/mock`, which the Temporal test suite already needs. Methods and activities named by a text cannot be mocked by reference; PathKit writes a TODO for them.
+
+### `pathkit init` and `pathkit doctor`
+
+`pathkit init` writes a starting `.pathkitrc.json` (every package, classification on, scenario list size, a target of 80) only if there is none; if there is one it changes nothing and prints the settings it would add. It lists the modules and workflows it finds.
+
+`pathkit doctor` checks, and says what to do about each problem: you are inside a Go module or workspace; the config is valid (an unknown or misspelled key is named with a "did you mean"); modules and workflows are found; traces exist, are fresh (not older than the source), fit the trace format of this PathKit and fit the maps; no workflow recorded nothing; `.pathkit/` is ignored by git; it also notes functions that could be told to PathKit with `activity_wrappers` and how many places PathKit could not fully read. Exit `0` when healthy, `1` when it found problems.
+
+### The safe runner
+
+`pathkit test --no-network` runs the tests in a network namespace with no network (Linux, through `unshare -rn`). If `unshare` is missing or the system forbids it, PathKit **refuses** with a clear message; it never runs the tests with the network on after you asked for it off. `--skip-file <file>` skips the tests named in a file: one regular expression per line, blank lines and `#` comments ignored; a `-skip` you pass after `--` is joined with it. Plain `pathkit test` is unchanged.
+
+### `pathkit diff`
+
+`pathkit diff --base origin/main` checks the git ref out in a temporary `git worktree` (removed afterwards, also on an error), builds the same maps there, and lists by id what is new, removed or changed: workflows, decisions, scenarios and handlers; for the new decisions and scenarios it says whether the traces of this run cover them. `--markdown` prints text for a pull request comment, `--json` data. `--fail-on-untested-new` exits `2` when a new decision (no exit of it taken by any test) or a new scenario has no test.
+
+### Which test covers what
+
+Every trace now records the name of the Go test that made it (from the test's call stack; blank when several parallel tests make it ambiguous; traces from before show "test name not recorded"). The report has one line, the HTML a table, and JSON `tests`: per test its runs, scenarios and branches, how many only it covers, and the tests that add nothing the others do not cover.
+
+### Exports
+
+`pathkit report --format junit|cobertura|sarif [--output <file>]`: **junit** has one test case per workflow, failing when its main number is below its target; **cobertura** has branch coverage per decision line; **sarif** (2.1.0) has results for the top missed scenarios and the places PathKit could not read. The exit code rules of `report` still apply.
+
+### The trend chart
+
+The HTML page draws a small inline SVG chart of the headline (the share of workflows meeting their target, and branch coverage) over the last report runs kept in `report-history.json`. It needs two runs written by this version; no library, no outside file.
+
+### The nightly check on a public corpus
+
+`.github/workflows/nightly.yml` has a second job: it clones the Temporal Go samples at a pinned commit, runs `analyze`, the tests with the recorder and `report`, and fails when the "could not fully read" panel grows over `.github/corpus/baseline.json` or a path a test ran is not testable. It uses no secret and does not change the main CI workflow.
 
 ## 9. Errors and exit codes
 
@@ -1021,8 +1107,8 @@ Every error starts with `pathkit <command>:` on stderr; a few (a list of paths, 
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `1` | A real error (bad argument, missing file, ...). The message says what. |
-| `2` | The report was produced, but **either** coverage is below `--fail-under` (or the config's `failUnder`), **or** (with classification enabled) the CI baseline check failed: a new untested testable path, a new needs-review path, a path that lost its test, or testable coverage below `classification.ci.fail_under_testable` (see "The CI check" in section 5). The stderr lines say which. Lets CI tell "coverage too low" apart from "PathKit failed". |
+| `1` | A real error (bad argument, missing file, ...). The message says what. `pathkit doctor` also exits `1` when it finds problems. |
+| `2` | (`pathkit diff --fail-on-untested-new`: a new decision or scenario has no test.) The report was produced, but **either** coverage is below `--fail-under` (or the config's `failUnder`), **or** (with classification enabled) the CI baseline check failed: a new untested testable path, a new needs-review path, a path that lost its test, or testable coverage below `classification.ci.fail_under_testable` (see "The CI check" in section 5). The stderr lines say which. Lets CI tell "coverage too low" apart from "PathKit failed". |
 
 | Message | Cause | Fix |
 | --- | --- | --- |

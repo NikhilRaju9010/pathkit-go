@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"github.com/NikhilRaju9010/pathkit-go/internal/advice"
 	"math"
 	"strings"
 
@@ -30,6 +31,8 @@ type ReportOptions struct {
 	// the cap (counts, stages and groups stay); --paths turns it off. The
 	// zero value prints the lists as before.
 	OmitCappedPaths bool
+	// TopTests is the list of tests to write first (advice.TestsToWriteFirst).
+	TopTests []advice.Item
 	// Hints adds "how to cover it" under every testable path no test ran
 	// (--hints).
 	Hints bool
@@ -43,13 +46,23 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 	var b strings.Builder
 	b.WriteString(CapWarning(res))
 	b.WriteString(ZeroPathWarning(res))
+	b.WriteString(MainHeadlineBlock(res)) // after the warnings, which stay first
 	if opt.Summary {
 		width := 0
 		for _, w := range res.Workflows {
 			width = max(width, len(reportName(w)))
 		}
 		for _, w := range res.Workflows {
-			fmt.Fprintf(&b, "%-*s  %s\n", width, reportName(w), workflowStats(w, opt.Color, false))
+			fmt.Fprintf(&b, "%-*s  %s · main number: %s\n", width, reportName(w), workflowStats(w, opt.Color, false), MainShort(w))
+			if w.Main.Kind != coverage.MainPath {
+				// the interesting ones get their reason, and the advice, on lines of their own
+				if w.Main.Why != "" {
+					b.WriteString("  Why this number: " + w.Main.Why + ".\n")
+				}
+				if a := SplitAdvice(w, nil); a != "" {
+					b.WriteString("  " + a + "\n")
+				}
+			}
 			for _, l := range HelperLines(w) {
 				b.WriteString("  " + l + "\n")
 			}
@@ -60,6 +73,9 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 				b.WriteString("\n")
 			}
 			fmt.Fprintf(&b, "%s (%s)\n", reportName(w), w.File)
+			for _, l := range MainBlock(w) {
+				b.WriteString(l + "\n")
+			}
 			fmt.Fprintf(&b, "%s\n", workflowStats(w, opt.Color, true))
 			b.WriteString(StageLines(w))
 			for _, l := range HelperLines(w) {
@@ -81,6 +97,7 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 				if opt.Classification != nil {
 					line += ClassTag(p.Class)
 				}
+				line += SameAs(p, w.Paths)
 				b.WriteString(line + "\n")
 				if opt.Hints && WantsHint(p) {
 					b.WriteString(hintLines(p))
@@ -99,7 +116,14 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 	for _, l := range opt.ExtraLines {
 		b.WriteString(l + "\n")
 	}
-	b.WriteString("\n" + HandlerBlock(res, opt.Summary) + CallOutcomeBlock(res, opt.Summary) + LoopRoundBlock(res, opt.Summary) + UnreadBlock(res, UnreadTop))
+	if block := TestsToWriteFirstBlock(opt.TopTests); block != "" {
+		b.WriteString("\n" + block)
+	}
+	b.WriteString("\n" + HandlerBlock(res, opt.Summary) + CallOutcomeBlock(res, opt.Summary) + LoopRoundBlock(res, opt.Summary))
+	if l := TestsLine(res); l != "" {
+		b.WriteString(l + "\n\n")
+	}
+	b.WriteString(UnreadBlock(res, UnreadTop))
 	b.WriteString("\n" + ExcludedBlock(res.Excluded, opt.ExcludedBy))
 	b.WriteString(TracesLine(res.Counts))
 	return b.String()

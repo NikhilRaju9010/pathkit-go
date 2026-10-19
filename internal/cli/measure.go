@@ -45,6 +45,7 @@ type measureOptions struct {
 type measured struct {
 	sc            *scoped
 	res           coverage.Result
+	workflows     []coverage.Workflow // the workflows measured, with their maps
 	traceDir      string
 	tracePaths    []string // every trace file read (what --clean deletes)
 	threshold     *float64 // nil: no --fail-under and no failUnder in the config
@@ -233,6 +234,12 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		in.Classifier, in.Policy, in.Explained = engine.Classify, engine.Policy(), engine.Explained()
 		in.Listing, in.Plan = engine.Listing, engine.PlanStages
 	}
+	if cfg := sc.cfg; cfg != nil {
+		cl := cfg.Classification
+		in.Scenarios = coverage.ScenarioOptions{MaxListed: cl.ScenarioMaxListed, MaxStates: cl.ScenarioMaxStates}
+		in.MainNumbers = coverage.MainOptions{Targets: cl.Targets, Force: cl.MainForce}
+	}
+	m.workflows = workflows
 	m.res = coverage.Compute(in)
 	if m.res.InternalError != nil {
 		return nil, userError("%v", m.res.InternalError)
@@ -247,6 +254,9 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	if m.ci != nil {
 		for _, w := range m.ci.anchorWarnings {
 			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, w)
+		}
+		for _, c := range m.ci.kindsChanged {
+			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, c)
 		}
 		if lw := m.ci.lostWarnings(m.res); len(lw) > 0 {
 			fmt.Fprintf(stderr, "pathkit %s: warning: %s\n", cmdName, strings.Join(lw, "\n"))
@@ -547,3 +557,7 @@ func unexplainedNotes(res coverage.Result) []string {
 func isEntryFinding(f string) bool {
 	return strings.Contains(f, "stale rule") || strings.Contains(f, "stale entry") || strings.Contains(f, "matches none of the listed paths")
 }
+
+// mainHeadline is the project's headline (workflows meeting their target, and
+// branches), for the trend.
+func (m *measured) mainHeadline() coverage.MainHeadline { return m.res.MainHeadline(m.res.Targets) }

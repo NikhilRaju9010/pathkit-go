@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"github.com/NikhilRaju9010/pathkit-go/internal/advice"
+	"github.com/NikhilRaju9010/pathkit-go/internal/render"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,9 +102,11 @@ func reportHTML(cmd *cobra.Command, m *measured, path string) func() error {
 		}
 		t := now()
 		runs = htmlreport.AddRun(runs, htmlreport.Run{Time: t.UTC(), Paths: m.res.Paths, Covered: m.res.Covered,
-			InScope: len(inScope), Excluded: len(excluded), Scope: htmlreport.Fingerprint(inScope, excluded)})
+			InScope: len(inScope), Excluded: len(excluded), Scope: htmlreport.Fingerprint(inScope, excluded),
+			MainMet: m.mainHeadline().Met, MainTotal: m.mainHeadline().Total, BranchCovered: m.mainHeadline().BranchCovered, BranchTotal: m.mainHeadline().BranchTotal})
 		page, err := htmlreport.Report(htmlreport.ReportInput{
 			Header: header(t, m.sc), Result: m.res, Threshold: m.threshold, ExcludedBy: m.excludedBy, Trend: runs, Classification: m.classView(), CustomLabels: m.customLabels, Assumptions: m.assumptions, Panel: m.panel,
+			TopTests: advice.TestsToWriteFirst(m.res, load.DisplayPath, render.TopTests),
 		})
 		if err != nil {
 			return err

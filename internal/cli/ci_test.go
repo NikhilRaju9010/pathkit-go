@@ -315,7 +315,8 @@ func TestCILostTest(t *testing.T) {
 	}
 	stdout, stderr, code := run(t, "report", "--traces", traces, "--config", cfg, "--baseline", base)
 	want := "pathkit report: 1 path had a test in the baseline " + base + " and has none now:\n" +
-		"  orders.OrderWorkflow path 2 (" + ids[2] + ", now testable): Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)\n"
+		"  orders.OrderWorkflow path 2 (" + ids[2] + ", now testable): Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)\n" +
+		"pathkit report: orders.OrderWorkflow: main number (path coverage) fell from 66.7% (2/3) in the baseline " + base + " to 33.3% (1/3)\n"
 	if code != ExitBelowThreshold || stderr != want || !strings.Contains(stdout, "1/3 paths") {
 		t.Fatalf("lost: code=%d stderr=%q\nwant %q", code, stderr, want)
 	}
@@ -339,5 +340,58 @@ func TestCILostTest(t *testing.T) {
 	ci = decode(t, out)["ci"].(map[string]any)
 	if ci["passed"] != true || len(ci["lostTests"].([]any)) != 1 || ci["lostTestsAllowed"] != true {
 		t.Errorf("allowed json: %v", ci)
+	}
+}
+
+// The main number is part of the baseline, and the check fails when a
+// workflow's main number is below classification.ci.main_floor or has fallen
+// below the baseline's by more than classification.ci.tolerance. An old
+// baseline (no main numbers) is checked as before.
+func TestCIMainNumber(t *testing.T) {
+	traces := ordersTraces(t) // 2 of 3 paths: path coverage 66.7%
+	inPilot(t)
+	base := filepath.Join(t.TempDir(), "b.json")
+	cfg := ciConfig(t, `{"enabled": true}`)
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", cfg, "--write-baseline", "--baseline", base); code != ExitOK {
+		t.Fatalf("write: %q", stderr)
+	}
+	raw, _ := os.ReadFile(base)
+	if !strings.Contains(string(raw), `"mainNumber"`) || !strings.Contains(string(raw), `"kind": "path"`) {
+		t.Fatalf("the baseline has no main number:\n%s", raw)
+	}
+
+	// a floor above the workflow's main number
+	floorCfg := ciConfig(t, `{"enabled": true, "ci": {"main_floor": 80}}`)
+	_, stderr, code := run(t, "report", "--traces", traces, "--config", floorCfg, "--baseline", base)
+	if code != ExitBelowThreshold || !strings.Contains(stderr, "orders.OrderWorkflow: main number (path coverage 2/3) 66.7% is below classification.ci.main_floor 80%") {
+		t.Errorf("floor: code=%d stderr=%q", code, stderr)
+	}
+	// a floor the workflow meets
+	okCfg := ciConfig(t, `{"enabled": true, "ci": {"main_floor": 60}}`)
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", okCfg, "--baseline", base); code != ExitOK {
+		t.Errorf("floor met: code=%d stderr=%q", code, stderr)
+	}
+
+	// an old baseline, without main numbers, is read and checked as before
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range doc["workflows"].([]any) {
+		delete(w.(map[string]any), "mainNumber")
+	}
+	old, _ := json.Marshal(doc)
+	oldFile := filepath.Join(t.TempDir(), "old.json")
+	if err := os.WriteFile(oldFile, old, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", cfg, "--baseline", oldFile); code != ExitOK {
+		t.Errorf("old baseline: code=%d stderr=%q", code, stderr)
+	}
+
+	// a bad value is refused
+	bad := ciConfig(t, `{"enabled": true, "ci": {"main_floor": 120}}`)
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", bad); code != ExitError || !strings.Contains(stderr, "main_floor") {
+		t.Errorf("bad floor: code=%d stderr=%q", code, stderr)
 	}
 }

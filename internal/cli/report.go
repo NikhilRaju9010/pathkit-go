@@ -3,6 +3,8 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/NikhilRaju9010/pathkit-go/internal/advice"
+	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,12 +19,14 @@ type reportOptions struct {
 	measure measureOptions
 	out     string
 	json    bool
-	summary bool
-	noColor bool
-	clean   bool
-	html    string
-	hints   bool
-	paths   bool
+	// format and output write the report in another format (junit, cobertura, sarif).
+	format, output string
+	summary        bool
+	noColor        bool
+	clean          bool
+	html           string
+	hints          bool
+	paths          bool
 	// unmatched adds the unmatched-trace report (--unmatched).
 	unmatched bool
 	// groups adds the missed paths grouped by first untested step (--groups).
@@ -67,6 +71,8 @@ writes that file.`,
 	f.StringVar(&opt.out, "out", "", "also write the report to this `file`, always as plain text (default: the config's \"out\")")
 	f.StringVar(&opt.measure.coverageBasis, "coverage-basis", "", "which coverage --fail-under checks: `basis`: testable or overall (default: overall; testable when the config enables classification)")
 	f.StringVar(&opt.measure.failUnder, "fail-under", "", "exit 2 when path coverage is below this `percent` (0-100)")
+	f.StringVar(&opt.format, "format", "", "write the report in another format: `junit` (one test case per workflow), `cobertura` (branch coverage per decision line) or `sarif` (the top missed scenarios and the places PathKit could not read)")
+	f.StringVar(&opt.output, "output", "", "write the --format report to this `file` instead of printing it")
 	f.BoolVar(&opt.json, "json", false, "print JSON instead of text (default: the config's \"json\")")
 	f.BoolVar(&opt.summary, "summary", false, "one line per workflow instead of every path")
 	f.BoolVar(&opt.hints, "hints", false, "under every testable path no test ran, say what a test must make happen to run it")
@@ -91,6 +97,25 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 	m, err := measure(cmd, "report", target, opt.measure)
 	if err != nil {
 		return err
+	}
+
+	if opt.format != "" || opt.output != "" {
+		if opt.format == "" {
+			return userError("--output needs --format %s", strings.Join(exportFormats, ", "))
+		}
+		data, err := exportFor(opt.format, m)
+		if err != nil {
+			return err
+		}
+		printed := string(data)
+		if opt.output != "" {
+			if err := os.WriteFile(opt.output, data, 0o644); err != nil {
+				return userError("could not write %s: %v", opt.output, err)
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "pathkit report: wrote %s (%s)\n", opt.output, opt.format)
+			printed = ""
+		}
+		return finish(cmd, "report", m, printed, string(data), "", opt.clean, nil)
 	}
 
 	// A flag always beats the config (including --json=false).
@@ -147,7 +172,7 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 	if opt.summary && opt.hints {
 		fmt.Fprintln(cmd.ErrOrStderr(), "pathkit report: --hints ignored because --summary was passed (it lists no paths).")
 	}
-	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.overallThreshold(), ExcludedBy: by, Classification: m.classView(), Hints: opt.hints, OmitCappedPaths: !opt.paths, ExtraLines: m.ci.floorLines(m.res)}
+	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.overallThreshold(), ExcludedBy: by, Classification: m.classView(), Hints: opt.hints, OmitCappedPaths: !opt.paths, ExtraLines: m.ci.floorLines(m.res), TopTests: advice.TestsToWriteFirst(m.res, load.DisplayPath, render.TopTests)}
 	plain := render.ReportText(m.res, ro)
 	printed := plain
 	if render.ColorEnabled(noColor, os.Getenv("NO_COLOR"), isTerminal(cmd.OutOrStdout())) {
@@ -220,6 +245,11 @@ type (
 		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
 		// The three headline numbers; absent unless a workflow is over the cap.
 		Headline *jsonHeadline `json:"headline,omitempty"`
+		// Added with main numbers: how many workflows meet their target.
+		MainHeadline *jsonMainHeadline `json:"mainHeadline,omitempty"`
+		// What each Go test covered (test names are in the traces).
+		Tests             []jsonTest   `json:"tests,omitempty"`
+		TestsToWriteFirst []jsonAdvice `json:"testsToWriteFirst,omitempty"`
 		// Paths left out of the lists as impossible; absent unless some were.
 		LeftOutImpossible *jsonLeftOut      `json:"leftOutImpossible,omitempty"`
 		Unread            []jsonUnread      `json:"unread"`
@@ -265,7 +295,7 @@ func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisIn
 	c := coverageJSON(res, threshold, bi)
 	out := jsonReport{SchemaVersion: c.SchemaVersion, Tool: c.Tool, Workflows: []jsonReportWorkflow{}, Excluded: c.Excluded,
 		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder,
-		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs, Headline: c.Headline, LeftOutImpossible: c.LeftOutImpossible, Unread: c.Unread, Handlers: c.Handlers, CallOutcomes: c.CallOutcomes, LoopRounds: c.LoopRounds}
+		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs, Headline: c.Headline, MainHeadline: c.MainHeadline, Tests: c.Tests, TestsToWriteFirst: c.TestsToWriteFirst, LeftOutImpossible: c.LeftOutImpossible, Unread: c.Unread, Handlers: c.Handlers, CallOutcomes: c.CallOutcomes, LoopRounds: c.LoopRounds}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
 		// Forward slashes on every system, so the JSON is the same everywhere;

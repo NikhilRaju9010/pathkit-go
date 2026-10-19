@@ -19,7 +19,9 @@ import (
 //	    a added by config, p priority, r rows
 //	a   the detector audit rows
 //
-// A row is [number, stableId, status, bucket, label, by, reason, steps]:
+// A row is [number, stableId, status, bucket, label, by, reason, steps] and, when
+// the path makes the same steps outside the workflow as another path of its
+// scenario, one more number: the other path's number:
 // status 0 missed, 1 covered, 2 covered by a stale trace; bucket, label, by
 // and reason are indexes into s (-1 for none); steps are indexes into s of
 // the path text cut after every "--> " (joined again with "--> ").
@@ -114,7 +116,11 @@ func (d *pageData) addWorkflow(w coverage.WorkflowResult, classified bool) {
 			by = d.str(decidedBy(p.Class))
 			ex = d.str(p.Class.Explanation)
 		}
-		wf.R = append(wf.R, []any{p.Number, p.StableID, status, b, l, by, ex, d.steps(render.PathText(p.Path))})
+		row := []any{p.Number, p.StableID, status, b, l, by, ex, d.steps(render.PathText(p.Path))}
+		if n := render.SameAsNumber(p, w.Paths); n > 0 {
+			row = append(row, n) // the number of the main path of the scenario
+		}
+		wf.R = append(wf.R, row)
 	}
 	if render.ShowStages(w) {
 		wf.X = w.Exact.String()

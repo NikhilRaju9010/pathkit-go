@@ -43,8 +43,14 @@
 {{- if .LoopRounds}}
 <a href="#loop-rounds">Loop rounds ({{len .LoopRounds}})</a>
 {{- end}}
+{{- if .Tests}}
+<a href="#tests">Tests ({{len .Tests}})</a>
+{{- end}}
 {{- if .Handlers}}
 <a href="#handlers">Handlers ({{len .Handlers}})</a>
+{{- end}}
+{{- if .Advice}}
+<a href="#write-first">Tests to write first ({{len .Advice}})</a>
 {{- end}}
 {{- if .Groups}}
 <a href="#groups">Missed paths ({{.GroupsTotal}} groups)</a>
@@ -68,6 +74,22 @@
 
 <section id="summary" aria-labelledby="h-summary">
 <h2 id="h-summary">Summary</h2>
+{{- range .MainHeadline}}
+<p class="total headline main-headline">{{.}}</p>
+{{- end}}
+{{- if .MainRows}}
+<div class="tablebox">
+<table class="over main-numbers">
+<caption>The main number of each workflow: the one number it is judged by</caption>
+<thead><tr><th scope="col">Workflow</th><th scope="col">Main number</th><th scope="col">Target</th><th scope="col">Why this number</th></tr></thead>
+<tbody>
+{{- range .MainRows}}
+<tr data-main-met="{{.Met}}"><th scope="row">{{.Name}}</th><td>{{.Number}}{{if .Measured}}{{if .Met}} · met{{else}} · not met{{end}}{{end}}</td><td>{{.Target}}</td><td>{{.Why}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- end}}
 {{- if .Measured}}
 {{- if .HeadlineLines}}
 {{- range .HeadlineLines}}
@@ -221,6 +243,32 @@
 </section>
 {{- end}}
 
+{{- if .Tests}}
+<section id="tests" aria-labelledby="h-tests" data-tests="{{len .Tests}}">
+<h2 id="h-tests">Which test covers what</h2>
+<p class="note">{{.TestsLine}} A "unique" scenario or branch is covered by this test and no other.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">What each Go test covered</caption>
+<thead><tr><th scope="col">Test</th><th scope="col">Runs</th><th scope="col">Scenarios</th><th scope="col">Unique scenarios</th><th scope="col">Branches</th><th scope="col">Unique branches</th><th scope="col">Workflows</th></tr></thead>
+<tbody>
+{{- range .Tests}}
+<tr data-adds-nothing="{{.AddsNothing}}">
+<td data-label="Test"><code>{{.Name}}</code>{{if .AddsNothing}} <strong>adds nothing new</strong>{{end}}</td>
+<td data-label="Runs">{{.Traces}}</td>
+<td data-label="Scenarios">{{.Scenarios}}</td>
+<td data-label="Unique scenarios">{{.UniqueScenarios}}</td>
+<td data-label="Branches">{{.Branches}}</td>
+<td data-label="Unique branches">{{.UniqueBranches}}</td>
+<td data-label="Workflows">{{.Workflows}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
 {{- if .Handlers}}
 <section id="handlers" aria-labelledby="h-handlers" data-handlers="{{len .Handlers}}">
 <h2 id="h-handlers">Handlers</h2>
@@ -238,6 +286,32 @@
 <td data-label="Registered at" class="file">{{.Where}}</td>
 <td data-label="Exercised">{{.Exercised}}</td>
 <td data-label="Branches taken">{{.Branches}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
+{{- if .Advice}}
+<section id="write-first" aria-labelledby="h-write-first" data-advice="{{len .Advice}}">
+<h2 id="h-write-first">Tests to write first</h2>
+<p class="note">The riskiest missed scenarios, riskiest first: cancel, then compensation, activity failure, continue-as-new, timers and timeouts, signals and updates, plain logic, old version branches. This only orders the list; it changes no number.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Tests worth writing first</caption>
+<thead><tr><th scope="col">#</th><th scope="col">Risk</th><th scope="col">Workflow</th><th scope="col">Where</th><th scope="col">What the test must do</th><th scope="col">Suggested test</th><th scope="col">Covers</th></tr></thead>
+<tbody>
+{{- range .Advice}}
+<tr data-advice-tag="{{.Tag}}">
+<td data-label="#">{{.Rank}}</td>
+<td data-label="Risk">{{.Tag}}</td>
+<td data-label="Workflow">{{.Workflow}}</td>
+<td data-label="Where" class="file">{{.Where}}</td>
+<td data-label="What the test must do">{{.Hint}}</td>
+<td data-label="Suggested test"><code>{{.Name}}</code><br><span class="file">id {{.ID}}</span></td>
+<td data-label="Covers">{{.Covers}}</td>
 </tr>
 {{- end}}
 </tbody>
@@ -284,6 +358,9 @@
 <summary><h3>{{$w.Name}}</h3>{{if $w.AddedByConfig}}<span class="added">added by config</span>{{end}}{{if $w.Priority}}<span class="badge prio-{{$w.Priority}}">{{$w.Priority}}</span>{{end}}{{if $.Measured}}<span class="bar-mini" aria-hidden="true"><i style="width:{{printf "%.1f" $w.Width}}%"></i></span><span>{{$w.Covered}} of {{$w.Total}} covered</span>{{else}}<span>{{$w.Total}} paths</span>{{end}}<span class="match" id="match-{{$i}}"></span></summary>
 <div class="wbody">
 <p class="file">{{$w.File}}</p>
+{{- range $w.MainLines}}
+<p class="main-line">{{.}}</p>
+{{- end}}
 <p class="stats">{{if $.Measured}}{{$w.Stats}}{{else}}{{$w.TotalPathsLine}}{{end}}{{if $w.Truncated}} <span class="truncated">truncated</span>{{end}}</p>
 {{- if $w.Stages}}
 <div class="stages" data-stages="{{$i}}">
@@ -344,6 +421,20 @@
 </div>
 <div class="trend">
 <h3>Trend (last {{len .Trend}} report {{if eq (len .Trend) 1}}run{{else}}runs{{end}})</h3>
+{{- with .TrendChart}}
+<svg class="trend-chart" viewBox="0 0 {{.W}} {{.H}}" width="{{.W}}" height="{{.H}}" role="img" aria-labelledby="trend-chart-title trend-chart-desc">
+<title id="trend-chart-title">Headline trend</title>
+<desc id="trend-chart-desc">{{.Desc}}</desc>
+{{- range .Grid}}
+<line class="grid" x1="{{.X1}}" x2="{{.X2}}" y1="{{.Y}}" y2="{{.Y}}"/><text class="axis" x="{{.TextX}}" y="{{.TextY}}" text-anchor="end">{{.Label}}</text>
+{{- end}}
+{{- range $l := .Lines}}
+<polyline class="line {{$l.Class}}" fill="none" points="{{$l.Points}}"/>
+{{- range $l.Dots}}<circle class="dot {{$l.Class}}" cx="{{.X}}" cy="{{.Y}}" r="3"><title>{{.Tip}}</title></circle>{{end}}
+{{- end}}
+</svg>
+<p class="note">Green: workflows meeting their target. Blue: branch coverage.</p>
+{{- end}}
 <ol>
 {{- range .Trend}}
 <li data-trend-covered="{{.Covered}}" data-trend-paths="{{.Paths}}">{{.Time}} · {{.Covered}}/{{.Paths}} · {{.Pct}} <meter min="0" max="100" value="{{.Percent}}">{{.Pct}}</meter>{{with .ScopeChanged}} <span class="scope-changed">{{.}}</span>{{end}}</li>

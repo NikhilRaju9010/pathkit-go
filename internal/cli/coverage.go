@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"github.com/NikhilRaju9010/pathkit-go/internal/advice"
+	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"math"
 	"path/filepath"
 	"sort"
@@ -146,6 +148,90 @@ type (
 		Assumptions []string `json:"assumptions,omitempty"`
 		// With --hints only, on testable paths no test ran.
 		HowToCover []string `json:"howToCover,omitempty"`
+		// Added with scenarios: the scenario the path belongs to, and (for a
+		// path that is not its scenario's main path) the id of the main path.
+		ScenarioID      string `json:"scenarioId,omitempty"`
+		SameBehaviourAs string `json:"sameBehaviourAs,omitempty"`
+	}
+	jsonMain struct {
+		Kind    string  `json:"kind"`
+		Covered int     `json:"covered"`
+		Total   int     `json:"total"`
+		Percent float64 `json:"percent"`
+		// Measured is false when there is nothing to measure; the workflow is
+		// then not counted as meeting its target.
+		Measured bool    `json:"measured"`
+		Target   float64 `json:"target"`
+		Met      bool    `json:"met"`
+		Why      string  `json:"why"`
+		Forced   string  `json:"forcedReason,omitempty"`
+		// SplitAdvice names the biggest stage as a candidate child workflow; absent
+		// when the main number is path coverage.
+		SplitAdvice string `json:"splitAdvice,omitempty"`
+	}
+	jsonScenario struct {
+		ID      string   `json:"id"`
+		Steps   []string `json:"steps"`
+		Bucket  string   `json:"bucket"`
+		Label   *string  `json:"label"`
+		Covered bool     `json:"covered"`
+		Traces  int      `json:"traces"`
+		// Paths are the numbers of the listed paths that make the scenario; the
+		// first is its main path.
+		Paths []int `json:"paths"`
+		// PathCount is how many listed paths make it (paths holds the first ten).
+		PathCount int `json:"pathCount"`
+	}
+	jsonScenarios struct {
+		Measured bool   `json:"measured"`
+		Why      string `json:"why,omitempty"`
+		// Count is exact, a decimal string.
+		Count          string         `json:"count"`
+		Covered        int            `json:"covered"`
+		Testable       int            `json:"testable"`
+		NeedsReview    int            `json:"needsReview"`
+		NeedsSpecial   int            `json:"needsSpecialTest"`
+		CannotBeTested int            `json:"cannotBeTested"`
+		Unchecked      string         `json:"unchecked,omitempty"`
+		FromPaths      bool           `json:"fromListedPaths"`
+		Truncated      bool           `json:"truncated"`
+		List           []jsonScenario `json:"list,omitempty"`
+	}
+	jsonAdvice struct {
+		Rank       int    `json:"rank"`
+		ID         string `json:"id"`
+		Workflow   string `json:"workflow"`
+		Tag        string `json:"tag"`
+		File       string `json:"file"`
+		Line       int    `json:"line"`
+		Hint       string `json:"hint"`
+		TestName   string `json:"testName"`
+		Covers     string `json:"covers"`
+		Paths      int    `json:"paths"`
+		Branches   int    `json:"branches"`
+		PathNumber int    `json:"pathNumber,omitempty"`
+	}
+	jsonTest struct {
+		Name            string   `json:"name"`
+		Traces          int      `json:"traces"`
+		Workflows       []string `json:"workflows"`
+		Scenarios       int      `json:"scenarios"`
+		Branches        int      `json:"branches"`
+		UniqueScenarios int      `json:"uniqueScenarios"`
+		UniqueBranches  int      `json:"uniqueBranches"`
+		AddsNothing     bool     `json:"addsNothingNew"`
+	}
+	jsonHandlerCoverage struct {
+		Covered     int `json:"covered"`
+		Total       int `json:"total"`
+		NotRecorded int `json:"notRecorded,omitempty"`
+	}
+	jsonMainHeadline struct {
+		Met         int       `json:"workflowsMeetingTarget"`
+		Total       int       `json:"workflows"`
+		Target      float64   `json:"target"`
+		NotMeasured []string  `json:"notMeasured,omitempty"`
+		Branches    jsonCount `json:"branches"`
 	}
 	jsonProofStep struct {
 		Step int    `json:"step"` // 1-based step on the path; 0 for the closing sentence
@@ -205,6 +291,19 @@ type (
 		// list reached, not every impossible part of the map.
 		PrunedScope string     `json:"prunedScope,omitempty"`
 		BranchesAll *jsonCount `json:"branchesAll,omitempty"`
+		// Added with scenarios and main numbers.
+		MainNumber      *jsonMain            `json:"mainNumber,omitempty"`
+		Scenarios       *jsonScenarios       `json:"scenarios,omitempty"`
+		HandlerCoverage *jsonHandlerCoverage `json:"handlerCoverage,omitempty"`
+		// Decision pairs: an outcome of one decision followed by an outcome of the
+		// next. Never the main number.
+		DecisionPairs *jsonPairs `json:"decisionPairs,omitempty"`
+	}
+	jsonPairs struct {
+		jsonCount
+		// Exact is false for a workflow over the path cap: every pair on the map
+		// is counted as possible.
+		Exact bool `json:"exact"`
 	}
 	jsonStage struct {
 		Index          int       `json:"index"`
@@ -317,6 +416,14 @@ type (
 		// and 2+ rounds can happen and which a test ran; absent when no
 		// workflow has a loop.
 		LoopRounds []jsonLoopRounds `json:"loopRounds,omitempty"`
+		// Added with main numbers: how many workflows meet their target.
+		MainHeadline *jsonMainHeadline `json:"mainHeadline,omitempty"`
+		// Added with test names: what each Go test covered; absent when no trace
+		// was counted.
+		Tests []jsonTest `json:"tests,omitempty"`
+		// Added with the advice: the tests worth writing first, riskiest first;
+		// absent when there is nothing to write.
+		TestsToWriteFirst []jsonAdvice `json:"testsToWriteFirst,omitempty"`
 		// Added with the CI check; absent when it is off.
 		CI *jsonCI `json:"ci,omitempty"`
 		// With --unmatched only.
@@ -489,6 +596,16 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 		out.Headline = &jsonHeadline{PathCoverage: count1r(h.PathCovered, h.PathTotal, strconv.Itoa(h.PathWorkflows)+" workflows under the cap"), PathWorkflows: h.PathWorkflows, WorkflowsTooBigForPathCoverage: h.TooBig,
 			StageCoverage: count1r(h.StageCovered, h.StageTotal, "no stage paths to measure"), StagesTooBigToList: h.StagesTooBig, BranchCoverage: count1r(h.BranchCovered, h.BranchTotal, "no branches")}
 	}
+	if len(res.Workflows) > 0 {
+		h := res.MainHeadline(res.Targets)
+		out.MainHeadline = &jsonMainHeadline{Met: h.Met, Total: h.Total, Target: h.Target, NotMeasured: h.NotMeasured, Branches: count1(h.BranchCovered, h.BranchTotal)}
+	}
+	for _, t := range res.Tests {
+		out.Tests = append(out.Tests, jsonTest{Name: t.Name, Traces: t.Traces, Workflows: t.Workflows, Scenarios: t.Scenarios, Branches: t.Branches, UniqueScenarios: t.UniqueScenarios, UniqueBranches: t.UniqueBranches, AddsNothing: t.AddsNothing})
+	}
+	for i, it := range advice.TestsToWriteFirst(res, load.DisplayPath, render.TopTests) {
+		out.TestsToWriteFirst = append(out.TestsToWriteFirst, jsonAdvice{Rank: i + 1, ID: it.ID, Workflow: it.Workflow, Tag: it.Tag, File: it.File, Line: it.Line, Hint: it.Hint, TestName: it.TestName, Covers: it.Covers(), Paths: it.Paths, Branches: it.Branches, PathNumber: it.PathNumber})
+	}
 	out.Unread = unreadJSON(res)
 	out.Handlers = handlersJSON(res)
 	out.CallOutcomes = callOutcomesJSON(res)
@@ -515,7 +632,12 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 			jw.PathList = append(jw.PathList, jsonPath{Number: p.Number, ID: p.Path.ID(), Text: render.PathText(p.Path), Steps: steps,
 				End: string(p.Path.End), Compensation: p.Path.Compensation, Covered: p.Covered, Traces: p.Traces, StaleTrace: p.StaleTrace,
 				StableID: p.StableID, Bucket: string(p.Class.Bucket), Label: optional(p.Class.Label), Source: string(p.Class.Source),
-				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons, Proof: proofJSON(p.Class.Proof), Assumptions: p.Class.Assumptions})
+				Confidence: string(p.Class.Confidence), PossibleInProduction: p.Class.PossibleInProduction, Explanation: p.Class.Explanation, RuleID: optional(p.Class.RuleID), ExtraReasons: p.Class.ExtraReasons, Proof: proofJSON(p.Class.Proof), Assumptions: p.Class.Assumptions,
+				ScenarioID: p.ScenarioID, SameBehaviourAs: p.SameAs})
+		}
+		jw.MainNumber, jw.Scenarios, jw.HandlerCoverage = mainJSON(w)
+		if w.Pairs.Total > 0 {
+			jw.DecisionPairs = &jsonPairs{jsonCount: count1(w.Pairs.Covered, w.Pairs.Total), Exact: w.Pairs.Exact}
 		}
 		if render.ShowStages(w) {
 			jw.PathCountExact, jw.PathsListed = w.Exact.String(), len(w.Paths)
@@ -693,4 +815,27 @@ func loopRoundsJSON(res coverage.Result) []jsonLoopRounds {
 		out = append(out, row)
 	}
 	return out
+}
+
+// mainJSON is a workflow's main number, scenarios and handler coverage.
+func mainJSON(w coverage.WorkflowResult) (*jsonMain, *jsonScenarios, *jsonHandlerCoverage) {
+	m := &jsonMain{Kind: w.Main.Kind, Covered: w.Main.Covered, Total: w.Main.Total, Percent: w.Main.Percent, Measured: w.Main.Measured,
+		Target: w.Main.Target, Met: w.Main.Met, Why: w.Main.Why, Forced: w.Main.ForcedReason, SplitAdvice: render.SplitAdvice(w, nil)}
+	s := &jsonScenarios{Measured: w.Scenarios.Measured, Why: w.Scenarios.Why, Count: "0"}
+	if w.Scenarios.Measured {
+		sc := w.Scenarios
+		s.Count, s.Covered, s.Testable, s.NeedsReview, s.NeedsSpecial, s.CannotBeTested = sc.Count.String(), sc.Covered, sc.Testable, sc.NeedsReview, sc.NeedsSpecial, sc.CannotBeTested
+		s.FromPaths, s.Truncated = sc.FromPaths, sc.Truncated
+		if !sc.FromPaths && sc.Unchecked != nil {
+			s.Unchecked = sc.Unchecked.String()
+		}
+		for _, x := range sc.Items {
+			s.List = append(s.List, jsonScenario{ID: x.ID, Steps: x.Steps, Bucket: string(x.Class.Bucket), Label: optional(x.Class.Label), Covered: x.Covered, Traces: x.Traces, Paths: x.Paths, PathCount: x.PathCount})
+		}
+	}
+	var h *jsonHandlerCoverage
+	if w.Handlers.Total > 0 || w.Handlers.NotRecorded > 0 {
+		h = &jsonHandlerCoverage{Covered: w.Handlers.Covered, Total: w.Handlers.Total, NotRecorded: w.Handlers.NotRecorded}
+	}
+	return m, s, h
 }

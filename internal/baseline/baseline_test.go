@@ -213,3 +213,23 @@ func TestReadByteOrderMark(t *testing.T) {
 		t.Errorf("two stray bytes should stay a plain not-a-baseline error, got %v", err)
 	}
 }
+
+func TestCheckMainDropsAndTolerance(t *testing.T) {
+	was := baseline.File{Workflows: []baseline.Workflow{{Name: "w.A", Main: &baseline.Main{Kind: "path", Covered: 4, Total: 5, Percent: 80}}, {Name: "w.B", Main: &baseline.Main{Kind: "scenario", Covered: 2, Total: 2, Percent: 100}}, {Name: "w.C"}}}
+	res := coverage.Result{Workflows: []coverage.WorkflowResult{
+		{Name: "w.A", Main: coverage.MainNumber{Kind: "path", Covered: 3, Total: 5, Percent: 60, Measured: true}},
+		{Name: "w.B", Main: coverage.MainNumber{Kind: "branch", Covered: 1, Total: 4, Percent: 25, Measured: true}}, // another kind: not compared
+		{Name: "w.C", Main: coverage.MainNumber{Kind: "path", Covered: 0, Total: 1, Percent: 0, Measured: true}},    // no main number in the baseline
+	}}
+	drops, changed := baseline.CheckMain(was, res, 0)
+	if len(drops) != 1 || drops[0].Workflow != "w.A" || len(changed) != 1 {
+		t.Fatalf("drops %+v changed %v", drops, changed)
+	}
+	if drops, _ := baseline.CheckMain(was, res, 25); len(drops) != 0 {
+		t.Errorf("a drop of 20 points is within a tolerance of 25: %+v", drops)
+	}
+	res.Workflows[0].Main.Measured = false
+	if drops, _ := baseline.CheckMain(was, res, 50); len(drops) != 1 || !drops[0].NotMeasured {
+		t.Errorf("a main number that is gone is a drop whatever the tolerance: %+v", drops)
+	}
+}
