@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
 
@@ -46,7 +47,12 @@ func ClassificationLines(res coverage.Result, v ClassificationView) []string {
 		return s + note
 	}
 	special := b.Special()
-	lines := []string{"Classification:", fmt.Sprintf("  Total paths:         %d", b.Overall().Paths), fmt.Sprintf("  Testable:            %d", b.Testable.Paths)}
+	capped, left, leftLines := leftOutImpossible(res)
+	head := "Classification:"
+	if capped > 0 {
+		head = fmt.Sprintf("Classification (listed paths only; %s over the cap):", count(capped, "workflow"))
+	}
+	lines := []string{head, fmt.Sprintf("  Total paths:         %d", b.Overall().Paths), fmt.Sprintf("  Testable:            %d", b.Testable.Paths)}
 	reasons := reasonLines(res)
 	for _, bk := range []struct {
 		name   string
@@ -57,8 +63,26 @@ func ClassificationLines(res coverage.Result, v ClassificationView) []string {
 		{"Needs special test: ", classify.NeedsSpecialTest, b.NeedsSpecialTest.Paths},
 		{"Needs review:       ", classify.NeedsReview, b.NeedsReview.Paths},
 	} {
-		lines = append(lines, fmt.Sprintf("  %s %d", bk.name, bk.count))
+		text := fmt.Sprintf("  %s %d", bk.name, bk.count)
+		if bk.bucket == classify.CannotBeTested && left.Sign() > 0 {
+			text += fmt.Sprintf(" listed, plus %s left out of the list as impossible (below)", Big(left))
+		}
+		lines = append(lines, text)
 		lines = append(lines, reasons[bk.bucket]...)
+	}
+	lines = append(lines, leftLines...)
+	if capped > 0 {
+		if tc := b.TestableCoverage(); tc.Paths != b.Testable.Paths {
+			policy := string(b.Policy)
+			if policy == "" {
+				policy = "count_as_testable"
+			}
+			if b.Policy == classify.Exclude {
+				lines = append(lines, fmt.Sprintf("  Testable %d + unexplained %d = %d in the denominator (policy: %s)", b.Testable.Paths, b.Unexplained.Paths, tc.Paths, policy))
+			} else {
+				lines = append(lines, fmt.Sprintf("  Testable %d + needs-review %d = %d in the denominator (policy: %s)", b.Testable.Paths, b.NeedsReview.Paths, tc.Paths, policy))
+			}
+		}
 	}
 	if n := BlockedByKnownBugs(res); n > 0 {
 		lines = append(lines, fmt.Sprintf("  Blocked by known bugs: %d", n))
@@ -75,6 +99,63 @@ func ClassificationLines(res coverage.Result, v ClassificationView) []string {
 		use += " (for --fail-under)"
 	}
 	return append(lines, use)
+}
+
+// LeftOut is what the workflows' lists leave out as impossible.
+type LeftOut struct {
+	// Capped is how many workflows are over the cap.
+	Capped int
+	// Paths and Groups: the paths left out of the lists as impossible (pruned
+	// groups no trace contradicted), and in how many groups.
+	Paths  *big.Int
+	Groups int
+	// ByLabel is Paths split by label.
+	ByLabel map[string]*big.Int
+}
+
+// LeftOutImpossible collects the pruned groups of every workflow.
+func LeftOutImpossible(res coverage.Result) LeftOut {
+	lo := LeftOut{Paths: new(big.Int), ByLabel: map[string]*big.Int{}}
+	for _, w := range res.Workflows {
+		if w.Capped {
+			lo.Capped++
+		}
+		for _, p := range w.Pruned {
+			if p.Unpruned {
+				continue
+			}
+			lo.Groups++
+			lo.Paths.Add(lo.Paths, p.Count)
+			label := p.Class.Label
+			if label == "" {
+				label = "(no label)"
+			}
+			if lo.ByLabel[label] == nil {
+				lo.ByLabel[label] = new(big.Int)
+			}
+			lo.ByLabel[label].Add(lo.ByLabel[label], p.Count)
+		}
+	}
+	return lo
+}
+
+// leftOutImpossible is LeftOutImpossible as the workflow count, the total and
+// the lines of the classification block (none when nothing was left out).
+func leftOutImpossible(res coverage.Result) (capped int, total *big.Int, lines []string) {
+	lo := LeftOutImpossible(res)
+	if lo.Groups == 0 {
+		return lo.Capped, lo.Paths, nil
+	}
+	lines = append(lines, fmt.Sprintf("  Left out of the lists as impossible: %s paths in %s (not in the numbers above)", Big(lo.Paths), count(lo.Groups, "group")))
+	var labels []string
+	for l := range lo.ByLabel {
+		labels = append(labels, l)
+	}
+	sort.Strings(labels)
+	for _, l := range labels {
+		lines = append(lines, fmt.Sprintf("    %s: %s", l, Big(lo.ByLabel[l])))
+	}
+	return lo.Capped, lo.Paths, lines
 }
 
 // ClassificationBlock is ClassificationLines as text ending in a newline.

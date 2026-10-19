@@ -15,12 +15,44 @@ func (g *Graph) PathCount() *big.Int {
 	return newCounter(g, nil).count(g.Start)
 }
 
+// OldVersionPathCount is the exact number of paths that take the old side of
+// some workflow.GetVersion check (a side kept only so old histories replay),
+// and whether the workflow has such a check at all.
+func (g *Graph) OldVersionPathCount() (n *big.Int, has bool) {
+	old := map[*Exit]bool{}
+	for _, j := range g.Junctions {
+		for _, f := range j.Facts {
+			if f.Kind != VersionCheck {
+				continue
+			}
+			for _, e := range j.Exits {
+				if e.Label == f.Exit {
+					old[e] = true
+					has = true
+				}
+			}
+		}
+	}
+	if !has {
+		return new(big.Int), false
+	}
+	c := newCounter(g, nil)
+	c.skip = old
+	return new(big.Int).Sub(g.PathCount(), c.count(g.Start)), true
+}
+
 // counter counts paths from a target, optionally stopping at a junction: a
 // road that reaches stop counts as one path that continues there.
 type counter struct {
 	g    *Graph
 	stop *Junction
-	memo map[countKey]*big.Int
+	// skip are exits the count does not take.
+	skip map[*Exit]bool
+	// outside, when set, makes a road that reaches a decision not in it count as
+	// one path that continues there (a part of a stage ends at the first decision
+	// outside it).
+	outside map[*Junction]bool
+	memo    map[countKey]*big.Int
 }
 
 // countKey is a target: a junction (with the exit it is limited to, if any), a
@@ -63,12 +95,12 @@ func (c *counter) count(t Target) *big.Int {
 		// used, so only its exit can be taken (a "for {}" has none: no path).
 		n = new(big.Int)
 		for _, e := range t.Retry.Junction.Exits {
-			if e.Label == "exit" {
+			if e.Label == "exit" && !c.skip[e] {
 				n = c.count(e.To)
 			}
 		}
 	case t.Junction != nil:
-		if t.Junction == c.stop {
+		if t.Junction == c.stop || (c.outside != nil && !c.outside[t.Junction]) {
 			n = one
 			break
 		}
@@ -78,6 +110,9 @@ func (c *counter) count(t Target) *big.Int {
 			exits = []*Exit{t.Only}
 		}
 		for _, e := range exits {
+			if c.skip[e] {
+				continue
+			}
 			n = new(big.Int).Add(n, c.count(e.To))
 		}
 	default:
@@ -86,3 +121,5 @@ func (c *counter) count(t Target) *big.Int {
 	c.memo[k] = n
 	return n
 }
+
+func bigInt(n int) *big.Int { return big.NewInt(int64(n)) }

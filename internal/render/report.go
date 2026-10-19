@@ -23,6 +23,13 @@ type ReportOptions struct {
 	// testable and overall coverage, the basis used) before the excluded
 	// line. nil prints exactly what PathKit printed before classification.
 	Classification *ClassificationView
+	// ExtraLines are printed after the classification block (the CI floor's
+	// basis per workflow over the cap).
+	ExtraLines []string
+	// OmitCappedPaths leaves the path list out of the block of a workflow over
+	// the cap (counts, stages and groups stay); --paths turns it off. The
+	// zero value prints the lists as before.
+	OmitCappedPaths bool
 	// Hints adds "how to cover it" under every testable path no test ran
 	// (--hints).
 	Hints bool
@@ -43,6 +50,9 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 		}
 		for _, w := range res.Workflows {
 			fmt.Fprintf(&b, "%-*s  %s\n", width, reportName(w), workflowStats(w, opt.Color, false))
+			for _, l := range HelperLines(w) {
+				b.WriteString("  " + l + "\n")
+			}
 		}
 	} else {
 		for i, w := range res.Workflows {
@@ -52,6 +62,13 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 			fmt.Fprintf(&b, "%s (%s)\n", reportName(w), w.File)
 			fmt.Fprintf(&b, "%s\n", workflowStats(w, opt.Color, true))
 			b.WriteString(StageLines(w))
+			for _, l := range HelperLines(w) {
+				b.WriteString(l + "\n")
+			}
+			if w.Capped && opt.OmitCappedPaths {
+				b.WriteString(CappedPathsNote(w))
+				continue
+			}
 			for _, p := range w.Paths {
 				word := paint("missed", red, opt.Color)
 				if p.Covered {
@@ -79,6 +96,10 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 	if opt.Classification != nil {
 		b.WriteString("\n" + ClassificationBlock(res, *opt.Classification))
 	}
+	for _, l := range opt.ExtraLines {
+		b.WriteString(l + "\n")
+	}
+	b.WriteString("\n" + HandlerBlock(res, opt.Summary) + CallOutcomeBlock(res, opt.Summary) + LoopRoundBlock(res, opt.Summary) + UnreadBlock(res, UnreadTop))
 	b.WriteString("\n" + ExcludedBlock(res.Excluded, opt.ExcludedBy))
 	b.WriteString(TracesLine(res.Counts))
 	return b.String()
@@ -88,13 +109,17 @@ func ReportText(res coverage.Result, opt ReportOptions) string {
 // project coverage" (the percentage threshold-aware, see Pct). The text
 // and HTML reports both print it.
 func ProjectTotalLine(res coverage.Result, threshold *float64) string {
+	pct := NotMeasured("no paths")
+	if res.Paths > 0 {
+		pct = Pct(coverage.Percent(res.Covered, res.Paths), threshold)
+	}
 	return fmt.Sprintf("%d paths total · %d covered · %d missed · %s project coverage",
-		res.Paths, res.Covered, res.Paths-res.Covered, Pct(coverage.Percent(res.Covered, res.Paths), threshold))
+		res.Paths, res.Covered, res.Paths-res.Covered, pct)
 }
 
 // BranchesLine is "Branches: 39/50 (78.0%)" for the whole project.
 func BranchesLine(res coverage.Result) string {
-	return fmt.Sprintf("Branches: %d/%d (%s)", res.BranchesTaken, res.Branches, Pct(coverage.Percent(res.BranchesTaken, res.Branches), nil))
+	return "Branches: " + Ratio(res.BranchesTaken, res.Branches, nil, "no branches")
 }
 
 // WorkflowStats is a workflow's line in the full report, without colour:
@@ -136,10 +161,14 @@ func count(n int, word string) string {
 }
 
 func reportName(w coverage.WorkflowResult) string {
+	name := w.Name
 	if w.AddedByConfig {
-		return w.Name + " (added by config)"
+		name += " (added by config)"
 	}
-	return w.Name
+	if w.Module != "" {
+		name += " [module " + w.Module + "]"
+	}
+	return name
 }
 
 // workflowStats is "2/3 paths · 66.7% · branches 3/4 · priority Medium".
@@ -155,7 +184,7 @@ func workflowStats(w coverage.WorkflowResult, color, branches bool) string {
 	}
 	if len(w.Stages) > 1 || w.Capped {
 		c, t, _ := StageCoverage(w)
-		parts = append(parts, fmt.Sprintf("stages %d/%d (%s)", c, t, Pct(coverage.Percent(c, t), nil)))
+		parts = append(parts, "stages "+Ratio(c, t, nil, "no stage paths to measure"))
 	}
 	if branches {
 		parts = append(parts, fmt.Sprintf("branches %d/%d", w.BranchesTaken, w.Branches))

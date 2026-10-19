@@ -28,37 +28,41 @@ func TestStableIDsAreUniqueInEveryWorkflow(t *testing.T) {
 			continue
 		}
 		for _, wf := range discover.Find(res.Packages) {
-			g, err := model.Build(wf)
-			if err != nil {
-				continue // a workflow PathKit cannot map has no paths
-			}
-			seen := map[string]string{}
-			for _, p := range g.Paths(model.DefaultMaxPaths).List {
-				id := p.StableID()
-				if other, dup := seen[id]; dup {
-					t.Errorf("%s: stable id %s is used by two paths:\n  %s\n  %s", wf.Name, id, other, p.StableKey())
+			// Both ways of putting helpers on the map: copied in, and (when copying
+			// would pass the cap) summarized.
+			for _, mode := range []model.HelperMode{model.HelpersInline, model.HelpersAuto} {
+				g, err := model.BuildWith(wf, model.Options{Helpers: mode})
+				if err != nil {
+					continue // a workflow PathKit cannot map has no paths
 				}
-				seen[id] = strings.ReplaceAll(p.StableKey(), "\x1f", " ")
-			}
-			// Stage path ids too: no two stage paths of one workflow share an id,
-			// whatever the stage size.
-			for _, limit := range []int{4, 16, model.DefaultStageMaxPaths} {
-				ids := map[string]string{}
-				for _, st := range g.Stages(limit) {
-					if st.Big {
-						continue
+				seen := map[string]string{}
+				for _, p := range g.Paths(model.DefaultMaxPaths).List {
+					id := p.StableID()
+					if other, dup := seen[id]; dup {
+						t.Errorf("%s: stable id %s is used by two paths:\n  %s\n  %s", wf.Name, id, other, p.StableKey())
 					}
-					sp, _ := g.StagePaths(st, int(st.Count.Int64())+1)
-					for _, p := range sp {
-						id := p.StageID()
-						if other, dup := ids[id]; dup {
-							t.Errorf("%s (stages of %d): stage path id %s is used twice:\n  %s\n  %s", wf.Name, limit, id, other, p.StableKey())
+					seen[id] = strings.ReplaceAll(p.StableKey(), "\x1f", " ")
+				}
+				// Stage path ids too: no two stage paths of one workflow share an id,
+				// whatever the stage size.
+				for _, limit := range []int{4, 16, model.DefaultStageMaxPaths} {
+					ids := map[string]string{}
+					for _, st := range g.Stages(limit) {
+						if st.Big {
+							continue
 						}
-						ids[id] = strings.ReplaceAll(p.StableKey(), "\x1f", " ")
+						sp, _ := g.StagePaths(st, int(st.Count.Int64())+1)
+						for _, p := range sp {
+							id := p.StageID()
+							if other, dup := ids[id]; dup {
+								t.Errorf("%s (stages of %d): stage path id %s is used twice:\n  %s\n  %s", wf.Name, limit, id, other, p.StableKey())
+							}
+							ids[id] = strings.ReplaceAll(p.StableKey(), "\x1f", " ")
+						}
 					}
 				}
+				checked++
 			}
-			checked++
 		}
 	}
 	if checked < 50 {

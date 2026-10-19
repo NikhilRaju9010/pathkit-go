@@ -67,6 +67,25 @@ func isSDKMethod(f *types.Func, typeNames []string, names ...string) bool {
 	return named.Obj().Pkg().Path() == internalPkg && slices.Contains(typeNames, named.Obj().Name())
 }
 
+// isNexusExecute reports whether f is NexusClient.ExecuteOperation (the type
+// is declared in the workflow package or its internal one, depending on the
+// SDK version).
+func isNexusExecute(f *types.Func) bool {
+	if f == nil || f.Name() != "ExecuteOperation" {
+		return false
+	}
+	recv := f.Type().(*types.Signature).Recv()
+	if recv == nil {
+		return false
+	}
+	named, ok := types.Unalias(recv.Type()).(*types.Named)
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Name() != "NexusClient" {
+		return false
+	}
+	p := named.Obj().Pkg().Path()
+	return p == workflowPkg || p == internalPkg
+}
+
 // isTemporalCall reports whether a call goes into any Temporal SDK package.
 func (b *builder) isTemporalCall(call *ast.CallExpr) bool {
 	f := b.calledFunc(call)
@@ -95,6 +114,9 @@ func (b *builder) errSource(obj types.Object, ifs *ast.IfStmt) (label string, te
 	case isPkgFunc(f, workflowPkg, "Await", "AwaitWithTimeout"):
 		return f.Name() + " (wait)", true, false
 	}
+	if w, ok := b.wrapperFor(call); ok {
+		return w.step(f), true, false
+	}
 	if label, junction := b.helperErrLabel(call); junction {
 		return label, true, true
 	}
@@ -119,6 +141,8 @@ func (b *builder) futureLabel(x ast.Expr, at ast.Node, depth int) string {
 		return argName(call.Args[1]) + " (local activity)"
 	case isPkgFunc(f, workflowPkg, "ExecuteChildWorkflow") && len(call.Args) > 1:
 		return argName(call.Args[1]) + " (child workflow)"
+	case isNexusExecute(f) && len(call.Args) > 1:
+		return argName(call.Args[1]) + " (nexus operation)"
 	case isPkgFunc(f, workflowPkg, "NewTimer", "NewTimerWithOptions"):
 		return "NewTimer (timer)"
 	case isPkgFunc(f, workflowPkg, "SignalExternalWorkflow"):
@@ -159,4 +183,33 @@ func argName(e ast.Expr) string {
 		}
 	}
 	return types.ExprString(e)
+}
+
+// wrapperFor reports whether a call is of a function the config says runs a
+// Temporal call (classification.activity_wrappers).
+func (b *builder) wrapperFor(call *ast.CallExpr) (Wrapper, bool) {
+	if len(b.wrappers) == 0 {
+		return Wrapper{}, false
+	}
+	f := b.calledFunc(call)
+	if f == nil {
+		return Wrapper{}, false
+	}
+	w, ok := b.wrappers[wrapperName(f)]
+	return w, ok
+}
+
+// step is the label of the junction on a wrapper's error: "Run (activity)".
+func (w Wrapper) step(f *types.Func) string {
+	name := w.Label
+	if name == "" {
+		name = f.Name()
+	}
+	switch w.Kind {
+	case "child_workflow":
+		return name + " (child workflow)"
+	case "nexus":
+		return name + " (nexus operation)"
+	}
+	return name + " (activity)"
 }

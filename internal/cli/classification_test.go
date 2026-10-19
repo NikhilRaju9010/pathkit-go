@@ -30,6 +30,10 @@ func stripAdditive(v any) {
 			delete(x, "classification") // the top-level count
 			delete(x, "coverageBasis")
 			delete(x, "classificationShown")
+			delete(x, "unread")                                                    // the "could not fully read" panel (M7.8)
+			for _, k := range []string{"callOutcomes", "handlers", "loopRounds"} { // the outcome, handler and loop tables (M8)
+				delete(x, k)
+			}
 		}
 		if _, ok := x["threshold"]; ok {
 			delete(x, "basis")

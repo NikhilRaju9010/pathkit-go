@@ -54,6 +54,14 @@ func (e *Engine) PlanStages(workflow string, g *model.Graph) *StagePlan {
 			if rep != nil && i < len(rep.Results) {
 				c = e.stageClass(rep.Results[i], rep)
 			}
+			// A stage path through the old side of a GetVersion is labelled
+			// like a listed path through it (it stays testable-or-special:
+			// the stage counts do not move).
+			if c.Bucket == Testable && e.detectorOn("version-gate-old-branch") {
+				if vc, ok := (versionGateOldBranch{}).Detect(model.Path{Steps: sp.Steps}); ok {
+					c = vc
+				}
+			}
 			plan.Classes[k] = append(plan.Classes[k], StageClass{Path: sp, Class: c})
 		}
 	}

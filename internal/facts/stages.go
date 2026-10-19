@@ -66,6 +66,12 @@ func (a *Analyzer) AnalyzeStages(g *model.Graph, stages []model.Stage, maxContex
 	cutOff, fresh := false, false
 	for k, st := range stages {
 		rep := StageReport{Stage: k, Contexts: len(contexts), CutOff: cutOff, Fresh: fresh}
+		if st.Part && !st.Big && a.off == "" {
+			// A part of a stretch that was too big: examined with nothing known
+			// on the way in, and nothing known is left for the next stage.
+			contexts, cutOff, fresh = []*Walk{a.emptyWalk()}, false, true
+			rep = StageReport{Stage: k, Contexts: 1, Fresh: true}
+		}
 		if st.Big || a.off != "" {
 			out[k] = rep
 			// Nothing is known about what a stage that is not followed leaves
@@ -130,6 +136,9 @@ func (a *Analyzer) AnalyzeStages(g *model.Graph, stages []model.Stage, maxContex
 		// impossible until the notebook is emptied (a stage not followed, or
 		// no state carried on).
 		contexts, fresh = nil, false
+		if st.Part {
+			order = nil // nothing known leaves a part
+		}
 		for _, sig := range order {
 			if len(contexts) == maxContexts {
 				cutOff = true
@@ -191,7 +200,7 @@ func (a *Analyzer) walkStage(g *model.Graph, st model.Stage, paths []model.Stage
 			used[r.ID] = false
 			return
 		}
-		if t.Junction == nil || (st.Next != nil && t.Junction == st.Next) {
+		if t.Junction == nil || st.Stops(t.Junction) {
 			done(idx, w, nil)
 			idx++
 			return

@@ -73,11 +73,16 @@ type Junction struct {
 	// They never change the junction, its exits, or any ID.
 	Facts []Fact
 
-	// viaHelper: the junction exists only because PathKit follows a helper
+	// viaHelper: the junction exists only because of what newer versions read
+	// (the decision of a "return <call>" is one too): it exists only because PathKit follows a helper
 	// function (the error check on a helper's result, or a loop with a call
 	// of a helper in it). Before helpers were followed it was not one, so
 	// path IDs from then do not have it (see Path.LegacyStableIDs).
 	viaHelper bool
+
+	// call is where the Temporal call this decision reads is (the activity,
+	// child workflow or Nexus operation that is started); nil if not known.
+	call *token.Position
 
 	// stable is the junction's description for stable path IDs (see
 	// assignStable): its label, made unique within the workflow.
@@ -196,6 +201,22 @@ type Graph struct {
 	pkg  *types.Package
 
 	trusted func(ast.Expr) bool
+
+	// units are the helpers summarized instead of copied into the map (see
+	// HelperUnit); summarized says the graph was built that way on purpose,
+	// and summarizedWhy gives the reason when PathKit chose it.
+	units         []*HelperUnit
+	unitByID      map[string]*Exit
+	summarized    bool
+	summarizedWhy string
+	// inline gives the map of the same workflow with the helpers copied in
+	// (only on a summarized graph); traces recorded against it still count.
+	inline func() *Graph
+	// directReturnSteps: some "return <call>" is a decision on this map.
+	directReturnSteps bool
+
+	// unread are the places PathKit did not follow (see Unread).
+	unread []Unread
 }
 
 // TrustedConstant reports whether expr is a constant whose value is the

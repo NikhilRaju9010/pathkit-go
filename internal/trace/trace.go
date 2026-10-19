@@ -48,7 +48,12 @@ type File struct {
 	Steps        []string `json:"steps"`
 	WorkflowID   string   `json:"workflowId"`
 	RunID        string   `json:"runId"`
-	RecordedAt   string   `json:"recordedAt"`
+	// Recorder says which recorder wrote the trace: 0 for the ones before
+	// handlers, summarized helpers and direct returns were recorded (the field
+	// is absent there), 3 for this one. A step kind the recorder did not know
+	// is "not recorded by this trace", never a missing or an unmatched step.
+	Recorder   int    `json:"recorder,omitempty"`
+	RecordedAt string `json:"recordedAt"`
 
 	Path string `json:"-"` // where it was read from
 }
@@ -130,9 +135,12 @@ const (
 
 // Outcome is the result of checking one trace.
 type Outcome struct {
-	Kind   Kind
-	Path   model.Path // when Matched
-	Reason string     // when not Matched
+	Kind Kind
+	Path model.Path // when Matched
+	// Steps are the steps as read against the current map (a trace recorded
+	// before helpers were summarized is converted first); when Matched.
+	Steps  []string
+	Reason string // when not Matched
 	// Mismatch is the matcher's own account when Unmatched: the steps
 	// that fitted and where the walk stood (the unmatched-trace report).
 	Mismatch *model.Mismatch
@@ -157,13 +165,21 @@ func CheckIn(f File, g *model.Graph, hash, pkg string) Outcome {
 	case f.Status != "complete":
 		return Outcome{Kind: Incomplete, Reason: "the run never reached a return (panic, timeout, or stopped)"}
 	case f.FunctionHash != hash:
+		// A trace recorded before helpers were summarized fits the map that
+		// copies them in; convert it, when the code has not changed since.
+		if old := g.InlineHash(); old != "" && f.FunctionHash == old {
+			if steps, ok := g.FromInline(f.Steps); ok {
+				f.Steps = steps
+				break
+			}
+		}
 		return Outcome{Kind: Stale, Reason: "recorded for a different version of the workflow function; re-record it"}
 	}
 	p, mm := g.Match(f.Steps)
 	if mm != nil {
 		return Outcome{Kind: Unmatched, Reason: mm.Reason, Mismatch: mm}
 	}
-	return Outcome{Kind: Matched, Path: p}
+	return Outcome{Kind: Matched, Path: p, Steps: f.Steps}
 }
 
 // ClearOlderThan deletes the trace files in dir last written before

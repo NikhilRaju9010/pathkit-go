@@ -33,11 +33,14 @@ import (
 
 // Workflow is one in-scope workflow to measure.
 type Workflow struct {
-	Name          string
-	File          string // where it is declared, as it should be printed (report)
-	Graph         *model.Graph
-	Hash          string // current model.FunctionHash
-	Package       string // import path of the workflow's package ("" when unknown)
+	Name    string
+	File    string // where it is declared, as it should be printed (report)
+	Graph   *model.Graph
+	Hash    string // current model.FunctionHash
+	Package string // import path of the workflow's package ("" when unknown)
+	// Module is the Go module the workflow is in; set only when the run covers
+	// several modules (a folder that holds more than one), "" otherwise.
+	Module        string
 	AddedByConfig bool
 }
 
@@ -72,6 +75,12 @@ type Input struct {
 	// Plan gives a workflow's stages and the class of every stage path; nil
 	// means plain stages, every stage path testable.
 	Plan func(workflow string, g *model.Graph) *classify.StagePlan
+	// Handlers are what the workflows register (signals, queries, updates and
+	// their validators); the handler table is built from them.
+	Handlers []model.Handler
+	// Display shortens a file name for the report (the caller's
+	// load.DisplayPath); nil leaves names as they are.
+	Display func(string) string
 }
 
 // Unexplained is a group of trace files of one workflow that fit no path
@@ -136,6 +145,23 @@ type WorkflowResult struct {
 	// above holds fewer (the cap, and the parts left out as pruned groups).
 	Exact  *big.Int
 	Capped bool
+	// OldVersionPaths is the exact number of paths through the old side of a
+	// workflow.GetVersion check; nil when the workflow has no such check.
+	OldVersionPaths *big.Int
+	// Module is the workflow's Go module when the run covers several ("" when
+	// it covers one).
+	Module string
+	// TracesCounted is how many recorded runs were counted for the workflow.
+	TracesCounted int
+	// OldRecorderTraces is how many of them an older recorder wrote: they have
+	// no steps for handlers, so a handler no trace shows is "not recorded".
+	OldRecorderTraces int
+	// HelpersSummarized says the helpers are mapped once each (Units) instead of
+	// copied into the paths; HelpersWhy is why PathKit chose that on its own
+	// ("" when the config asked for it).
+	HelpersSummarized bool
+	HelpersWhy        string
+	Units             []UnitResult
 	// BeyondCap is how many counted traces ran a path that is not in the list.
 	BeyondCap int
 	// Pruned are the parts of the map left out of the list because the engine
@@ -165,12 +191,18 @@ type PrunedResult struct {
 
 // StageResult is one stage of a workflow and which of its paths a test ran.
 type StageResult struct {
-	Index    int
-	Count    *big.Int
-	Big      bool // too many paths to list: branch coverage only
-	Paths    []StagePathResult
-	Contexts int
-	CutOff   bool
+	Index int
+	Count *big.Int
+	Big   bool // too many paths to list: branch coverage only
+	// Part says the stage is a piece of a stretch that was too big for one stage
+	// (SplitFrom paths), cut at the decisions of a nested region; SplitWhy, on a
+	// Big stage, says why it could not be cut.
+	Part      bool
+	SplitFrom *big.Int
+	SplitWhy  string
+	Paths     []StagePathResult
+	Contexts  int
+	CutOff    bool
 	// Branches counts the exits of the stage's decisions, and how many a test took.
 	Branches, BranchesTaken int
 	// Covered, and the buckets of the stage paths (Testable counts needs-review
@@ -218,8 +250,22 @@ type Result struct {
 	Branches      int
 	BranchesTaken int
 	Warnings      []Warning
-	Counts        Counts
-	Breakdown     Breakdown
+	// Unread are the places PathKit did not (fully) read, in workflow order
+	// (the "could not fully read" panel; see UnreadEntry).
+	Unread []UnreadEntry
+	// Handlers is the handler table: every signal, query, update and update
+	// validator the workflows register, whether a test exercised it, and how
+	// many of its branches a test took.
+	Handlers []HandlerResult
+	// CallOutcomes is the outcome table: for every activity, child workflow and
+	// Nexus operation call whose result is checked, the outcomes it can have
+	// and which of them a test saw.
+	CallOutcomes []CallOutcomeRow
+	// LoopRounds is the loop rounds table: for every loop, which of 0, 1 and 2+
+	// rounds can happen and which a test ran.
+	LoopRounds []LoopRoundsRow
+	Counts     Counts
+	Breakdown  Breakdown
 	// PrunedPaths is how many paths were left out of the lists because the
 	// fact engine shows them impossible (counted exactly, kept as groups), over
 	// all workflows.
@@ -374,13 +420,17 @@ func Compute(in Input) Result {
 
 		listing  *classify.Listing
 		plan     *classify.StagePlan
-		capped   bool                   // the workflow has more paths than the list holds
-		allExits map[string]*model.Exit // every exit some path takes
-		seen     map[string]bool        // every exit ID some counted trace recorded
-		hits     []map[string]int       // per stage: traces per stage path key
-		unpruned map[int]bool           // pruned groups some trace ran through
-		beyond   int                    // traces that fit the map but not the list
-		ran      map[string]bool        // every prefix of every path a counted trace ran (a path beyond the list too)
+		capped   bool                                // the workflow has more paths than the list holds
+		allExits map[string]*model.Exit              // every exit some path takes
+		seen     map[string]bool                     // every exit ID some counted trace recorded
+		hits     []map[string]int                    // per stage: traces per stage path key
+		unpruned map[int]bool                        // pruned groups some trace ran through
+		unitHit  map[string]bool                     // exit IDs of summarized helpers some counted trace took
+		counted  int                                 // traces counted for this workflow
+		oldRec   int                                 // of those, recorded by a recorder before handlers were recorded
+		rounds   map[*model.Junction]map[string]bool // loop -> round buckets some counted trace ran
+		beyond   int                                 // traces that fit the map but not the list
+		ran      map[string]bool                     // every prefix of every path a counted trace ran (a path beyond the list too)
 	}
 	states := map[string]*state{}
 	var order []*state
@@ -394,7 +444,7 @@ func Compute(in Input) Result {
 			plan = in.Plan(w.Name, w.Graph)
 		}
 		st := &state{wf: w, paths: lst.PathList, listing: lst, plan: plan, byKey: map[string]int{}, branches: map[string]bool{}, unexp: map[string]*Unexplained{},
-			seen: map[string]bool{}, ran: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
+			seen: map[string]bool{}, unitHit: map[string]bool{}, rounds: map[*model.Junction]map[string]bool{}, ran: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
 		for k := range st.hits {
 			st.hits[k] = map[string]int{}
 		}
@@ -496,7 +546,7 @@ func Compute(in Input) Result {
 			if p, mm := st.wf.Graph.Match(f.Steps); mm != nil {
 				out = trace.Outcome{Kind: trace.Unmatched, Reason: mm.Reason, Mismatch: mm}
 			} else {
-				out = trace.Outcome{Kind: trace.Matched, Path: p}
+				out = trace.Outcome{Kind: trace.Matched, Path: p, Steps: f.Steps}
 			}
 		}
 		switch out.Kind {
@@ -525,6 +575,9 @@ func Compute(in Input) Result {
 			res.Counts.Unknown++
 			warn(tf, out.Kind, "trace %s (%s): %s", name, f.Workflow, out.Reason)
 			continue
+		}
+		for _, h := range st.wf.Graph.UnitHits(out.Steps) {
+			st.unitHit[h] = true
 		}
 		i, ok := st.byKey[out.Path.Key()]
 		if !ok {
@@ -558,7 +611,19 @@ func Compute(in Input) Result {
 				st.stale[i] = true
 			}
 		}
-		for _, id := range f.Steps { // raw steps, before loop folding
+		st.counted++
+		if f.Recorder == 0 {
+			st.oldRec++
+		}
+		for j, ns := range st.wf.Graph.Rounds(out.Steps) {
+			if st.rounds[j] == nil {
+				st.rounds[j] = map[string]bool{}
+			}
+			for _, n := range ns {
+				st.rounds[j][model.RoundBucket(n)] = true
+			}
+		}
+		for _, id := range out.Steps { // raw steps (as read against this map), before loop folding
 			st.seen[id] = true
 			if _, onPath := st.branches[id]; onPath {
 				st.branches[id] = true
@@ -602,7 +667,28 @@ func Compute(in Input) Result {
 		wr := WorkflowResult{Name: st.wf.Name, File: st.wf.File, AddedByConfig: st.wf.AddedByConfig, Truncated: st.paths.Truncated, Branches: len(st.branches)}
 		wr.Breakdown.Policy = policy
 		wr.Exact, wr.Capped, wr.BeyondCap = st.listing.Exact, st.capped, st.beyond
+		wr.TracesCounted, wr.OldRecorderTraces = st.counted, st.oldRec
+		wr.Module = st.wf.Module
 		wr.Ran = st.ran
+		if n, has := st.wf.Graph.OldVersionPathCount(); has {
+			wr.OldVersionPaths = n
+		}
+		wr.HelpersSummarized, wr.HelpersWhy = st.wf.Graph.Summarized(), st.wf.Graph.SummarizedBecause()
+		for _, u := range st.wf.Graph.Units() {
+			ur := UnitResult{ID: u.ID, Name: u.Name(), Sites: len(u.Calls)}
+			pos := u.Position()
+			ur.File, ur.Line = pos.Filename, pos.Line
+			if in.Display != nil {
+				ur.File = in.Display(ur.File)
+			}
+			for _, id := range u.Branches() {
+				ur.Branches++
+				if st.unitHit[id.String()] {
+					ur.BranchesTaken++
+				}
+			}
+			wr.Units = append(wr.Units, ur)
+		}
 		for i, p := range st.paths.List {
 			pr := PathResult{Number: i + 1, Path: p, Covered: st.traces[i] > 0, Traces: st.traces[i], StaleTrace: st.stale[i], StableID: p.StableID(), Class: classifier(st.wf.Name, p)}
 			if pr.Class.Bucket == "" {
@@ -701,6 +787,18 @@ func Compute(in Input) Result {
 		}
 	}
 	sort.SliceStable(res.Warnings, func(i, j int) bool { return res.Warnings[i].File < res.Warnings[j].File })
+	res.Unread = collectUnread(in, res.Workflows)
+	graphs, seen := map[string]*model.Graph{}, map[string]map[string]bool{}
+	for name, st := range states {
+		graphs[name], seen[name] = st.wf.Graph, st.seen
+	}
+	res.Handlers = handlerTable(in, graphs, seen, res.Workflows)
+	res.CallOutcomes = callOutcomeTable(in, seen)
+	var loopIn []loopInput
+	for _, st := range order {
+		loopIn = append(loopIn, loopInput{st.wf.Name, st.wf.Graph, st.rounds})
+	}
+	res.LoopRounds = loopRoundsTable(in, loopIn)
 	// Internal assertion: the demotion above makes this impossible. If a
 	// later change breaks it, say so loudly (the caller stops with an error)
 	// instead of hiding a path a test ran.
@@ -819,7 +917,7 @@ func finishStages(wr *WorkflowResult, plan *classify.StagePlan, hits []map[strin
 	}
 	wr.AllBranches, wr.AllBranchesTaken = len(allExits), taken
 	for k, stg := range plan.Stages {
-		sr := StageResult{Index: k, Count: stg.Count, Big: stg.Big, Contexts: plan.Contexts[k], CutOff: plan.CutOff[k]}
+		sr := StageResult{Index: k, Count: stg.Count, Big: stg.Big, Contexts: plan.Contexts[k], CutOff: plan.CutOff[k], Part: stg.Part, SplitFrom: stg.SplitFrom, SplitWhy: stg.SplitWhy}
 		inStage := map[*model.Junction]bool{}
 		for _, j := range stg.Junctions {
 			inStage[j] = true
@@ -873,4 +971,345 @@ func StageTotals(res Result) (covered, total int) {
 		}
 	}
 	return covered, total
+}
+
+// FloorPart is one slice of the testable floor number: the path coverage of
+// the workflows under the cap (Workflow ""), or one workflow over the cap
+// measured by its stages ("stage") or its branches ("branch").
+type FloorPart struct {
+	Workflow       string
+	Basis          string // "path", "stage" or "branch"
+	Covered, Total int
+}
+
+// TestableFloor is the number classification.ci.fail_under_testable is checked
+// against. A workflow under the cap counts by its testable paths. One over the
+// cap lists only part of its paths, so listed-path coverage would mislead: it
+// counts by cappedBasis instead, "stage" (its testable stage paths) or
+// "branch" (the exits taken over the whole map). With no workflow over the cap
+// this is exactly the testable coverage of the project.
+func TestableFloor(res Result, cappedBasis string) (covered, total int, parts []FloorPart) {
+	var under FloorPart
+	under.Basis = "path"
+	for _, w := range res.Workflows {
+		if !w.Capped {
+			t := w.Breakdown.TestableCoverage()
+			under.Covered += t.Covered
+			under.Total += t.Paths
+			continue
+		}
+		p := FloorPart{Workflow: w.Name, Basis: cappedBasis}
+		if cappedBasis == "branch" {
+			p.Covered, p.Total = w.AllBranchesTaken, w.AllBranches
+		} else {
+			p.Basis = "stage"
+			for _, s := range w.Stages {
+				if s.Big {
+					continue
+				}
+				p.Covered += s.Covered
+				p.Total += len(s.Paths) - s.CannotBeTested
+			}
+		}
+		parts = append(parts, p)
+		covered += p.Covered
+		total += p.Total
+	}
+	covered += under.Covered
+	total += under.Total
+	return covered, total, append([]FloorPart{under}, parts...)
+}
+
+// UnreadEntry is one row of the "PathKit could not fully read" panel: a place
+// PathKit treated as unknown or cut off, and what it did instead.
+type UnreadEntry struct {
+	Workflow   string
+	File       string // as it should be printed
+	Line       int
+	Kind       string
+	Call       string
+	Effect     string
+	Suggestion string
+}
+
+// Kinds of UnreadEntry that come from the measurement and not from the model
+// (model.Unread* are the ones the model finds in the code).
+const (
+	UnreadPathCap    = "path cap"
+	UnreadContextCut = "context cut-off"
+	UnreadNotMapped  = "workflow not mapped"
+)
+
+// collectUnread gathers the model's unread places of every workflow, plus the
+// cut-offs the measurement itself made: the path cap and stages whose fact
+// engine passed the limit of incoming states.
+func collectUnread(in Input, results []WorkflowResult) []UnreadEntry {
+	show := in.Display
+	if show == nil {
+		show = func(s string) string { return s }
+	}
+	graphs := map[string]*Workflow{}
+	for i := range in.Workflows {
+		graphs[in.Workflows[i].Name] = &in.Workflows[i]
+	}
+	var out []UnreadEntry
+	for _, w := range results {
+		src := graphs[w.Name]
+		if src == nil || src.Graph == nil {
+			continue
+		}
+		pos := src.Graph.FileSet().Position(src.Graph.Func().Pos())
+		for _, u := range src.Graph.Unread() {
+			out = append(out, UnreadEntry{Workflow: w.Name, File: show(u.File), Line: u.Line, Kind: u.Kind, Call: u.Call, Effect: u.Effect, Suggestion: u.Suggestion})
+		}
+		if w.Capped {
+			out = append(out, UnreadEntry{Workflow: w.Name, File: show(pos.Filename), Line: pos.Line, Kind: UnreadPathCap,
+				Effect: fmt.Sprintf("only %d of %s paths are listed; the rest are counted and covered through stages", len(w.Paths), w.Exact)})
+		}
+		for _, s := range w.Stages {
+			if s.CutOff {
+				out = append(out, UnreadEntry{Workflow: w.Name, File: show(pos.Filename), Line: pos.Line, Kind: UnreadContextCut,
+					Effect: fmt.Sprintf("stage %d had more incoming states than the limit; the extra ones are not followed, so claims there are made with less information", s.Index+1)})
+			}
+		}
+	}
+	return out
+}
+
+// UnitResult is one summarized helper: its branches, and how many some test
+// took. A branch counts when any call of the helper takes it.
+type UnitResult struct {
+	ID            string
+	Name          string
+	File          string
+	Line          int
+	Branches      int
+	BranchesTaken int
+	Sites         int // places that call it
+}
+
+// HandlerResult is one row of the handler table.
+type HandlerResult struct {
+	Owner string // the workflow that registers it
+	Kind  string // "signal", "query", "update" or "update validator"
+	Name  string // "" when the name is computed
+	Where string // file:line of the registration, as it should be printed
+	// Workflow is the small workflow made of its code (an update handler or
+	// validator PathKit maps), "" when there is none.
+	Workflow string
+	// Exercised is "yes", "no", or "not recorded" (a trace cannot tell: a query
+	// handler, or a signal read in a way no decision shows).
+	Exercised string
+	// Branches and BranchesTaken count the exits of the handler's own decisions
+	// (zero when it has no map).
+	Branches, BranchesTaken int
+	// Why says why the handler has no map of its code ("" when it has one).
+	Why string
+}
+
+// IsGap says the row is worth attention: a handler no test exercised, or one
+// with branches no test took.
+func (h HandlerResult) IsGap() bool {
+	return h.Exercised == "no" || h.BranchesTaken < h.Branches
+}
+
+// handlerTable builds the handler table from what the workflows register and
+// the traces counted for them.
+func handlerTable(in Input, graphs map[string]*model.Graph, seen map[string]map[string]bool, results []WorkflowResult) []HandlerResult {
+	byName := map[string]WorkflowResult{}
+	for _, w := range results {
+		byName[w.Name] = w
+	}
+	show := in.Display
+	if show == nil {
+		show = func(s string) string { return s }
+	}
+	var out []HandlerResult
+	done := map[string]bool{}
+	for _, h := range in.Handlers {
+		key := fmt.Sprintf("%s|%s|%s|%s:%d", h.Owner, h.Kind, h.Name, h.Pos.Filename, h.Pos.Line)
+		if done[key] {
+			continue
+		}
+		done[key] = true
+		if graphs[h.Owner] == nil {
+			continue // its workflow was not measured (--function, scope)
+		}
+		r := HandlerResult{Owner: h.Owner, Kind: h.Kind, Name: h.Name, Where: fmt.Sprintf("%s:%d", show(h.Pos.Filename), h.Pos.Line), Why: h.Why}
+		own, mapped := byName[h.WorkflowName]
+		switch {
+		case h.Kind == model.HandlerSignal:
+			r.Exercised = signalExercised(h, graphs[h.Owner], seen[h.Owner])
+			r.Why = ""
+		case mapped && h.WorkflowName != "":
+			r.Workflow = h.WorkflowName
+			if h.Workflow == nil {
+				r.Workflow = h.WorkflowName // a workflow PathKit finds on its own
+			}
+			r.Exercised = "no"
+			if o := byName[h.Owner]; own.TracesCounted == 0 && o.TracesCounted > 0 && o.OldRecorderTraces == o.TracesCounted {
+				r.Exercised = "not recorded" // every trace of the owner is from a recorder that did not record handlers
+			}
+			if own.TracesCounted > 0 {
+				r.Exercised = "yes"
+			}
+			r.Branches, r.BranchesTaken = own.Branches, own.BranchesTaken
+			r.Why = ""
+		default:
+			r.Exercised = "not recorded"
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// signalExercised looks for a decision on the signal in the owner's map:
+// "yes" when a counted trace took the exit for it, "no" when the map has
+// such an exit and none did, and "not recorded" when no decision shows the
+// signal (it is read with a plain Receive, say).
+func signalExercised(h model.Handler, g *model.Graph, seen map[string]bool) string {
+	if g == nil || h.Name == "" {
+		return "not recorded"
+	}
+	want := fmt.Sprintf("signal %q", h.Name)
+	found := false
+	for _, j := range g.AllJunctions() {
+		if j.Kind != model.Selector {
+			continue
+		}
+		for _, e := range j.Exits {
+			if e.Label == want {
+				found = true
+				if seen[e.ID.String()] {
+					return "yes"
+				}
+			}
+		}
+	}
+	if found {
+		return "no"
+	}
+	return "not recorded"
+}
+
+// CallOutcome is one outcome of a call: "success", "failure", or a kind of
+// failure the code tells apart ("timeout"); Seen says whether some counted trace
+// took it.
+type CallOutcome struct {
+	Outcome string
+	Seen    bool
+}
+
+// CallOutcomeRow is one call site of the outcome table.
+type CallOutcomeRow struct {
+	Workflow string
+	File     string // as it should be printed
+	Line     int
+	Kind     string // "activity", "local activity", "child workflow" or "nexus operation"
+	Name     string
+	Outcomes []CallOutcome
+}
+
+// Gaps are the outcomes no test saw.
+func (r CallOutcomeRow) Gaps() []string {
+	var out []string
+	for _, o := range r.Outcomes {
+		if !o.Seen {
+			out = append(out, o.Outcome)
+		}
+	}
+	return out
+}
+
+// callOutcomeTable lists the checked calls of every measured workflow and the
+// outcomes counted traces took (seen: every exit ID a counted trace recorded).
+func callOutcomeTable(in Input, seen map[string]map[string]bool) []CallOutcomeRow {
+	show := in.Display
+	if show == nil {
+		show = func(s string) string { return s }
+	}
+	var out []CallOutcomeRow
+	for _, w := range in.Workflows {
+		for _, site := range w.Graph.CallSites() {
+			row := CallOutcomeRow{Workflow: w.Name, File: show(site.File), Line: site.Line, Kind: site.Kind, Name: site.Name}
+			for _, e := range site.Junction.Exits {
+				row.Outcomes = append(row.Outcomes, CallOutcome{Outcome: map[string]string{"success": "success", "failure": "failure"}[e.Label], Seen: seen[w.Name][e.ID.String()]})
+			}
+			// success first, then failure, then the kinds of failure
+			sort.SliceStable(row.Outcomes, func(i, k int) bool {
+				return row.Outcomes[i].Outcome == "success" && row.Outcomes[k].Outcome != "success"
+			})
+			for _, f := range site.Failures {
+				row.Outcomes = append(row.Outcomes, CallOutcome{Outcome: "failure: " + f.Kind, Seen: seen[w.Name][f.Exit.ID.String()]})
+			}
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// LoopRoundsRow is one loop of the loop rounds table.
+type LoopRoundsRow struct {
+	Workflow string
+	File     string
+	Line     int
+	Loop     string // "for range items"
+	Rounds   []RoundCount
+}
+
+// RoundCount is one of the three round counts of a loop: whether it can
+// happen, and whether some test ran it.
+type RoundCount struct {
+	Bucket   string // "0 rounds", "1 round" or "2+ rounds"
+	Possible bool
+	Seen     bool
+}
+
+// Gaps are the round counts that can happen and no test ran.
+func (r LoopRoundsRow) Gaps() []string {
+	var out []string
+	for _, c := range r.Rounds {
+		if c.Possible && !c.Seen {
+			out = append(out, c.Bucket)
+		}
+	}
+	return out
+}
+
+// loopRoundsTable builds the table from the rounds counted traces ran. Copies
+// of one helper's loop (one per call) are one loop.
+type loopInput struct {
+	name   string
+	g      *model.Graph
+	rounds map[*model.Junction]map[string]bool
+}
+
+func loopRoundsTable(in Input, states []loopInput) []LoopRoundsRow {
+	show := in.Display
+	if show == nil {
+		show = func(s string) string { return s }
+	}
+	var out []LoopRoundsRow
+	for _, st := range states {
+		idx := map[string]int{}
+		for _, j := range st.g.Loops() {
+			key := fmt.Sprintf("%s:%d:%d", j.Pos.Filename, j.Pos.Line, j.Pos.Column)
+			i, ok := idx[key]
+			if !ok {
+				idx[key] = len(out)
+				i = len(out)
+				row := LoopRoundsRow{Workflow: st.name, File: show(j.Pos.Filename), Line: j.Pos.Line, Loop: j.Label}
+				for _, b := range model.RoundBuckets {
+					row.Rounds = append(row.Rounds, RoundCount{Bucket: b})
+				}
+				out = append(out, row)
+			}
+			for k, b := range model.RoundBuckets {
+				possible := b != model.RoundBuckets[0] || j.CanRun0()
+				out[i].Rounds[k].Possible = out[i].Rounds[k].Possible || possible
+				out[i].Rounds[k].Seen = out[i].Rounds[k].Seen || st.rounds[j][b]
+			}
+		}
+	}
+	return out
 }

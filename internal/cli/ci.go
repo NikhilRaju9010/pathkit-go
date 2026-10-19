@@ -50,6 +50,7 @@ type ciState struct {
 	floor        *float64
 	floorFrom    string
 	stageFloor   *float64
+	cappedBasis  string // "stage" or "branch": what the floor measures for a workflow over the cap
 	untested     []baseline.Finding
 	review       []baseline.Finding
 	lost         []baseline.Finding
@@ -84,6 +85,10 @@ func prepareCI(cmd *cobra.Command, opt ciOptions, sc *scoped, sf scopeFlags, fun
 	st := &ciState{write: opt.writeBaseline, allowLost: opt.allowLostTests}
 	if ci.FailUnderTestable != nil {
 		st.floor, st.floorFrom = ci.FailUnderTestable, cfg.Path
+	}
+	st.cappedBasis = ci.CappedBasis
+	if st.cappedBasis == "" {
+		st.cappedBasis = "stage"
 	}
 	if ci.StageFloor != nil {
 		st.stageFloor, st.floorFrom = ci.StageFloor, cfg.Path
@@ -164,9 +169,9 @@ func (st *ciState) failures(res coverage.Result) [][]string {
 	}
 	var out [][]string
 	if st.floor != nil {
-		c := res.Breakdown.TestableCoverage()
-		if v := coverage.Percent(c.Covered, c.Paths); v < *st.floor {
-			out = append(out, []string{fmt.Sprintf("testable coverage %s is below classification.ci.fail_under_testable %s (in %s)", render.Pct(v, st.floor), render.Threshold(*st.floor), st.floorFrom)})
+		covered, total, parts := coverage.TestableFloor(res, st.cappedBasis)
+		if v := coverage.Percent(covered, total); v < *st.floor {
+			out = append(out, []string{fmt.Sprintf("testable coverage %s is below classification.ci.fail_under_testable %s (in %s)%s", render.Pct(v, st.floor), render.Threshold(*st.floor), st.floorFrom, floorBasisNote(parts))})
 		}
 	}
 	if st.stageFloor != nil {
@@ -210,6 +215,49 @@ func (st *ciState) failures(res coverage.Result) [][]string {
 		st.listLost(&out, text)
 	}
 	return out
+}
+
+// floorBasisNote says, when some workflow is over the path cap, what each part
+// of the floor number was measured by (and nothing otherwise, so the message
+// of a project with no such workflow stays as it was).
+func floorBasisNote(parts []coverage.FloorPart) string {
+	if len(parts) < 2 {
+		return ""
+	}
+	var texts []string
+	for _, p := range parts {
+		switch {
+		case p.Workflow == "" && p.Total > 0:
+			texts = append(texts, fmt.Sprintf("path coverage of the workflows under the cap %d/%d", p.Covered, p.Total))
+		case p.Workflow != "":
+			texts = append(texts, fmt.Sprintf("%s over the cap, by %s coverage %d/%d", p.Workflow, p.Basis, p.Covered, p.Total))
+		}
+	}
+	return "; measured by " + strings.Join(texts, "; ")
+}
+
+// floorLines tell, for every workflow over the cap, what the testable floor
+// (fail_under_testable) measured it by. Nothing when there is no floor or no
+// such workflow.
+func (st *ciState) floorLines(res coverage.Result) []string {
+	if st == nil || st.floor == nil {
+		return nil
+	}
+	covered, total, parts := coverage.TestableFloor(res, st.cappedBasis)
+	if len(parts) < 2 {
+		return nil
+	}
+	lines := []string{fmt.Sprintf("CI floor basis (classification.ci.capped_basis: %s): %d/%d in all", st.cappedBasis, covered, total)}
+	for _, p := range parts {
+		if p.Workflow == "" {
+			if p.Total > 0 {
+				lines = append(lines, fmt.Sprintf("  workflows under the cap: path coverage %d/%d", p.Covered, p.Total))
+			}
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  %s: %s coverage %d/%d", p.Workflow, p.Basis, p.Covered, p.Total))
+	}
+	return lines
 }
 
 // lostLines lists the paths that lost their test, in the same shape as the
@@ -266,6 +314,16 @@ type (
 	jsonCIFloor struct {
 		Threshold float64 `json:"threshold"`
 		Passed    bool    `json:"passed"`
+		// Added with ci.capped_basis, on the floor only; absent when no
+		// workflow is over the cap: what each part of the number measured.
+		CappedBasis string        `json:"cappedBasis,omitempty"`
+		Parts       []jsonCIBasis `json:"parts,omitempty"`
+	}
+	jsonCIBasis struct {
+		Workflow string `json:"workflow"` // "" for the workflows under the cap
+		Basis    string `json:"basis"`    // "path", "stage" or "branch"
+		Covered  int    `json:"covered"`
+		Total    int    `json:"total"`
 	}
 	jsonCIFinding struct {
 		Workflow  string  `json:"workflow"`
@@ -287,8 +345,14 @@ func (st *ciState) json(res coverage.Result) *jsonCI {
 		out.BaselineMode = map[bool]string{true: "write", false: "check"}[st.write]
 	}
 	if st.floor != nil {
-		c := res.Breakdown.TestableCoverage()
-		out.Floor = &jsonCIFloor{Threshold: *st.floor, Passed: coverage.Percent(c.Covered, c.Paths) >= *st.floor}
+		covered, total, parts := coverage.TestableFloor(res, st.cappedBasis)
+		out.Floor = &jsonCIFloor{Threshold: *st.floor, Passed: coverage.Percent(covered, total) >= *st.floor}
+		if len(parts) > 1 {
+			out.Floor.CappedBasis = st.cappedBasis
+			for _, p := range parts {
+				out.Floor.Parts = append(out.Floor.Parts, jsonCIBasis{Workflow: p.Workflow, Basis: p.Basis, Covered: p.Covered, Total: p.Total})
+			}
+		}
 		out.Passed = out.Floor.Passed
 	}
 	if st.stageFloor != nil {

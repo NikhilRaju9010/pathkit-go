@@ -296,6 +296,34 @@ func TestStageSettingsRead(t *testing.T) {
 	if err != nil || c.StageMaxPaths != 256 || c.MaxContexts != 16 || c.CI.StageFloor != nil {
 		t.Errorf("defaults: %+v %v", c, err)
 	}
+	if c.CI.CappedBasis != "" && c.CI.CappedBasis != "stage" {
+		t.Errorf("capped_basis default: %q", c.CI.CappedBasis)
+	}
+	if c, err = read(`{"classification": {"enabled": true}}`); err != nil || c.HelperMode != "auto" {
+		t.Errorf("helpers.mode default: %q %v", c.HelperMode, err)
+	}
+	if c, err = read(`{"classification": {"helpers": {"mode": "summarize"}}}`); err != nil || c.HelperMode != "summarize" {
+		t.Errorf("helpers.mode summarize: %q %v", c.HelperMode, err)
+	}
+	if c, err = read(`{"classification": {"activity_wrappers": ["example.com/lib/wrap.Run", {"function": "(*example.com/lib/wrap.Client).Start", "kind": "child_workflow", "label": "Start"}]}}`); err != nil ||
+		len(c.ActivityWrappers) != 2 || c.ActivityWrappers[0].Kind != "activity" || c.ActivityWrappers[1].Kind != "child_workflow" || c.ActivityWrappers[1].Label != "Start" {
+		t.Errorf("activity_wrappers: %+v %v", c.ActivityWrappers, err)
+	}
+	if c, err = read(`{"classification": {"enabled": true}}`); err != nil || c.DirectReturns != "report" {
+		t.Errorf("direct_returns default: %q %v", c.DirectReturns, err)
+	}
+	if c, err = read(`{"classification": {"direct_returns": "step"}}`); err != nil || c.DirectReturns != "step" {
+		t.Errorf("direct_returns step: %q %v", c.DirectReturns, err)
+	}
+	if c, err = read(`{"classification": {"enabled": true}}`); err != nil || c.LoopsModel != "one" {
+		t.Errorf("loops.model default: %q %v", c.LoopsModel, err)
+	}
+	if c, err = read(`{"classification": {"loops": {"model": "zero-one-many"}}}`); err != nil || c.LoopsModel != "zero-one-many" {
+		t.Errorf("loops.model: %q %v", c.LoopsModel, err)
+	}
+	if c, err = read(`{"classification": {"enabled": true, "ci": {"capped_basis": "branch"}}}`); err != nil || c.CI.CappedBasis != "branch" {
+		t.Errorf("capped_basis branch: %+v %v", c, err)
+	}
 	c, err = read(`{"classification": {"enabled": true, "stages": {"max_paths": 64}, "engine": {"max_contexts": 4}, "ci": {"stage_floor": 70}}}`)
 	if err != nil || c.StageMaxPaths != 64 || c.MaxContexts != 4 || c.CI.StageFloor == nil || *c.CI.StageFloor != 70 {
 		t.Errorf("set: %+v %v", c, err)
@@ -304,6 +332,14 @@ func TestStageSettingsRead(t *testing.T) {
 		`{"classification": {"enabled": true, "stages": {"max_paths": 1}}}`,
 		`{"classification": {"enabled": true, "engine": {"max_contexts": 0}}}`,
 		`{"classification": {"enabled": true, "ci": {"stage_floor": 101}}}`,
+		`{"classification": {"enabled": true, "ci": {"capped_basis": "path"}}}`,
+		`{"classification": {"enabled": true, "helpers": {"mode": "some"}}}`,
+		`{"classification": {"activity_wrappers": [""]}}`,
+		`{"classification": {"direct_returns": "yes"}}`,
+		`{"classification": {"loops": {"model": "many"}}}`,
+		`{"classification": {"activity_wrappers": [{"function": "a.B", "kind": "signal"}]}}`,
+		`{"classification": {"activity_wrappers": [{"fn": "a.B"}]}}`,
+		`{"classification": {"enabled": true, "helpers": {"style": "inline"}}}`,
 		`{"classification": {"enabled": true, "stages": {"size": 5}}}`,
 	} {
 		if _, err := read(bad); err == nil {

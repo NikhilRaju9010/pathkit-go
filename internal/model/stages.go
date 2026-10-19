@@ -37,6 +37,28 @@ type Stage struct {
 	// Big: Count is more than the limit, even for this stage alone. It is not
 	// listed, and the reports use branch coverage inside it.
 	Big bool
+
+	// Part says the stage is a piece of a stretch that was too big for one
+	// stage, cut at the decisions that every path through a nested region of
+	// it passes (see splitBig). A part is examined by the fact engine with
+	// nothing known on the way in, and leaves nothing known: what it claims
+	// rests on its own decisions only. Within is its set of decisions; a stage
+	// path ends when it reaches a decision outside it. SplitFrom is how many
+	// paths the stretch had.
+	Part      bool
+	Within    map[*Junction]bool
+	SplitFrom *big.Int
+	// SplitWhy, on a Big stage that could not be cut, says why in a line.
+	SplitWhy string
+}
+
+// Stops reports whether a path of the stage ends when it reaches junction j
+// (the stage's next gate, or for a part any decision outside it).
+func (st Stage) Stops(j *Junction) bool {
+	if st.Part {
+		return !st.Within[j]
+	}
+	return st.Next != nil && j == st.Next
 }
 
 // Stages cuts the workflow into stages. Stages next to each other are merged
@@ -287,7 +309,7 @@ func (g *Graph) computeStages(maxPaths int) []Stage {
 		stages = append(stages, st)
 		a = b + 1
 	}
-	return stages
+	return g.splitBigStages(stages, maxPaths)
 }
 
 func stopOf(nodes []*Junction, i int) *Junction {
@@ -376,7 +398,7 @@ func (g *Graph) stagePaths(st Stage, limit int, used map[EdgeID]bool) (out []Sta
 			used[r.ID] = false
 			return
 		}
-		if t.Junction == nil || (st.Next != nil && t.Junction == st.Next) {
+		if t.Junction == nil || st.Stops(t.Junction) {
 			if len(out) == limit {
 				truncated = true
 				return
@@ -428,12 +450,20 @@ func (g *Graph) StagePieces(p Path, stages []Stage) []StagePath {
 		}
 	}
 	var out []StagePath
+	closeCur := func(cur StagePath) {
+		// A part of a cut stretch that the path skips (the nested region was not
+		// entered) has no piece.
+		if len(cur.Steps) == 0 && cur.Stage < len(stages) && stages[cur.Stage].Part {
+			return
+		}
+		out = append(out, cur)
+	}
 	cur := StagePath{Stage: 0}
 	for _, s := range p.Steps {
 		k := of[s.Junction]
 		for cur.Stage < k {
 			cur.Continue = true
-			out = append(out, cur)
+			closeCur(cur)
 			cur = StagePath{Stage: cur.Stage + 1}
 		}
 		cur.Steps = append(cur.Steps, s)

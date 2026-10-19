@@ -76,6 +76,11 @@ func writeOverlay(workflows []recordable, absTraces string) (string, error) {
 	if err != nil {
 		return "", userError("%s", err)
 	}
+	if cwd, err := os.Getwd(); err == nil {
+		if err := instrument.CheckOverlayDir(overlayDir, instrument.ModuleRoot(cwd)); err != nil {
+			return "", userError("%s", err)
+		}
+	}
 	overlay, err := instrument.WriteOverlay(res, overlayDir)
 	if err != nil {
 		return "", userError("could not write the overlay: %v", err)
@@ -148,23 +153,44 @@ func runTest(cmd *cobra.Command, target string, goArgs []string, traceDir string
 	}
 	goTest = append(goTest, goArgs...)
 
-	run := exec.Command("go", goTest...)
-	run.Dir = dir
-	run.Stdout, run.Stderr = stdout, stderr
-	run.Env = os.Environ()
-	// A folder reached through a symbolic link (macOS temp folders are one)
-	// keeps the link's name in $PWD, and "go test" would take that as the
-	// working folder; the Go tool names files by their real path, so the
-	// overlay would match nothing and no trace would be written. Name the
-	// real folder. (Not on Windows: $PWD does not work that way there.)
-	if runtime.GOOS != "windows" {
-		if abs, err := filepath.Abs(dir); err == nil {
-			if real, err := filepath.EvalSymlinks(abs); err == nil {
-				run.Env = append(run.Env, "PWD="+real)
+	// A folder that holds several Go modules is tested module by module; one
+	// overlay and one trace folder serve them all.
+	dirs := []string{dir}
+	if len(sc.res.Modules) > 0 {
+		dirs = sc.res.Modules
+	}
+	var testErr error
+	for _, d := range dirs {
+		args := goTest
+		if len(sc.res.Modules) > 0 {
+			args = append([]string(nil), goTest...)
+			for i, a := range args {
+				if a == pattern {
+					args[i] = "./..."
+				}
+			}
+			fmt.Fprintf(stderr, "pathkit test: running the tests of the module in %s\n", load.DisplayPath(d))
+		}
+		run := exec.Command("go", args...)
+		run.Dir = d
+		run.Stdout, run.Stderr = stdout, stderr
+		run.Env = os.Environ()
+		// A folder reached through a symbolic link (macOS temp folders are one)
+		// keeps the link's name in $PWD, and "go test" would take that as the
+		// working folder; the Go tool names files by their real path, so the
+		// overlay would match nothing and no trace would be written. Name the
+		// real folder. (Not on Windows: $PWD does not work that way there.)
+		if runtime.GOOS != "windows" {
+			if abs, err := filepath.Abs(d); err == nil {
+				if real, err := filepath.EvalSymlinks(abs); err == nil {
+					run.Env = append(run.Env, "PWD="+real)
+				}
 			}
 		}
+		if err := run.Run(); err != nil && testErr == nil {
+			testErr = err
+		}
 	}
-	testErr := run.Run()
 
 	files, err := trace.List(absTraces)
 	if err != nil {

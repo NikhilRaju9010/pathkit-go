@@ -74,5 +74,31 @@ Special-test coverage: 0 / 0
 Overall coverage:      20 / 38 = 52.6%  (all paths)
 Coverage basis used:   testable
 
+Handlers: 3 registered (signals, queries, updates and update validators), 0 with a gap; for 2 of them a recorded run cannot show whether a test used them ("not recorded"):
+  query status (approval.ApprovalWorkflow, registered at approval/approval.go:22): exercised by a test: not recorded
+  signal decision (approval.ApprovalWorkflow, registered at approval/approval.go:30): exercised by a test: not recorded
+  signal delivery-update (shipment.ShipmentWorkflow, registered at shipment/shipment.go:37): exercised by a test: yes
+
+Call outcomes: 12 activity, child workflow or Nexus calls checked, 7 outcomes no test saw:
+  billing/subscription.go:21: ChargeMonthly (activity) in billing.SubscriptionWorkflow: success seen, failure seen
+  fulfillment/fulfillment.go:23: ReserveInventory (activity) in fulfillment.OrderFulfillmentWorkflow: success seen, failure not seen
+  fulfillment/fulfillment.go:35: PaymentWorkflow (child workflow) in fulfillment.OrderFulfillmentWorkflow: success seen, failure seen
+  fulfillment/fulfillment.go:40: ShipOrder (activity) in fulfillment.OrderFulfillmentWorkflow: success seen, failure not seen
+  fulfillment/payment.go:15: AuthorizeCard (activity) in fulfillment.PaymentWorkflow: success seen, failure not seen
+  fulfillment/payment.go:21: FraudReview (activity) in fulfillment.PaymentWorkflow: success seen, failure not seen
+  orders/orders.go:41: ChargeCard (activity) in orders.OrderWorkflow: success seen, failure seen
+  polling/polling.go:23: CheckStatus (activity) in polling.ReportPollingWorkflow: success seen, failure not seen
+  reports/dailyreport.go:32: BuildReport (activity) in reports.DailyReportWorkflow: success seen, failure seen
+  reports/dailyreport.go:36: EmailReport (activity) in reports.DailyReportWorkflow: success seen, failure not seen
+  shipment/shipment.go:27: CreateLabel (activity) in shipment.ShipmentWorkflow: success seen, failure seen
+  shipment/shipment.go:55: NotifyCustomer (activity) in shipment.ShipmentWorkflow: success seen, failure not seen
+
+Loop rounds: 2 loops on the map, 2 loops with a round count no test ran:
+  billing/subscription.go:20: for i < s.CyclesPerRun in billing.SubscriptionWorkflow: 0 rounds not seen, 1 round seen, 2+ rounds seen
+  polling/polling.go:21: for attempt <= in.MaxPolls in polling.ReportPollingWorkflow: 0 rounds not seen, 1 round seen, 2+ rounds seen
+
+PathKit could not fully read 1 place:
+  approval/approval.go:29: closure not mapped func literal (approval.ApprovalWorkflow) — its Temporal calls are not steps of any path (a goroutine, a deferred cleanup or a function stored for later is not followed)
+
 0 workflows excluded (no scope in use)
 Traces: 21 read · 21 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable

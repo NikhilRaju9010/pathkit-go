@@ -41,6 +41,11 @@ Covered paths:
 Untested paths:
   3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed)
 
+Call outcomes: 1 activity, child workflow or Nexus call checked, 1 outcome no test saw:
+  orders/orders.go:41: ChargeCard (activity) in orders.OrderWorkflow: success not seen, failure seen
+
+PathKit read everything in scope
+
 0 workflows excluded (no scope in use)
 Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
 `
@@ -48,7 +53,8 @@ Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 exclu
 func TestCoverageText(t *testing.T) {
 	traces := ordersTraces(t)
 	out := filepath.Join(t.TempDir(), "report.txt")
-	stdout, stderr, code := run(t, "coverage", pilot+"/orders/orders.go", "--traces", traces, "--out", out)
+	inPilot(t) // file names print relative to the folder the command runs in
+	stdout, stderr, code := run(t, "coverage", "./orders/orders.go", "--traces", traces, "--out", out)
 	if code != ExitOK || stderr != "" || stdout != ordersCoverage {
 		t.Fatalf("code=%d stderr=%q\n%s\nwant\n%s", code, stderr, stdout, ordersCoverage)
 	}
@@ -58,8 +64,12 @@ func TestCoverageText(t *testing.T) {
 }
 
 func TestCoverageJSONGolden(t *testing.T) {
-	stdout, _, code := run(t, "coverage", pilot+"/orders/orders.go", "--traces", ordersTraces(t), "--json", "--fail-under", "60")
-	want, err := os.ReadFile("testdata/coverage_orders.classified.json")
+	traces := ordersTraces(t)
+	golden := absPath(t, "testdata/coverage_orders.classified.json")
+	inPilot(t)
+	stdout, _, code := run(t, "coverage", "./orders/orders.go", "--traces", traces, "--json", "--fail-under", "60")
+	updateGolden(t, golden, stdout)
+	want, err := os.ReadFile(golden)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,5 +226,17 @@ func TestClean(t *testing.T) {
 	if _, stderr, code := run(t, "clean", "--traces", dir, "--older-than", "soon"); code != ExitError ||
 		stderr != `pathkit clean: invalid --older-than value: "soon" (use a number with m, h or d, e.g. 7d)`+"\n" {
 		t.Errorf("bad --older-than: code=%d %q", code, stderr)
+	}
+}
+
+// updateGolden rewrites a golden file on purpose: PATHKIT_UPDATE_GOLDEN=1 go test ./internal/cli.
+// Look at "git diff" before committing what it wrote.
+func updateGolden(t *testing.T, path, content string) {
+	t.Helper()
+	if os.Getenv("PATHKIT_UPDATE_GOLDEN") == "" {
+		return
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

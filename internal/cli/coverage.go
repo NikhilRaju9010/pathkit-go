@@ -3,7 +3,9 @@ package cli
 import (
 	"encoding/json"
 	"math"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -20,6 +22,7 @@ type coverageOptions struct {
 	json    bool
 	clean   bool
 	hints   bool
+	paths   bool
 	// unmatched adds the unmatched-trace report (--unmatched).
 	unmatched bool
 }
@@ -51,6 +54,7 @@ on stderr; they never change the exit code.`,
 	f.StringVar(&opt.measure.failUnder, "fail-under", "", "exit 2 when path coverage is below this `percent` (0-100)")
 	f.BoolVar(&opt.json, "json", false, "print JSON instead of text")
 	f.BoolVar(&opt.hints, "hints", false, "under every testable path no test ran, say what a test must make happen to run it")
+	f.BoolVar(&opt.paths, "paths", false, "list the paths of a workflow with more paths than the list holds (by default only its counts, stages and groups are printed)")
 	f.BoolVar(&opt.unmatched, "unmatched", false, "add a report of the traces that fit no path: where each left the map, what the map expected, and the likely cause")
 	f.BoolVar(&opt.measure.allowStale, "allow-stale", false, "also count traces recorded for an older version of a workflow, when they still fit a path")
 	f.BoolVar(&opt.clean, "clean", false, "delete the trace files after the report (only when the report was produced)")
@@ -83,10 +87,14 @@ func runCoverage(cmd *cobra.Command, target string, opt coverageOptions) error {
 		}
 		output = buf.String()
 	} else {
-		output = render.CoverageTextHints(m.res, m.overallThreshold(), m.showClass, opt.hints)
+		output = render.CoverageTextFull(m.res, m.overallThreshold(), m.showClass, opt.hints, !opt.paths)
 		if v := m.classView(); v != nil {
 			output += "\n" + render.ClassificationBlock(m.res, *v)
 		}
+		for _, l := range m.ci.floorLines(m.res) {
+			output += l + "\n"
+		}
+		output += "\n" + render.HandlerBlock(m.res, false) + render.CallOutcomeBlock(m.res, false) + render.LoopRoundBlock(m.res, false) + render.UnreadBlock(m.res, render.UnreadTop)
 		output += "\n" + render.ExcludedBlock(m.res.Excluded, m.excludedBy) + render.TracesLine(m.res.Counts)
 		if opt.unmatched {
 			output += "\n" + render.UnmatchedSection(m.res)
@@ -105,6 +113,10 @@ type (
 		Total   int     `json:"total"`
 		Covered int     `json:"covered"`
 		Percent float64 `json:"percent"` // one decimal; use covered/total for exact math
+		// Added with the honest numbers: set to false, with the reason, only
+		// when total is 0 (the percent is then meaningless); absent otherwise.
+		Measured *bool  `json:"measured,omitempty"`
+		Reason   string `json:"reason,omitempty"`
 	}
 	jsonPath struct {
 		Number       int      `json:"number"`
@@ -157,11 +169,14 @@ type (
 		OverallCoverage     jsonCount `json:"overallCoverage"`
 	}
 	jsonWorkflow struct {
-		Name           string             `json:"name"`
-		AddedByConfig  bool               `json:"addedByConfig"`
-		Paths          jsonCount          `json:"paths"`
-		Branches       jsonCount          `json:"branches"`
-		Truncated      bool               `json:"truncated"`
+		Name          string    `json:"name"`
+		AddedByConfig bool      `json:"addedByConfig"`
+		Paths         jsonCount `json:"paths"`
+		Branches      jsonCount `json:"branches"`
+		Truncated     bool      `json:"truncated"`
+		// Added with several modules: the Go module the workflow is in; absent
+		// when the run covers one module.
+		Module         string             `json:"module,omitempty"`
 		PathList       []jsonPath         `json:"pathList"`
 		Classification jsonClassification `json:"classification"`
 		// Added with the unexplained-trace check; absent when every trace
@@ -172,10 +187,17 @@ type (
 		// digits). These keys are there when the workflow has several stages or
 		// more paths than the list holds; prunedGroups when parts of the map were
 		// left out of the list as impossible.
-		PathCountExact string       `json:"pathCountExact,omitempty"`
-		PathsListed    int          `json:"pathsListed,omitempty"`
-		Stages         []jsonStage  `json:"stages,omitempty"`
-		PrunedGroups   []jsonPruned `json:"prunedGroups,omitempty"`
+		PathCountExact string `json:"pathCountExact,omitempty"`
+		// Added with the old-version-branch count; absent when the workflow has no GetVersion check. An exact count, as a string.
+		OldVersionPaths string `json:"oldVersionPaths,omitempty"`
+		// Added with summarized helpers; absent when the workflow's helpers are
+		// copied into its paths.
+		HelpersSummarized bool         `json:"helpersSummarized,omitempty"`
+		HelpersReason     string       `json:"helpersReason,omitempty"`
+		Helpers           []jsonHelper `json:"helpers,omitempty"`
+		PathsListed       int          `json:"pathsListed,omitempty"`
+		Stages            []jsonStage  `json:"stages,omitempty"`
+		PrunedGroups      []jsonPruned `json:"prunedGroups,omitempty"`
 		// PrunedGroupsTotal is how many groups there are when prunedGroups holds only
 		// the biggest ones.
 		PrunedGroupsTotal int `json:"prunedGroupsTotal,omitempty"`
@@ -185,17 +207,23 @@ type (
 		BranchesAll *jsonCount `json:"branchesAll,omitempty"`
 	}
 	jsonStage struct {
-		Index          int        `json:"index"`
-		Paths          string     `json:"paths"` // exact, a decimal string
-		TooBigToList   bool       `json:"tooBigToList"`
-		Covered        int        `json:"covered"`
-		Testable       int        `json:"testable"`
-		CannotBeTested int        `json:"cannotBeTested"`
-		NeedsReview    int        `json:"needsReview"`
-		Branches       jsonCount  `json:"branches"`
-		Contexts       int        `json:"contexts"`
-		CutOff         bool       `json:"contextsCutOff"`
-		PathList       []jsonSPth `json:"pathList,omitempty"`
+		Index          int       `json:"index"`
+		Paths          string    `json:"paths"` // exact, a decimal string
+		TooBigToList   bool      `json:"tooBigToList"`
+		Covered        int       `json:"covered"`
+		Testable       int       `json:"testable"`
+		CannotBeTested int       `json:"cannotBeTested"`
+		NeedsReview    int       `json:"needsReview"`
+		Branches       jsonCount `json:"branches"`
+		Contexts       int       `json:"contexts"`
+		CutOff         bool      `json:"contextsCutOff"`
+		// Added with the cut of too-big stages: Part says the stage is a piece of
+		// a bigger stretch (splitFrom paths, a decimal string); splitWhy, on a stage
+		// too big to list, says why it could not be cut.
+		Part      bool       `json:"part,omitempty"`
+		SplitFrom string     `json:"splitFrom,omitempty"`
+		SplitWhy  string     `json:"splitWhy,omitempty"`
+		PathList  []jsonSPth `json:"pathList,omitempty"`
 	}
 	jsonSPth struct {
 		ID      string   `json:"id"`
@@ -270,6 +298,25 @@ type (
 		// more paths than the list holds. The older total, branches and
 		// classification keys keep their meaning: listed paths only.
 		Headline *jsonHeadline `json:"headline,omitempty"`
+		// Added with the honest numbers: the paths left out of the lists as
+		// impossible; absent unless some were. The classification counts
+		// above are the listed paths only.
+		LeftOutImpossible *jsonLeftOut `json:"leftOutImpossible,omitempty"`
+		// Added with the "could not fully read" panel: every place PathKit
+		// did not follow or cut off; an empty list means it read everything
+		// in scope.
+		Unread []jsonUnread `json:"unread"`
+		// Added with the handler table: every signal, query, update and update
+		// validator a workflow registers; absent when none does.
+		Handlers []jsonHandlerRow `json:"handlers,omitempty"`
+		// Added with the outcome table: every checked activity, child workflow
+		// and Nexus call, its outcomes and whether a test saw them; absent when
+		// there is none.
+		CallOutcomes []jsonCallOutcome `json:"callOutcomes,omitempty"`
+		// Added with the loop rounds table: every loop on a map, which of 0, 1
+		// and 2+ rounds can happen and which a test ran; absent when no
+		// workflow has a loop.
+		LoopRounds []jsonLoopRounds `json:"loopRounds,omitempty"`
 		// Added with the CI check; absent when it is off.
 		CI *jsonCI `json:"ci,omitempty"`
 		// With --unmatched only.
@@ -295,6 +342,65 @@ type (
 		StageCoverage                  jsonCount `json:"stageCoverage"`
 		StagesTooBigToList             int       `json:"stagesTooBigToList"`
 		BranchCoverage                 jsonCount `json:"branchCoverage"`
+	}
+	jsonHelper struct {
+		Helper   string    `json:"helper"`
+		File     string    `json:"file"`
+		Line     int       `json:"line"`
+		Branches jsonCount `json:"branches"`
+		Sites    int       `json:"sites"` // places that call it
+	}
+	jsonHandlerRow struct {
+		Workflow  string  `json:"workflow"` // the workflow that registers it
+		Kind      string  `json:"kind"`     // "signal", "query", "update" or "update validator"
+		Name      *string `json:"name"`     // null when the name is computed
+		File      string  `json:"file"`
+		Line      int     `json:"line"`
+		Exercised string  `json:"exercised"` // "yes", "no" or "not recorded"
+		// HandlerWorkflow is the small workflow made of the handler's code, when PathKit maps it.
+		HandlerWorkflow *string    `json:"handlerWorkflow"`
+		Branches        *jsonCount `json:"branches"` // null when the handler has no map
+		Why             *string    `json:"why"`
+	}
+	jsonCallOutcome struct {
+		Workflow string `json:"workflow"`
+		File     string `json:"file"`
+		Line     int    `json:"line"`
+		Kind     string `json:"kind"`
+		Name     string `json:"name"`
+		Outcomes []struct {
+			Outcome  string `json:"outcome"`
+			Possible bool   `json:"possible"`
+			Seen     bool   `json:"seen"`
+		} `json:"outcomes"`
+	}
+	jsonLoopRounds struct {
+		Workflow string `json:"workflow"`
+		File     string `json:"file"`
+		Line     int    `json:"line"`
+		Loop     string `json:"loop"`
+		Rounds   []struct {
+			Rounds   string `json:"rounds"` // "0 rounds", "1 round" or "2+ rounds"
+			Possible bool   `json:"possible"`
+			Seen     bool   `json:"seen"`
+		} `json:"rounds"`
+	}
+	jsonUnread struct {
+		Workflow   string  `json:"workflow"`
+		File       string  `json:"file"`
+		Line       int     `json:"line"`
+		Kind       string  `json:"kind"`
+		Call       string  `json:"call"`
+		Effect     string  `json:"effect"`
+		Suggestion *string `json:"suggestion"` // the activity_wrappers entry that would tell PathKit about the function; null if none
+	}
+	jsonLeftOut struct {
+		// Paths is an exact count (a string; it can pass 64 bits).
+		Paths   string            `json:"paths"`
+		Groups  int               `json:"groups"`
+		ByLabel map[string]string `json:"byLabel"`
+		// ListedPathsOnly: the classification numbers do not include them.
+		ListedPathsOnly bool `json:"listedPathsOnly"`
 	}
 	jsonAssumption struct {
 		Name   string  `json:"name"`
@@ -357,6 +463,17 @@ func count1(covered, total int) jsonCount {
 	return jsonCount{Total: total, Covered: covered, Percent: math.Round(coverage.Percent(covered, total)*10) / 10}
 }
 
+// count1r is count1 for the headline ratios: with nothing to divide by it adds
+// measured:false and the reason.
+func count1r(covered, total int, reason string) jsonCount {
+	c := count1(covered, total)
+	if total == 0 {
+		f := false
+		c.Measured, c.Reason = &f, reason
+	}
+	return c
+}
+
 func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCoverage {
 	out := jsonCoverage{
 		SchemaVersion: 1, Tool: "pathkit-go",
@@ -369,15 +486,26 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 	}
 	out.BlockedByKnownBugs = render.BlockedByKnownBugs(res)
 	if h, ok := res.Headline(); ok {
-		out.Headline = &jsonHeadline{PathCoverage: count1(h.PathCovered, h.PathTotal), PathWorkflows: h.PathWorkflows, WorkflowsTooBigForPathCoverage: h.TooBig,
-			StageCoverage: count1(h.StageCovered, h.StageTotal), StagesTooBigToList: h.StagesTooBig, BranchCoverage: count1(h.BranchCovered, h.BranchTotal)}
+		out.Headline = &jsonHeadline{PathCoverage: count1r(h.PathCovered, h.PathTotal, strconv.Itoa(h.PathWorkflows)+" workflows under the cap"), PathWorkflows: h.PathWorkflows, WorkflowsTooBigForPathCoverage: h.TooBig,
+			StageCoverage: count1r(h.StageCovered, h.StageTotal, "no stage paths to measure"), StagesTooBigToList: h.StagesTooBig, BranchCoverage: count1r(h.BranchCovered, h.BranchTotal, "no branches")}
+	}
+	out.Unread = unreadJSON(res)
+	out.Handlers = handlersJSON(res)
+	out.CallOutcomes = callOutcomesJSON(res)
+	out.LoopRounds = loopRoundsJSON(res)
+	if lo := render.LeftOutImpossible(res); lo.Groups > 0 {
+		by := map[string]string{}
+		for l, n := range lo.ByLabel {
+			by[l] = n.String()
+		}
+		out.LeftOutImpossible = &jsonLeftOut{Paths: lo.Paths.String(), Groups: lo.Groups, ByLabel: by, ListedPathsOnly: true}
 	}
 	if names := render.CapNames(res); len(names) > 0 {
 		out.PathCap = &jsonPathCap{Limit: model.DefaultMaxPaths, Workflows: names,
 			Message: render.CapHeadline(names) + " " + strings.Join(render.CapAdvice(), " ")}
 	}
 	for _, w := range res.Workflows {
-		jw := jsonWorkflow{Name: w.Name, AddedByConfig: w.AddedByConfig, Paths: count1(w.Covered, len(w.Paths)),
+		jw := jsonWorkflow{Name: w.Name, Module: w.Module, AddedByConfig: w.AddedByConfig, Paths: count1(w.Covered, len(w.Paths)),
 			Branches: count1(w.BranchesTaken, w.Branches), Truncated: w.Truncated, PathList: []jsonPath{}, Classification: classificationJSON(w.Breakdown)}
 		for _, p := range w.Paths {
 			steps := []string{}
@@ -392,13 +520,25 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 		if render.ShowStages(w) {
 			jw.PathCountExact, jw.PathsListed = w.Exact.String(), len(w.Paths)
 		}
+		if w.OldVersionPaths != nil {
+			jw.OldVersionPaths = w.OldVersionPaths.String()
+		}
+		if w.HelpersSummarized {
+			jw.HelpersSummarized, jw.HelpersReason = true, w.HelpersWhy
+			for _, u := range w.Units {
+				jw.Helpers = append(jw.Helpers, jsonHelper{Helper: u.Name, File: filepath.ToSlash(u.File), Line: u.Line, Branches: count1(u.BranchesTaken, u.Branches), Sites: u.Sites})
+			}
+		}
 		if w.Capped {
 			jw.BranchesAll = &jsonCount{Total: w.AllBranches, Covered: w.AllBranchesTaken, Percent: coverage.Percent(w.AllBranchesTaken, w.AllBranches)}
 		}
 		if render.ShowStages(w) {
 			for _, s := range w.Stages {
-				js := jsonStage{Index: s.Index + 1, Paths: s.Count.String(), TooBigToList: s.Big, Covered: s.Covered, Testable: s.Testable, CannotBeTested: s.CannotBeTested,
+				js := jsonStage{Part: s.Part, SplitWhy: s.SplitWhy, Index: s.Index + 1, Paths: s.Count.String(), TooBigToList: s.Big, Covered: s.Covered, Testable: s.Testable, CannotBeTested: s.CannotBeTested,
 					NeedsReview: s.NeedsReview, Branches: count1(s.BranchesTaken, s.Branches), Contexts: s.Contexts, CutOff: s.CutOff}
+				if s.SplitFrom != nil {
+					js.SplitFrom = s.SplitFrom.String()
+				}
 				for _, sp := range s.Paths {
 					end := string(sp.Path.End)
 					if sp.Path.Continue {
@@ -494,4 +634,63 @@ func optional(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+func unreadJSON(res coverage.Result) []jsonUnread {
+	out := []jsonUnread{}
+	for _, u := range res.Unread {
+		out = append(out, jsonUnread{Workflow: u.Workflow, File: filepath.ToSlash(u.File), Line: u.Line, Kind: u.Kind, Call: u.Call, Effect: u.Effect, Suggestion: optional(u.Suggestion)})
+	}
+	return out
+}
+
+func handlersJSON(res coverage.Result) []jsonHandlerRow {
+	var out []jsonHandlerRow
+	for _, h := range res.Handlers {
+		file, line := h.Where, 0
+		if i := strings.LastIndex(h.Where, ":"); i >= 0 {
+			file = h.Where[:i]
+			line, _ = strconv.Atoi(h.Where[i+1:])
+		}
+		row := jsonHandlerRow{Workflow: h.Owner, Kind: h.Kind, Name: optional(h.Name), File: filepath.ToSlash(file), Line: line,
+			Exercised: h.Exercised, HandlerWorkflow: optional(h.Workflow), Why: optional(h.Why)}
+		if h.Workflow != "" {
+			c := count1(h.BranchesTaken, h.Branches)
+			row.Branches = &c
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func callOutcomesJSON(res coverage.Result) []jsonCallOutcome {
+	var out []jsonCallOutcome
+	for _, r := range res.CallOutcomes {
+		row := jsonCallOutcome{Workflow: r.Workflow, File: filepath.ToSlash(r.File), Line: r.Line, Kind: r.Kind, Name: r.Name}
+		for _, o := range r.Outcomes {
+			row.Outcomes = append(row.Outcomes, struct {
+				Outcome  string `json:"outcome"`
+				Possible bool   `json:"possible"`
+				Seen     bool   `json:"seen"`
+			}{o.Outcome, true, o.Seen})
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func loopRoundsJSON(res coverage.Result) []jsonLoopRounds {
+	var out []jsonLoopRounds
+	for _, r := range res.LoopRounds {
+		row := jsonLoopRounds{Workflow: r.Workflow, File: filepath.ToSlash(r.File), Line: r.Line, Loop: r.Loop}
+		for _, c := range r.Rounds {
+			row.Rounds = append(row.Rounds, struct {
+				Rounds   string `json:"rounds"`
+				Possible bool   `json:"possible"`
+				Seen     bool   `json:"seen"`
+			}{c.Bucket, c.Possible, c.Seen})
+		}
+		out = append(out, row)
+	}
+	return out
 }

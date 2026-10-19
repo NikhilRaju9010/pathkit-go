@@ -714,9 +714,10 @@ func TestCoverageMatchesKey(t *testing.T) {
 			t.Errorf("report --json (minus file, priority, excludedBy) differs from coverage --json\ncoverage:\n%s\nreport:\n%s", cov, rep)
 		}
 		// 8 fields as before, plus the 3 added with path classification
-		// (classification, coverageBasis, classificationShown).
-		if len(c) != 11 || len(c["workflows"].([]any)) != len(wantPriority) {
-			t.Errorf("compared %d top-level fields and %d workflows; want 11 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
+		// (classification, coverageBasis, classificationShown), unread, and the
+		// handler, call outcome and loop round tables.
+		if len(c) != 15 || len(c["workflows"].([]any)) != len(wantPriority) {
+			t.Errorf("compared %d top-level fields and %d workflows; want 15 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
 		}
 		if !maps.Equal(gotPriority, wantPriority) {
 			t.Errorf("priorities %v, want %v", gotPriority, wantPriority)
@@ -772,6 +773,15 @@ func TestCoverageMatchesKey(t *testing.T) {
 		}
 		t.Chdir(pilot)
 		text, stderr, code := pathkit(t, "report", "./...", "--traces", traces)
+		update := func(name, content string) {
+			// Regenerate on purpose: PATHKIT_UPDATE_GOLDEN=1 go test ./internal/e2e -run TestCoverageMatchesKey
+			if os.Getenv("PATHKIT_UPDATE_GOLDEN") != "" {
+				if err := os.WriteFile(filepath.Join(goldenDir, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		update("baseline-report.txt", slashHeaders(text))
 		if code != 0 || stderr != "" || slashHeaders(text) != read("baseline-report.txt") {
 			t.Errorf("report text (classification off) differs from baseline-report.txt: exit %d %q", code, stderr)
 		}
@@ -789,10 +799,12 @@ func TestCoverageMatchesKey(t *testing.T) {
 		}
 
 		text, stderr, code = pathkit(t, "report", "./...", "--traces", traces, "--coverage-basis", "testable")
+		update("classified-report.txt", slashHeaders(text))
 		if code != 0 || stderr != "" || slashHeaders(text) != read("classified-report.txt") {
 			t.Errorf("classified report text differs from classified-report.txt: exit %d %q\n%s", code, stderr, text)
 		}
 		js, _, _ = pathkit(t, "report", "./...", "--traces", traces, "--json", "--coverage-basis", "testable")
+		update("classified-report.json", js)
 		if js != read("classified-report.json") {
 			t.Error("classified report --json differs from classified-report.json")
 		}
@@ -1105,6 +1117,10 @@ func stripClassification(v any) {
 			delete(x, "classification")
 			delete(x, "coverageBasis")
 			delete(x, "classificationShown")
+			delete(x, "unread")                                                    // the "could not fully read" panel (M7.8)
+			for _, k := range []string{"callOutcomes", "handlers", "loopRounds"} { // the outcome, handler and loop tables (M8)
+				delete(x, k)
+			}
 		}
 		if _, ok := x["threshold"]; ok {
 			delete(x, "basis")

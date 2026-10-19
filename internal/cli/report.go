@@ -22,6 +22,7 @@ type reportOptions struct {
 	clean   bool
 	html    string
 	hints   bool
+	paths   bool
 	// unmatched adds the unmatched-trace report (--unmatched).
 	unmatched bool
 	// groups adds the missed paths grouped by first untested step (--groups).
@@ -69,6 +70,7 @@ writes that file.`,
 	f.BoolVar(&opt.json, "json", false, "print JSON instead of text (default: the config's \"json\")")
 	f.BoolVar(&opt.summary, "summary", false, "one line per workflow instead of every path")
 	f.BoolVar(&opt.hints, "hints", false, "under every testable path no test ran, say what a test must make happen to run it")
+	f.BoolVar(&opt.paths, "paths", false, "list the paths of a workflow with more paths than the list holds (by default only its counts, stages and groups are printed)")
 	f.BoolVar(&opt.unmatched, "unmatched", false, "add a report of the traces that fit no path: where each left the map, what the map expected, and the likely cause")
 	f.BoolVar(&opt.groups, "groups", false, "add the testable paths no test ran, grouped by the first step no test took (biggest group first, with where it is and how to cover it)")
 	f.BoolVar(&opt.noColor, "no-color", false, "never colour the output (also: the config's \"noColor\", or the NO_COLOR environment variable)")
@@ -145,7 +147,7 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 	if opt.summary && opt.hints {
 		fmt.Fprintln(cmd.ErrOrStderr(), "pathkit report: --hints ignored because --summary was passed (it lists no paths).")
 	}
-	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.overallThreshold(), ExcludedBy: by, Classification: m.classView(), Hints: opt.hints}
+	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.overallThreshold(), ExcludedBy: by, Classification: m.classView(), Hints: opt.hints, OmitCappedPaths: !opt.paths, ExtraLines: m.ci.floorLines(m.res)}
 	plain := render.ReportText(m.res, ro)
 	printed := plain
 	if render.ColorEnabled(noColor, os.Getenv("NO_COLOR"), isTerminal(cmd.OutOrStdout())) {
@@ -218,6 +220,12 @@ type (
 		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
 		// The three headline numbers; absent unless a workflow is over the cap.
 		Headline *jsonHeadline `json:"headline,omitempty"`
+		// Paths left out of the lists as impossible; absent unless some were.
+		LeftOutImpossible *jsonLeftOut      `json:"leftOutImpossible,omitempty"`
+		Unread            []jsonUnread      `json:"unread"`
+		Handlers          []jsonHandlerRow  `json:"handlers,omitempty"`
+		CallOutcomes      []jsonCallOutcome `json:"callOutcomes,omitempty"`
+		LoopRounds        []jsonLoopRounds  `json:"loopRounds,omitempty"`
 	}
 	jsonGroup struct {
 		Workflow string   `json:"workflow"`
@@ -257,7 +265,7 @@ func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisIn
 	c := coverageJSON(res, threshold, bi)
 	out := jsonReport{SchemaVersion: c.SchemaVersion, Tool: c.Tool, Workflows: []jsonReportWorkflow{}, Excluded: c.Excluded,
 		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder,
-		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs, Headline: c.Headline}
+		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs, Headline: c.Headline, LeftOutImpossible: c.LeftOutImpossible, Unread: c.Unread, Handlers: c.Handlers, CallOutcomes: c.CallOutcomes, LoopRounds: c.LoopRounds}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
 		// Forward slashes on every system, so the JSON is the same everywhere;

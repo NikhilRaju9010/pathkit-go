@@ -2,6 +2,39 @@
 
 All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is part of the version being prepared, v0.2.0 (not tagged). The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
 
+## v0.3.0 (not tagged yet)
+
+Two milestones: honest numbers on huge workflows, and reading more Temporal code shapes. Nothing is tagged yet. Every existing JSON key keeps its name, value and meaning; new keys are added. Output for a workflow under the 2000-path cap is unchanged except for the new tables and lines listed under "Added to every report".
+
+### Honest numbers on huge workflows
+
+- **`not measured (<reason>)`** replaces `0/0 (0.0%)` everywhere a ratio has nothing to divide by (text, `--summary`, HTML cards). The JSON ratio gets `measured: false` and `reason` beside its old keys.
+- **Classification block for a workflow over the cap** is titled "listed paths only", gets a `Left out of the lists as impossible` line (total and by label; JSON `leftOutImpossible`), says `Cannot be tested: 0 listed, plus N left out`, and spells out the testable denominator.
+- **CI floor for big workflows.** `classification.ci.fail_under_testable` uses stage coverage (`ci.capped_basis: "stage"`, default) or branch coverage (`"branch"`) for each workflow over the cap, and says which. Exit codes are unchanged.
+- **Helpers copied in or summarized** (`classification.helpers.mode`: `inline`, `summarize`, `auto`, default `auto`). When copying helpers into the map would pass the path cap, each helper is mapped once and a call is one step; the report says `<helper>: X of Y branches tested; called from N places`. Workflows under the cap keep every path id. Traces recorded before this change still count (they are converted while the workflow code is unchanged). In the sample fixture a workflow that calls one helper at twelve places goes from 8,191 paths to 13.
+- **Stages cut further.** A stage with more paths than `stages.max_paths` is cut at the decisions of its nested regions instead of falling back to branch coverage; the report says when a stretch cannot be cut and why.
+- **Old `GetVersion` branches.** A version check written as a yes/no variable, with `!`, or as a one-line function is read like the plain comparison; stage paths through the old side are labelled; each workflow prints `Old version branches: N paths (exact)` (`oldVersionPaths`).
+- **Short text report for huge workflows.** The paths of a workflow over the cap are listed only with the new `--paths` flag (`report`, `coverage`).
+- **`pathkit explain <id>`** prints warnings only for the workflow that owns the path.
+- **Overlay safety.** A copied `.pathkit/overlay` that names files outside the module, or is a link out of it, is refused with a message; nothing is read or written there.
+- **The HTML page** shows the missed-paths section only when there are groups (it already did; now tested).
+- **Windows CI** runs the race test with `-p 2`. macOS and Linux are unchanged.
+
+### Reading more Temporal shapes
+
+- **"PathKit could not fully read" panel** in every report (text, `--summary`, JSON `unread`, HTML): calls it did not follow (interface methods, function values, other packages and modules), computed names, futures nobody reads, returned calls, closures, validators that panic, workflows it cannot map, the path cap and context cut-offs.
+- **Nexus operations** are steps (`echo (nexus operation)`, success / failure).
+- **Update handlers and validators** are mapped like small workflows and recorded; the handler table (`handlers`) covers signals, queries, updates and validators.
+- **Call outcome table** (`callOutcomes`) with the kinds of failure the code tells apart, and the **loop rounds table** (`loopRounds`).
+- **`classification.activity_wrappers`** makes a library function a step. **`classification.direct_returns`** (`report` default, `step`) decides what `return fut.Get(...)` is. **`classification.loops.model`** accepts `one`; `zero-one-many` is reserved.
+- **Several Go modules in one folder** are read in one combined report (`--module` limits it).
+- **`docs/CONSTRUCTS.md`** lists 26 shapes, each handled or reported, with a fixture and an `expected.json` in `testdata/constructs` that a test checks.
+- **Trace files** gain an optional `recorder` field. Older traces are read and counted as before; a step kind they cannot hold is shown as not recorded.
+
+### Added to every report (new lines and keys)
+
+`PathKit read everything in scope` (or the panel), the handler table, the call outcome table and the loop rounds table in the text and HTML report; `unread`, `handlers`, `callOutcomes` and `loopRounds` in the JSON. The golden files of the sample project, `internal/cli/testdata` and the test expectations that pin the report text were updated for these additions (`PATHKIT_UPDATE_GOLDEN=1`, `PATHKIT_UPDATE_HTML_GOLDEN=1`); `testdata/golden/model/snapshot.txt` and the older `coverage_orders.json` / `report_orders.json` goldens were not touched.
+
 ## v0.2.0 (not tagged yet)
 
 The next version collects everything below; nothing is tagged yet.

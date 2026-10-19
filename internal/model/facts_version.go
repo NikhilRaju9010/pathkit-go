@@ -107,7 +107,53 @@ func (b *builder) versionRange(call *ast.CallExpr) (id string, lo, hi int64, ok 
 	return constant.StringVal(tv.Value), lo, hi, true
 }
 
+// versionCondition reads an if condition on a GetVersion result. Besides the
+// comparison itself it follows a bool variable set once from one, a negation
+// of one, and a call of a function of the package whose only statement is
+// "return <such a comparison>" (a version gate written as a helper).
 func (b *builder) versionCondition(cond ast.Expr) (Fact, bool) {
+	return b.versionConditionAt(cond, 0)
+}
+
+func (b *builder) versionConditionAt(cond ast.Expr, depth int) (Fact, bool) {
+	if depth > 3 {
+		return Fact{}, false
+	}
+	switch e := ast.Unparen(cond).(type) {
+	case *ast.UnaryExpr:
+		if e.Op != token.NOT {
+			return Fact{}, false
+		}
+		f, ok := b.versionConditionAt(e.X, depth+1)
+		if !ok {
+			return Fact{}, false
+		}
+		if f.Exit == "true" {
+			f.Exit = "false"
+		} else {
+			f.Exit = "true"
+		}
+		return f, true
+	case *ast.Ident:
+		if rhs, ok := b.singleDefinition(e); ok {
+			return b.versionConditionAt(rhs, depth+1)
+		}
+		return Fact{}, false
+	case *ast.CallExpr:
+		h := b.calleeOf(e)
+		if h == nil || h.body == nil || len(h.body.List) != 1 {
+			return Fact{}, false
+		}
+		ret, ok := h.body.List[0].(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return Fact{}, false
+		}
+		return b.versionConditionAt(ret.Results[0], depth+1)
+	}
+	return b.versionComparison(cond)
+}
+
+func (b *builder) versionComparison(cond ast.Expr) (Fact, bool) {
 	bin, ok := ast.Unparen(cond).(*ast.BinaryExpr)
 	if !ok {
 		return Fact{}, false

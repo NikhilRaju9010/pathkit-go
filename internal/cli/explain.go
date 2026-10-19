@@ -99,8 +99,20 @@ func runExplain(cmd *cobra.Command, id, target string, opt explainOptions) error
 		if len(truncated) > 0 {
 			msg += fmt.Sprintf("; %s more paths than PathKit lists (2000 each), so the id may be beyond the path cap: %s", map[bool]string{true: "this workflow has", false: "these workflows have"}[len(truncated) == 1], strings.Join(truncated, ", "))
 		}
+		m.emitWarnings(nil) // nothing owns the id: every warning may matter
 		return userError("%s", msg)
 	}
+	// Only the warnings of the workflow(s) that own the path: another
+	// workflow's stale trace or rule is not news here.
+	owners := map[string]bool{}
+	for _, w := range m.res.Workflows {
+		for _, p := range w.Paths {
+			if p.StableID == id {
+				owners[w.Name] = true
+			}
+		}
+	}
+	m.emitWarnings(owners)
 	if len(found) > 1 {
 		fmt.Fprintf(cmd.OutOrStdout(), "%s fits a path in %d workflows (a stable id is only unique inside one workflow; --function picks one):\n\n", id, len(found))
 	}

@@ -175,6 +175,8 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 <nav aria-label="Sections">
 <a href="#summary">Summary</a>
 <a href="#workflows">Workflows</a>
+<a href="#unread">Could not read (0)</a>
+<a href="#call-outcomes">Call outcomes (1)</a>
 <a href="#groups">Missed paths (1 groups)</a>
 <a href="#paths">Paths</a>
 </nav>
@@ -228,6 +230,29 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 <td data-label="Coverage"><span class="bar-mini" aria-hidden="true"><i style="width:66.7%"></i></span> 2 of 3 · 66.7%</td>
 <td data-label="Missed">1</td>
 <td data-label="Paths">3</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section id="unread" aria-labelledby="h-unread" data-unread="0">
+<h2 id="h-unread">What PathKit could not fully read</h2>
+<p class="note">PathKit read everything in scope</p>
+</section>
+<section id="call-outcomes" aria-labelledby="h-call-outcomes" data-call-outcomes="1">
+<h2 id="h-call-outcomes">Call outcomes</h2>
+<p class="note">Every activity, child workflow and Nexus call whose result the code checks: the outcomes it can have, and whether a recorded test saw each. A failure the code tells apart (a timeout, a cancellation) is listed under the call.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Outcomes of the checked calls</caption>
+<thead><tr><th scope="col">Call</th><th scope="col">Workflow</th><th scope="col">Where</th><th scope="col">Outcomes</th></tr></thead>
+<tbody>
+<tr data-call-gap="true">
+<td data-label="Call">ChargeCard (activity)</td>
+<td data-label="Workflow">orders.OrderWorkflow</td>
+<td data-label="Where" class="file">orders/orders.go:41</td>
+<td data-label="Outcomes">success <strong>not seen</strong>, failure seen</td>
 </tr>
 </tbody>
 </table>

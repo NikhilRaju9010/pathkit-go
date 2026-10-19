@@ -197,3 +197,58 @@ func Incremented(ctx workflow.Context) error {
 	}
 	return step(ctx)
 }
+
+// old = true: the gate is kept in a bool variable that is set once.
+func CatchBoolVar(ctx workflow.Context) error {
+	newBehaviour := workflow.GetVersion(ctx, "change-s", workflow.DefaultVersion, 1) != workflow.DefaultVersion
+	if newBehaviour {
+		return step(ctx)
+	}
+	return nil
+}
+
+// old = false: the same variable, tested with !.
+func CatchBoolVarNegated(ctx workflow.Context) error {
+	newBehaviour := workflow.GetVersion(ctx, "change-t", workflow.DefaultVersion, 1) != workflow.DefaultVersion
+	if !newBehaviour {
+		return nil
+	}
+	return step(ctx)
+}
+
+func useNewRules(ctx workflow.Context) bool {
+	return workflow.GetVersion(ctx, "change-u", workflow.DefaultVersion, 1) != workflow.DefaultVersion
+}
+
+// old = false: the gate is a small function of the package.
+func CatchHelperGate(ctx workflow.Context) error {
+	if useNewRules(ctx) {
+		return step(ctx)
+	}
+	return nil
+}
+
+func isBig(n int) bool {
+	return n > 10
+}
+
+// A function that is not a version gate is not read as one.
+func NotAGateFunction(ctx workflow.Context, n int) error {
+	if isBig(n) {
+		return step(ctx)
+	}
+	return nil
+}
+
+func gateWithTwoStatements(ctx workflow.Context) bool {
+	_ = ctx
+	return workflow.GetVersion(ctx, "change-v", workflow.DefaultVersion, 1) != workflow.DefaultVersion
+}
+
+// A gate function with more than the return is not read.
+func GateFunctionWithMore(ctx workflow.Context) error {
+	if gateWithTwoStatements(ctx) {
+		return step(ctx)
+	}
+	return nil
+}

@@ -3,14 +3,17 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"go/ast"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/tools/go/packages"
 
 	"github.com/NikhilRaju9010/pathkit-go/internal/classify"
+	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
 	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
@@ -22,7 +25,8 @@ type scopeFlags struct {
 	config  string
 	include []string
 	exclude []string
-	all     bool // analyze only: ignore the scope
+	all     bool   // analyze only: ignore the scope
+	module  string // limit to one module of a folder that holds several (a module path or a folder name)
 	// wantNames (not a flag): the command resolves workflow names from the
 	// classification section (coverage and report), so the configured
 	// packages must be loaded to check them.
@@ -37,6 +41,7 @@ func addScopeFlags(cmd *cobra.Command, sf *scopeFlags, withAll bool) {
 	f.StringVar(&sf.config, "config", "", "use this config `file` instead of searching for .pathkitrc.json")
 	f.StringSliceVar(&sf.include, "include", nil, "only these `workflows` count (replaces the config's include list)")
 	f.StringSliceVar(&sf.exclude, "exclude", nil, "leave these `workflows` out (reason: \"excluded by --exclude flag\")")
+	f.StringVar(&sf.module, "module", "", "when the folder holds several Go modules, only this `module` (its module path, or its folder name)")
 	if withAll {
 		f.BoolVar(&sf.all, "all", false, "show every workflow, ignoring .pathkitrc.json, --include and --exclude")
 	}
@@ -48,6 +53,9 @@ type recordable struct {
 	graph         *model.Graph
 	hash          string
 	addedByConfig bool
+	// handler is set when the workflow is the code of an update handler or
+	// validator that another workflow registers (see model.FindHandlers).
+	handler *model.Handler
 }
 
 // notAnalyzable is an in-scope workflow PathKit can't map. It is always
@@ -65,6 +73,7 @@ type scoped struct {
 	res           *load.Result
 	cfg           *scope.Config // nil: no config file in use
 	mapped        []recordable
+	handlers      []model.Handler // what the mapped workflows register (the handler table)
 	excluded      []scope.Excluded
 	notAnalyzable []notAnalyzable
 	// names are every workflow-like function the names in the config were
@@ -117,6 +126,11 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 	if err != nil {
 		return nil, userError("%s", err)
 	}
+	if sf.module != "" {
+		if res, err = onlyModule(res, sf.module); err != nil {
+			return nil, userError("%s", err)
+		}
+	}
 	// Names must not depend on which folder this command was given: with a
 	// config they are decided over the config's packages (loaded once more
 	// when the command was given another folder), else over what was loaded.
@@ -167,8 +181,15 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 	for _, f := range nameSet {
 		out.names = append(out.names, f.Workflow.Name)
 	}
+	opts := model.Options{Helpers: helperMode(cfg), Wrappers: wrapperSpecs(cfg), DirectReturns: cfg != nil && cfg.Classification.DirectReturns == "step"}
+	known := map[*ast.FuncDecl]string{}
+	for _, f := range fns {
+		if f.Auto {
+			known[f.Workflow.Func] = f.Workflow.Name
+		}
+	}
 	for _, e := range applied.InScope {
-		g, err := model.Build(e.Workflow)
+		g, err := model.BuildWith(e.Workflow, opts)
 		var u *model.UnsupportedError
 		var pe *model.PragmaError
 		if errors.As(err, &u) || errors.As(err, &pe) {
@@ -181,6 +202,25 @@ func loadScoped(cmdName, target string, sf scopeFlags, stderr io.Writer) (*scope
 		out.mapped = append(out.mapped, recordable{
 			wf: e.Workflow, graph: g, hash: g.CodeHash(), addedByConfig: e.AddedByConfig,
 		})
+		// The update handlers and validators the workflow registers are small
+		// workflows of their own (their code has paths and branches).
+		for _, h := range model.FindHandlers(e.Workflow, known) {
+			if h.Workflow != nil {
+				hg, err := model.BuildWith(*h.Workflow, opts)
+				var hu *model.UnsupportedError
+				var hp *model.PragmaError
+				switch {
+				case errors.As(err, &hu) || errors.As(err, &hp):
+					h.Why, h.Workflow = "not analysed: "+err.Error(), nil
+				case err != nil:
+					return nil, err
+				default:
+					hc := h
+					out.mapped = append(out.mapped, recordable{wf: *h.Workflow, graph: hg, hash: hg.CodeHash(), handler: &hc})
+				}
+			}
+			out.handlers = append(out.handlers, h)
+		}
 	}
 	return out, nil
 }
@@ -198,6 +238,7 @@ func loadAll(targets []string) (*load.Result, error) {
 		if err != nil {
 			return nil, err
 		}
+		merged.Modules = append(merged.Modules, r.Modules...)
 		for _, p := range r.Packages {
 			if !seen[p.ID] {
 				seen[p.ID] = true
@@ -246,4 +287,94 @@ func loadConfig(explicit, cwd string) (*scope.Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// notMappedUnread lists the workflows in scope that PathKit could not map at
+// all (an unsupported construct) for the "could not fully read" panel.
+func notMappedUnread(sc *scoped) []coverage.UnreadEntry {
+	var out []coverage.UnreadEntry
+	for _, n := range sc.notAnalyzable {
+		var u *model.UnsupportedError
+		if !errors.As(n.err, &u) {
+			continue
+		}
+		out = append(out, coverage.UnreadEntry{Workflow: n.name, File: load.DisplayPath(u.Pos.Filename), Line: u.Pos.Line, Kind: coverage.UnreadNotMapped,
+			Call: u.Construct, Effect: "the whole workflow is left out of the report: " + u.Reason})
+	}
+	return out
+}
+
+// helperMode is the config's classification.helpers.mode (auto when unset).
+func helperMode(cfg *scope.Config) model.HelperMode {
+	if cfg == nil {
+		return model.HelpersAuto
+	}
+	switch cfg.Classification.HelperMode {
+	case "inline":
+		return model.HelpersInline
+	case "summarize":
+		return model.HelpersSummarize
+	}
+	return model.HelpersAuto
+}
+
+// wrapperSpecs are the config's classification.activity_wrappers for the model.
+func wrapperSpecs(cfg *scope.Config) []model.Wrapper {
+	if cfg == nil {
+		return nil
+	}
+	var out []model.Wrapper
+	for _, w := range cfg.Classification.ActivityWrappers {
+		out = append(out, model.Wrapper{Function: w.Function, Kind: w.Kind, Label: w.Label})
+	}
+	return out
+}
+
+// onlyModule keeps the packages of one module of a folder that holds several:
+// named by its module path or by its folder (its name, or its path below the
+// folder given).
+func onlyModule(res *load.Result, want string) (*load.Result, error) {
+	if len(res.Modules) == 0 {
+		return nil, fmt.Errorf("--module %s: the folder holds one Go module, not several; leave --module out", want)
+	}
+	matches := func(dir, path string) bool {
+		return want == path || want == filepath.Base(dir) || want == filepath.ToSlash(dir) || strings.HasSuffix(filepath.ToSlash(dir), "/"+strings.TrimPrefix(filepath.ToSlash(want), "./"))
+	}
+	out := &load.Result{File: res.File}
+	for _, p := range res.Packages {
+		if p.Module != nil && matches(p.Module.Dir, p.Module.Path) {
+			out.Packages = append(out.Packages, p)
+		}
+	}
+	var names []string
+	for _, m := range res.Modules {
+		names = append(names, filepath.Base(m))
+		for _, p := range out.Packages {
+			if p.Module != nil && p.Module.Dir == m {
+				out.Modules = append(out.Modules, m)
+				break
+			}
+		}
+	}
+	if len(out.Packages) == 0 {
+		return nil, fmt.Errorf("--module %s matches none of the modules found (%s)", want, strings.Join(names, ", "))
+	}
+	return out, nil
+}
+
+// moduleOf is the module path a workflow's package belongs to.
+func moduleOf(wf discover.Workflow) string {
+	if wf.Pkg != nil && wf.Pkg.Module != nil {
+		return wf.Pkg.Module.Path
+	}
+	return ""
+}
+
+// moduleIfSeveral is the workflow's module path when the folder holds several
+// modules, so reports name it; "" otherwise (nothing changes for one module).
+func moduleIfSeveral(sc *scoped, wf discover.Workflow) string {
+	if len(sc.res.Modules) > 1 {
+		return moduleOf(wf)
+	}
+	return ""
 }

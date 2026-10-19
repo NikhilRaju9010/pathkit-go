@@ -94,6 +94,9 @@ func runAnalyze(cmd *cobra.Command, arg string, opt analyzeOptions) error {
 		if r.addedByConfig { // D8: always visible which workflows a person added
 			block = strings.Replace(block, "Workflow: "+r.wf.Name+"\n", "Workflow: "+r.wf.Name+" (added by config)\n", 1)
 		}
+		if m := moduleIfSeveral(sc, r.wf); m != "" { // several modules: say which one
+			block = strings.Replace(block, "Workflow: "+r.wf.Name, "Workflow: "+r.wf.Name+" [module "+m+"]", 1)
+		}
 		blocks = append(blocks, block)
 	}
 	if len(blocks) == 0 {

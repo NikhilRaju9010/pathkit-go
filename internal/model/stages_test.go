@@ -70,13 +70,52 @@ func TestStagesAddUp(t *testing.T) {
 					allSmall = allSmall && !st.Big
 				}
 				if allSmall {
-					total, through := new(big.Int), big.NewInt(1)
-					for k := range stages {
-						total.Add(total, new(big.Int).Mul(through, ends[k]))
-						through = new(big.Int).Mul(through, goes[k])
+					// The paths of the workflow are the ways to go from stage to stage:
+					// from the start, take a stage path of the stage the road is at; one
+					// that ends the workflow is a path, one that goes on leads to the
+					// stage that begins where it stops. For stages in a row this is the
+					// product of their counts; a stretch cut into parts has a nested
+					// region that some roads skip.
+					byEntry := map[*model.Junction]int{}
+					for k, st := range stages {
+						if st.Entry.Junction != nil {
+							byEntry[st.Entry.Junction] = k
+						}
 					}
-					if total.Cmp(g.PathCount()) != 0 {
-						t.Errorf("%s (limit %d): stages multiply out to %s paths, PathCount says %s", wf.Name, limit, total, g.PathCount())
+					memo := map[int]*big.Int{}
+					var count func(k int) *big.Int
+					bad := false
+					count = func(k int) *big.Int {
+						if v, ok := memo[k]; ok {
+							return v
+						}
+						n := new(big.Int)
+						sp, _ := g.StagePaths(stages[k], limit+1)
+						for _, p := range sp {
+							if !p.Continue {
+								n.Add(n, big.NewInt(1))
+								continue
+							}
+							if len(p.Steps) == 0 {
+								bad = true
+								continue
+							}
+							next, ok := byEntry[p.Steps[len(p.Steps)-1].Exit.To.Junction]
+							if !ok {
+								bad = true // a stage path goes on to a decision that no stage begins at
+								continue
+							}
+							n.Add(n, count(next))
+						}
+						memo[k] = n
+						return n
+					}
+					total := g.PathCount() // a map with no decision at all has no stages to add up
+					if g.Start.Junction != nil {
+						total = count(0)
+					}
+					if bad || total.Cmp(g.PathCount()) != 0 {
+						t.Errorf("%s (limit %d): stages add up to %s paths (consistent: %v), PathCount says %s", wf.Name, limit, total, !bad, g.PathCount())
 					}
 				}
 				for _, p := range ps.List {
@@ -130,5 +169,44 @@ func TestBigWorkflowStages(t *testing.T) {
 	}
 	if st := e.Stages(256); len(st) < 2 {
 		t.Errorf("EarlyExits: %d stages", len(st))
+	}
+}
+
+// PrunedFlow's first stretch is "if disabled { eleven ifs }" followed by eleven
+// more: 2,049 paths in one stretch. It is cut at the nested region: the
+// decision that opens it, the first eight ifs of the region, its last three,
+// then the second chain as before.
+func TestBigStageIsCutAtANestedRegion(t *testing.T) {
+	g, err := model.Build(workflowsIn(t, "../../testdata/fixtures/bigflow")["bigflow.PrunedFlow"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	stages := g.Stages(256)
+	var counts []string
+	parts := 0
+	for _, st := range stages {
+		counts = append(counts, st.Count.String())
+		if st.Part {
+			parts++
+			if st.Big || st.SplitFrom == nil || st.SplitFrom.String() != "2049" {
+				t.Errorf("stage %d: part with %s paths, big %v, split from %v", st.Index, st.Count, st.Big, st.SplitFrom)
+			}
+		}
+		if st.Big {
+			t.Errorf("stage %d is still too big (%s paths): %s", st.Index, st.Count, st.SplitWhy)
+		}
+	}
+	if got := len(stages); got != 5 || parts != 3 {
+		t.Errorf("%d stages (%d parts) with %v paths, want 5 stages, 3 of them parts", got, parts, counts)
+	}
+	// Near miss: a workflow whose stages were small already is not cut.
+	g2, err := model.Build(workflowsIn(t, "../../testdata/fixtures/bigflow")["bigflow.TwentyFourIfs"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range g2.Stages(256) {
+		if st.Part {
+			t.Errorf("TwentyFourIfs stage %d was cut", st.Index)
+		}
 	}
 }

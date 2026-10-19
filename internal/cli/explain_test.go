@@ -236,3 +236,26 @@ func TestExplainShowsFileWithForwardSlashes(t *testing.T) {
 		t.Errorf("first line %q, want %q", got, want)
 	}
 }
+
+// explain prints the warnings of the workflow that owns the path, not those
+// of the other workflows it measured on the way.
+func TestExplainPrintsOnlyItsOwnWorkflowsWarnings(t *testing.T) {
+	traces := ordersTraces(t)
+	writeTrace(t, traces, "billing-old", map[string]any{"schemaVersion": 2, "tool": "pathkit-go", "workflow": "billing.SubscriptionWorkflow",
+		"functionHash": "0000000000000000", "status": "complete", "steps": []string{"J1.true"}})
+	inPilot(t)
+	ids := stableIDsOf(t, pilot+"/orders", "orders.OrderWorkflow")
+	_, stderr, _ := run(t, "report", "./...", "--traces", traces)
+	if !strings.Contains(stderr, "billing.SubscriptionWorkflow") {
+		t.Fatalf("report should warn about the billing trace, got %q", stderr)
+	}
+	_, stderr, code := run(t, "explain", ids[0], "./...", "--traces", traces)
+	if code != ExitOK || strings.Contains(stderr, "billing.SubscriptionWorkflow") {
+		t.Errorf("explain of an orders path printed a billing warning: code=%d %q", code, stderr)
+	}
+	billing := stableIDsOf(t, pilot+"/billing", "billing.SubscriptionWorkflow")
+	_, stderr, _ = run(t, "explain", billing[0], "./...", "--traces", traces)
+	if !strings.Contains(stderr, "billing.SubscriptionWorkflow") {
+		t.Errorf("explain of a billing path lost its own warning: %q", stderr)
+	}
+}

@@ -36,6 +36,16 @@
 <nav aria-label="Sections">
 <a href="#summary">Summary</a>
 <a href="#workflows">Workflows</a>
+<a href="#unread">Could not read ({{len .Unread}})</a>
+{{- if .CallOutcomes}}
+<a href="#call-outcomes">Call outcomes ({{len .CallOutcomes}})</a>
+{{- end}}
+{{- if .LoopRounds}}
+<a href="#loop-rounds">Loop rounds ({{len .LoopRounds}})</a>
+{{- end}}
+{{- if .Handlers}}
+<a href="#handlers">Handlers ({{len .Handlers}})</a>
+{{- end}}
 {{- if .Groups}}
 <a href="#groups">Missed paths ({{.GroupsTotal}} groups)</a>
 {{- end}}
@@ -137,6 +147,105 @@
 {{- end}}
 </section>
 
+<section id="unread" aria-labelledby="h-unread" data-unread="{{len .Unread}}">
+<h2 id="h-unread">What PathKit could not fully read</h2>
+{{- if .Unread}}
+<p class="note">Calls PathKit did not follow into, and places it cut off. For each, the last column says what it did instead.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Places PathKit could not fully read</caption>
+<thead><tr><th scope="col">Where</th><th scope="col">Workflow</th><th scope="col">Kind</th><th scope="col">Code</th><th scope="col">What PathKit did</th></tr></thead>
+<tbody>
+{{- range .Unread}}
+<tr data-unread-kind="{{.Kind}}">
+<td data-label="Where" class="file">{{.Where}}</td>
+<td data-label="Workflow">{{.Workflow}}</td>
+<td data-label="Kind">{{.Kind}}</td>
+<td data-label="Code"><code>{{.Call}}</code></td>
+<td data-label="What PathKit did">{{.Effect}}{{if .Suggestion}} To tell PathKit about it, add <code>{{.Suggestion}}</code> to <code>classification.activity_wrappers</code>.{{end}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+{{- else}}
+<p class="note">{{.UnreadNone}}</p>
+{{- end}}
+</section>
+
+{{- if .CallOutcomes}}
+<section id="call-outcomes" aria-labelledby="h-call-outcomes" data-call-outcomes="{{len .CallOutcomes}}">
+<h2 id="h-call-outcomes">Call outcomes</h2>
+<p class="note">Every activity, child workflow and Nexus call whose result the code checks: the outcomes it can have, and whether a recorded test saw each. A failure the code tells apart (a timeout, a cancellation) is listed under the call.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Outcomes of the checked calls</caption>
+<thead><tr><th scope="col">Call</th><th scope="col">Workflow</th><th scope="col">Where</th><th scope="col">Outcomes</th></tr></thead>
+<tbody>
+{{- range .CallOutcomes}}
+<tr data-call-gap="{{.Gap}}">
+<td data-label="Call">{{.Call}}</td>
+<td data-label="Workflow">{{.Workflow}}</td>
+<td data-label="Where" class="file">{{.Where}}</td>
+<td data-label="Outcomes">{{range $i, $o := .Outcomes}}{{if $i}}, {{end}}{{$o.Name}} {{if $o.Seen}}seen{{else}}<strong>not seen</strong>{{end}}{{end}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
+{{- if .LoopRounds}}
+<section id="loop-rounds" aria-labelledby="h-loop-rounds" data-loop-rounds="{{len .LoopRounds}}">
+<h2 id="h-loop-rounds">Loop rounds</h2>
+<p class="note">A path goes into a loop once, but a run goes round as often as the data says. For every loop: whether a recorded test ran it with no round, with one, and with two or more. A loop no test ran with two or more rounds is a gap.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Rounds each loop ran in the recorded tests</caption>
+<thead><tr><th scope="col">Loop</th><th scope="col">Workflow</th><th scope="col">Where</th><th scope="col">0 rounds</th><th scope="col">1 round</th><th scope="col">2+ rounds</th></tr></thead>
+<tbody>
+{{- range .LoopRounds}}
+<tr data-loop-gap="{{.Gap}}">
+<td data-label="Loop"><code>{{.Loop}}</code></td>
+<td data-label="Workflow">{{.Workflow}}</td>
+<td data-label="Where" class="file">{{.Where}}</td>
+{{- range .Rounds}}
+<td data-label="{{.Bucket}}">{{if eq .State "not seen"}}<strong>not seen</strong>{{else}}{{.State}}{{end}}</td>
+{{- end}}
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
+{{- if .Handlers}}
+<section id="handlers" aria-labelledby="h-handlers" data-handlers="{{len .Handlers}}">
+<h2 id="h-handlers">Handlers</h2>
+<p class="note">Signals, queries, updates and update validators the workflows register. "Exercised" says whether a recorded test ran it; "not recorded" means a trace cannot show it. The code of an update handler or validator is mapped like a small workflow, so its branches are counted.</p>
+<div class="tablebox">
+<table class="over">
+<caption class="sr">Handlers the workflows register</caption>
+<thead><tr><th scope="col">Handler</th><th scope="col">Kind</th><th scope="col">Workflow</th><th scope="col">Registered at</th><th scope="col">Exercised</th><th scope="col">Branches taken</th></tr></thead>
+<tbody>
+{{- range .Handlers}}
+<tr data-handler-gap="{{.Gap}}">
+<td data-label="Handler">{{.Name}}</td>
+<td data-label="Kind">{{.Kind}}</td>
+<td data-label="Workflow">{{.Owner}}</td>
+<td data-label="Registered at" class="file">{{.Where}}</td>
+<td data-label="Exercised">{{.Exercised}}</td>
+<td data-label="Branches taken">{{.Branches}}</td>
+</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</section>
+{{- end}}
+
 {{- if .Groups}}
 <section id="groups" aria-labelledby="h-groups" data-groups="{{.GroupsTotal}}">
 <h2 id="h-groups">Missed paths by first untested step</h2>
@@ -192,6 +301,23 @@
 </table>
 </div>
 <div class="sg" data-sg="{{$i}}"></div>
+</div>
+{{- end}}
+{{- if $w.Helpers}}
+<div class="helpers" data-helpers="{{$i}}">
+<h4>Helpers</h4>
+<p class="note">{{$w.HelpersNote}}.</p>
+<div class="tablebox">
+<table class="summary-table">
+<caption>Helpers of {{$w.Name}}</caption>
+<thead><tr><th scope="col">Helper</th><th scope="col">Where</th><th scope="col">Branches taken</th><th scope="col">Called at</th></tr></thead>
+<tbody>
+{{- range $w.Helpers}}
+<tr><td>{{.Name}}</td><td class="file">{{.Where}}</td><td>{{.Branches}}</td><td>{{.Sites}} {{if eq .Sites "1"}}site{{else}}sites{{end}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
 </div>
 {{- end}}
 <div class="pt" data-pt="{{$i}}"></div>

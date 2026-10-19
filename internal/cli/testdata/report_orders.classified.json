@@ -186,5 +186,27 @@
     }
   },
   "coverageBasis": "overall",
-  "classificationShown": false
+  "classificationShown": false,
+  "unread": [],
+  "callOutcomes": [
+    {
+      "workflow": "orders.OrderWorkflow",
+      "file": "orders/orders.go",
+      "line": 41,
+      "kind": "activity",
+      "name": "ChargeCard",
+      "outcomes": [
+        {
+          "outcome": "success",
+          "possible": true,
+          "seen": false
+        },
+        {
+          "outcome": "failure",
+          "possible": true,
+          "seen": true
+        }
+      ]
+    }
+  ]
 }
