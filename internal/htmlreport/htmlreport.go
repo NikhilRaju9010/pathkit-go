@@ -29,6 +29,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"fmt"
+	"github.com/NikhilRaju9010/pathkit-go/internal/advice"
 	"html/template"
 	"math"
 	"path/filepath"
@@ -82,6 +83,8 @@ type ReportInput struct {
 	// Panel is every assumption, on or off, with its claim count; the summary
 	// shows it.
 	Panel []classify.AssumptionStatus
+	// TopTests are the tests to write first (advice.TestsToWriteFirst).
+	TopTests []advice.Item
 }
 
 // overallThreshold is the threshold for the overall figures: none when
@@ -123,17 +126,28 @@ type (
 		// HeadlineLines replace TotalLine and BranchesLine when a workflow has
 		// more paths than the list holds (coverage.Headline).
 		HeadlineLines []string
-		Explain       string // what "testable" and "overall" mean
-		Cards         []cardView
-		Buckets       []bucketView
-		ClassLines    []string
-		FailUnder     *failUnderView
-		Workflows     []workflowView
-		ExcludedLine  string
-		Excluded      []scope.Excluded
-		Traces        *coverage.Counts
-		Trend         []trendView
-		Glossary      *glossaryView
+		// MainHeadline are the first lines of the summary: workflows meeting their
+		// target and branch coverage; MainRows is the table of main numbers.
+		MainHeadline []string
+		MainRows     []mainRowView
+		// Tests is what each Go test covered; TestsLine says it in a sentence.
+		Tests     []testRowView
+		TestsLine string
+		// Advice is the tests to write first, the first section of the missed area.
+		Advice       []adviceRowView
+		Explain      string // what "testable" and "overall" mean
+		Cards        []cardView
+		Buckets      []bucketView
+		ClassLines   []string
+		FailUnder    *failUnderView
+		Workflows    []workflowView
+		ExcludedLine string
+		Excluded     []scope.Excluded
+		Traces       *coverage.Counts
+		Trend        []trendView
+		// TrendChart is the inline SVG of the headline over the last runs.
+		TrendChart *chartView
+		Glossary   *glossaryView
 		// Groups are the testable paths no test ran, grouped by the first step
 		// no test took (biggest first, at most maxGroupsHTML); GroupsMore is
 		// how many more groups there are.
@@ -182,6 +196,22 @@ type (
 		Helpers     []helperRowView
 		HelpersNote string
 		PrunedLine  string
+		// MainLines are the workflow's main number, why, and its scenarios.
+		MainLines []string
+	}
+	adviceRowView struct {
+		Rank                                 int
+		Tag, Workflow, Where, Hint, Name, ID string
+		Covers                               string
+	}
+	testRowView struct {
+		Name, Workflows                                              string
+		Traces, Scenarios, UniqueScenarios, Branches, UniqueBranches int
+		AddsNothing                                                  bool
+	}
+	mainRowView struct {
+		Name, Number, Target, Why, Scenarios string
+		Met, Measured                        bool
 	}
 	panelRow struct {
 		Name, Status, Claims string
@@ -247,6 +277,28 @@ func Report(in ReportInput) ([]byte, error) {
 		Traces:       &res.Counts,
 	}
 	v.setHeader(in.Header)
+	v.MainHeadline = render.MainHeadlineLines(res)
+	for _, t := range res.Tests {
+		v.Tests = append(v.Tests, testRowView{Name: t.Name, Workflows: strings.Join(t.Workflows, ", "), Traces: t.Traces, Scenarios: t.Scenarios, UniqueScenarios: t.UniqueScenarios, Branches: t.Branches, UniqueBranches: t.UniqueBranches, AddsNothing: t.AddsNothing})
+	}
+	v.TestsLine = render.TestsLine(res)
+	for i, it := range in.TopTests {
+		where := it.File
+		if it.Line > 0 {
+			where = fmt.Sprintf("%s:%d", it.File, it.Line)
+		}
+		v.Advice = append(v.Advice, adviceRowView{Rank: i + 1, Tag: it.Tag, Workflow: it.Workflow, Where: where, Hint: it.Hint, Name: it.TestName, ID: it.ID, Covers: it.Covers()})
+	}
+	for _, w := range res.Workflows {
+		m := w.Main
+		row := mainRowView{Name: w.Name, Why: m.Why, Met: m.Met, Measured: m.Measured, Target: render.Threshold(m.Target), Scenarios: render.ScenarioLine(w)}
+		if m.Measured {
+			row.Number = fmt.Sprintf("%s %d/%d (%s)", mainKindName(m.Kind), m.Covered, m.Total, render.Pct(m.Percent, nil))
+		} else {
+			row.Number = "not measured"
+		}
+		v.MainRows = append(v.MainRows, row)
+	}
 	if _, capped := res.Headline(); capped {
 		v.HeadlineLines = render.HeadlineLines(res, overallThreshold(in), in.Classification != nil)
 	}
@@ -336,6 +388,7 @@ func Report(in ReportInput) ([]byte, error) {
 			TotalPathsLine: render.TotalLine(model.PathList{List: make([]model.Path, len(w.Paths)), Truncated: w.Truncated}, model.DefaultMaxPaths),
 			Open:           wi == 0,
 		}
+		wv.MainLines = render.MainBlock(w)
 		if lines := render.HelperLines(w); len(lines) > 0 {
 			wv.HelpersNote = lines[0]
 			for _, u := range w.Units {
@@ -388,6 +441,7 @@ func Report(in ReportInput) ([]byte, error) {
 		data.addAudit(v.Glossary.Audit)
 	}
 	v.Data = data.finish()
+	v.TrendChart = TrendChart(in.Trend)
 	for i, r := range in.Trend {
 		t := trendView{Time: r.Time.UTC().Format("2006-01-02 15:04 UTC"), Covered: r.Covered, Paths: r.Paths,
 			Percent: math.Round(coverage.Percent(r.Covered, r.Paths)*10) / 10, Pct: render.Pct(coverage.Percent(r.Covered, r.Paths), nil)}
@@ -569,3 +623,5 @@ func cnt(n int, noun string) string {
 	}
 	return itoa(n) + " " + noun + "s"
 }
+
+func mainKindName(kind string) string { return kind + " coverage" }

@@ -93,3 +93,45 @@ func TestSummarizedHelpersCountOldAndNewTraces(t *testing.T) {
 		})
 	}
 }
+
+// A helper that changes the caller's value (through a pointer, a pointer
+// receiver, a map, a slice or a captured variable) must make the caller forget
+// what it knew: the decision after the call is not decided by the old value.
+// The same holds with the helpers copied in and with the helpers summarized.
+func TestHelperWritesMakeCallerForget(t *testing.T) {
+	fixture := abs(t, "../../testdata/fixtures/helperwrites")
+	dir := t.TempDir()
+	t.Chdir(dir)
+	for _, mode := range []struct{ name, helpers string }{{"copied in", "inline"}, {"summarized", "summarize"}} {
+		t.Run(mode.name, func(t *testing.T) {
+			cfg := filepath.Join(dir, mode.helpers+".json")
+			if err := os.WriteFile(cfg, []byte(`{"classification": {"enabled": true, "helpers": {"mode": "`+mode.helpers+`"}}}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			traces := filepath.Join(dir, "traces-"+mode.helpers)
+			if _, stderr, code := pathkit(t, "test", fixture+"/...", "--traces", traces, "--config", cfg); code != 0 {
+				t.Fatalf("pathkit test: exit %d\n%s", code, stderr)
+			}
+			doc := summarizeReport(t, fixture, traces, cfg)
+			for _, name := range []string{"ViaPointer", "ViaReceiver", "ViaMap", "ViaSlice", "ViaCapture"} {
+				w := workflowNamed(t, doc, "helperwrites."+name)
+				if n := cannotCount(w); n != 0 {
+					t.Errorf("%s: %d paths claimed cannot-be-tested; the helper changed the value", name, n)
+				}
+			}
+			if n := cannotCount(workflowNamed(t, doc, "helperwrites.NearMiss")); n != 1 {
+				t.Errorf("NearMiss: %d cannot-be-tested paths, want 1 (the helper does not touch v)", n)
+			}
+		})
+	}
+}
+
+// cannotCount is how many of a workflow's paths are labelled cannot-be-tested
+// in "report --json".
+func cannotCount(w map[string]any) int {
+	c, _ := w["classification"].(map[string]any)
+	b, _ := c["buckets"].(map[string]any)
+	x, _ := b["cannotBeTested"].(map[string]any)
+	n, _ := x["paths"].(float64)
+	return int(n)
+}

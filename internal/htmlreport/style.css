@@ -151,3 +151,11 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
   details.wf, details.wf > summary { border: 0; } details.wf > summary { background: none; }
   tr.det { display: table-row; } table { font-size: 9pt; }
 }
+.trend-chart { max-width: 100%; height: auto; }
+.trend-chart .grid { stroke: var(--line); }
+.trend-chart .axis { fill: var(--muted); font-size: 10px; }
+.trend-chart .line { stroke-width: 2; }
+.trend-chart .line.main { stroke: var(--ok); }
+.trend-chart .line.branch { stroke: var(--accent); }
+.trend-chart .dot.main { fill: var(--ok); }
+.trend-chart .dot.branch { fill: var(--accent); }

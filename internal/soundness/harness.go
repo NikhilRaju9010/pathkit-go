@@ -126,22 +126,59 @@ func DriverTest(programs []Program) string {
 	b.WriteString(`package progs
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
 )
 
+// traceFiles lists the trace files in dir (PK_TRACES), to find the one a run
+// wrote.
+func traceFiles(dir string) map[string]bool {
+	out := map[string]bool{}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".trace.json") {
+			out[e.Name()] = true
+		}
+	}
+	return out
+}
+
 func TestRunAll(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
+	dir := os.Getenv("PK_TRACES")
 	run := func(name string, fn interface{}, args ...interface{}) {
 		env := suite.NewTestWorkflowEnvironment()
 		env.RegisterActivity(ActEcho)
+		// what the run does outside the workflow, in order: activities, local
+		// activities and timers; written next to the run's trace file
+		var events []string
+		env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
+			events = append(events, "A:"+info.ActivityType.Name)
+		})
+		env.SetOnLocalActivityStartedListener(func(info *activity.Info, _ context.Context, _ []interface{}) {
+			events = append(events, "L:"+info.ActivityType.Name)
+		})
+		env.SetOnTimerScheduledListener(func(string, time.Duration) { events = append(events, "T") })
+		before := traceFiles(dir)
 		env.ExecuteWorkflow(fn, args...)
 		if !env.IsWorkflowCompleted() {
 			t.Fatalf("%s %v: not completed", name, args)
 		}
 		if err := env.GetWorkflowError(); err != nil {
 			t.Fatalf("%s %v: %v", name, args, err)
+		}
+		for f := range traceFiles(dir) {
+			if !before[f] {
+				_ = os.WriteFile(filepath.Join(dir, f+".events"), []byte(strings.Join(events, "\n")), 0o644)
+			}
 		}
 	}
 `)

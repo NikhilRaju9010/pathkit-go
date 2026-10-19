@@ -204,14 +204,14 @@ func typeName(t types.Type) string {
 // callPos is where the call that a junction decides on is: the activity, child
 // workflow or Nexus operation that is started, found from the error variable
 // the check reads (its nearest assignment, then back to the Execute call).
-func (b *builder) callPos(obj types.Object, ifs *ast.IfStmt) *token.Position {
+func (b *builder) callPos(obj types.Object, ifs *ast.IfStmt) (*token.Position, *ast.CallExpr) {
 	rhs, _, ok := b.nearestAssign(obj, ifs.Cond.Pos())
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	call, ok := ast.Unparen(rhs).(*ast.CallExpr)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	pos := call
 	if f := b.calledFunc(call); isSDKMethod(f, []string{"Future"}, "Get") {
@@ -222,5 +222,19 @@ func (b *builder) callPos(obj types.Object, ifs *ast.IfStmt) *token.Position {
 		}
 	}
 	p := b.fset.Position(pos.Pos())
-	return &p
+	return &p, pos
+}
+
+// CallExpr is the call a decision on a Temporal call's result reads: the
+// ExecuteActivity, ExecuteChildWorkflow, Sleep ... call itself; nil when the
+// decision reads something else or the call is not known.
+func (j *Junction) CallExpr() *ast.CallExpr { return j.callExpr }
+
+// FailureKindOf says which kind of failure the exit takes ("timeout",
+// "cancelled", "application error", "non-retryable application error"), when
+// the exit is the one a check of the error kind (errors.As, IsTimeoutError ...)
+// takes after a call failed.
+func (g *Graph) FailureKindOf(e *Exit) (string, bool) {
+	k, ok := g.fingerprinter().failKind[e]
+	return k, ok
 }

@@ -715,9 +715,10 @@ func TestCoverageMatchesKey(t *testing.T) {
 		}
 		// 8 fields as before, plus the 3 added with path classification
 		// (classification, coverageBasis, classificationShown), unread, and the
-		// handler, call outcome and loop round tables.
-		if len(c) != 15 || len(c["workflows"].([]any)) != len(wantPriority) {
-			t.Errorf("compared %d top-level fields and %d workflows; want 15 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
+		// handler, call outcome and loop round tables, mainHeadline (M9), and tests and
+		// testsToWriteFirst (M10).
+		if len(c) != 18 || len(c["workflows"].([]any)) != len(wantPriority) {
+			t.Errorf("compared %d top-level fields and %d workflows; want 18 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
 		}
 		if !maps.Equal(gotPriority, wantPriority) {
 			t.Errorf("priorities %v, want %v", gotPriority, wantPriority)
@@ -1107,16 +1108,22 @@ func TestCIRunsEverything(t *testing.T) {
 func stripClassification(v any) {
 	switch x := v.(type) {
 	case map[string]any:
-		for _, k := range []string{"stableId", "bucket", "label", "source", "confidence", "possibleInProduction", "explanation", "ruleId"} {
+		for _, k := range []string{"stableId", "bucket", "label", "source", "confidence", "possibleInProduction", "explanation", "ruleId", "scenarioId", "sameBehaviourAs"} {
 			delete(x, k)
 		}
 		if _, ok := x["pathList"]; ok {
+			for _, k := range []string{"scenarioId", "sameBehaviourAs", "mainNumber", "scenarios", "handlerCoverage", "decisionPairs"} { // scenarios and main numbers (M9)
+				delete(x, k)
+			}
 			delete(x, "classification")
 		}
 		if _, ok := x["workflows"]; ok {
 			delete(x, "classification")
 			delete(x, "coverageBasis")
 			delete(x, "classificationShown")
+			delete(x, "tests")                                                     // what each Go test covered (M10.7)
+			delete(x, "testsToWriteFirst")                                         // the advice (M10.1)
+			delete(x, "mainHeadline")                                              // workflows meeting their target (M9.7)
 			delete(x, "unread")                                                    // the "could not fully read" panel (M7.8)
 			for _, k := range []string{"callOutcomes", "handlers", "loopRounds"} { // the outcome, handler and loop tables (M8)
 				delete(x, k)

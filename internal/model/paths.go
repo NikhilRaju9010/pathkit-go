@@ -75,52 +75,8 @@ type PathList struct {
 // (iterate, body, retry, exit). A road that would need a second retry is
 // not listed. At most max paths are listed.
 func (g *Graph) Paths(max int) PathList {
-	var out PathList
-	used := map[EdgeID]bool{}
-	var steps []Step
-	var walk func(t Target)
-	walk = func(t Target) {
-		if out.Truncated || t.Dead() {
-			return
-		}
-		if r := t.Retry; r != nil {
-			if used[r.ID] {
-				return
-			}
-			used[r.ID] = true
-			steps = append(steps, Step{Junction: r.Junction, Exit: r})
-			walk(r.To)
-			steps = steps[:len(steps)-1]
-			used[r.ID] = false
-			return
-		}
-		if t.Junction == nil {
-			if len(out.List) == max {
-				out.Truncated = true
-				return
-			}
-			p := Path{Steps: append([]Step(nil), steps...), End: t.End}
-			p.Compensation = g.compensationOn(p.Steps)
-			out.List = append(out.List, p)
-			return
-		}
-		exits := t.Junction.Exits
-		if t.Only != nil {
-			exits = []*Exit{t.Only}
-		}
-		for _, e := range exits {
-			if used[e.ID] {
-				continue
-			}
-			used[e.ID] = true
-			steps = append(steps, Step{Junction: t.Junction, Exit: e})
-			walk(e.To)
-			steps = steps[:len(steps)-1]
-			used[e.ID] = false
-		}
-	}
-	walk(g.Start)
-	return out
+	// the same walk as PathsPruned, with a state that never rules an exit out
+	return g.PathsPruned(max, func() any { return nil }, func(state any) any { return state }, func(any, Step) any { return nil }).PathList
 }
 
 // A PrunedGroup is a part of the map that listing leaves out because every

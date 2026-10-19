@@ -33,7 +33,7 @@ const RecorderFile = "zz_pathkit_recorder.go"
 // Names the generated code adds. If the user's code already uses one,
 // instrumenting stops with a clear error instead of producing broken code.
 var packageNames = []string{"pathkitStart", "pathkitRecorder", "pathkitTrace", "pathkitTraceDir", "pathkitLoop",
-	"pathkitSite", "pathkitEnter", "pathkitFrame", "pathkitTables", "pathkitCtxKey", "pathkitPending", "pathkitSource"}
+	"pathkitSite", "pathkitEnter", "pathkitFrame", "pathkitTables", "pathkitCtxKey", "pathkitPending", "pathkitSource", "pathkitTestName"}
 
 // maxResults is how many results a workflow function may have; the
 // recorder declares one pathkitRetN helper for each N up to it.
@@ -699,6 +699,7 @@ import (
 	pathkitjson "encoding/json"
 	pathkitos "os"
 	pathkitfilepath "path/filepath"
+	pathkitruntime "runtime"
 	pathkitstrings "strings"
 	pathkittime "time"
 
@@ -720,6 +721,7 @@ type pathkitTrace struct {
 	RunID         string   ` + "`json:\"runId\"`" + `
 	Recorder      int      ` + "`json:\"recorder,omitempty\"`" + `
 	RecordedAt    string   ` + "`json:\"recordedAt\"`" + `
+	TestName      string   ` + "`json:\"testName,omitempty\"`" + `
 }
 
 // pathkitRecorder belongs to one call of one workflow function.
@@ -959,6 +961,62 @@ func pathkitRet{{.N}}[{{.TypeParams}} any](r *pathkitRecorder, {{.Params}}) ({{.
 	return {{.Args}}
 }
 {{end}}
+// pathkitTestName finds the Go test that runs this workflow: the Test function
+// on the goroutine that waits in the Temporal test environment's
+// ExecuteWorkflow (the workflow itself runs on another goroutine, so its own
+// stack does not show the test). "" when there is none, or when several tests
+// wait there at once (parallel tests): the stack cannot tell which one is ours.
+func pathkitTestName() string {
+	// only a "go test" binary has a test to name (and the dump of every goroutine
+	// is not worth its cost anywhere else)
+	if pathkitos.Getenv("PATHKIT_TESTNAMES") == "off" || len(pathkitos.Args) == 0 || !(pathkitstrings.HasSuffix(pathkitos.Args[0], ".test") || pathkitstrings.HasSuffix(pathkitos.Args[0], ".test.exe")) {
+		return ""
+	}
+	buf := make([]byte, 1<<16)
+	for {
+		n := pathkitruntime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		if len(buf) >= 1<<19 { // a very long dump: not worth the time inside a workflow
+			return ""
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+	found := ""
+	for _, g := range pathkitstrings.Split(string(buf), "\n\n") {
+		if !pathkitstrings.Contains(g, "TestWorkflowEnvironment).ExecuteWorkflow(") {
+			continue
+		}
+		name := ""
+		for _, line := range pathkitstrings.Split(g, "\n") {
+			if line == "" || line[0] == '\t' || pathkitstrings.HasPrefix(line, "goroutine ") || pathkitstrings.HasPrefix(line, "created by ") {
+				continue
+			}
+			if i := pathkitstrings.LastIndex(line, "("); i > 0 {
+				line = line[:i]
+			}
+			parts := pathkitstrings.Split(line, ".")
+			for len(parts) > 1 && (pathkitstrings.HasPrefix(parts[len(parts)-1], "func") || pathkitstrings.HasPrefix(parts[len(parts)-1], "gowrap")) {
+				parts = parts[:len(parts)-1]
+			}
+			base := parts[len(parts)-1]
+			if pathkitstrings.HasPrefix(base, "Test") && !pathkitstrings.HasPrefix(line, "testing.") && !pathkitstrings.Contains(line, "go.temporal.io/sdk") {
+				name = base
+			}
+		}
+		if name == "" {
+			continue
+		}
+		if found != "" && found != name {
+			return ""
+		}
+		found = name
+	}
+	return found
+}
+
 // flush writes the trace file. It runs deferred, so it also runs after a
 // panic or runtime.Goexit; those runs never called returned() and are
 // saved as incomplete. There is no recover(): panics are left untouched.
@@ -968,6 +1026,7 @@ func (r *pathkitRecorder) flush() {
 		r.trace.Status = "complete"
 	}
 	r.trace.RecordedAt = pathkittime.Now().UTC().Format(pathkittime.RFC3339)
+	r.trace.TestName = pathkitTestName()
 	data, err := pathkitjson.MarshalIndent(r.trace, "", "  ")
 	if err != nil {
 		return

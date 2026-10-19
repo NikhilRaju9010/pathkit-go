@@ -10,7 +10,14 @@ import (
 
 // In the pilot folder (no config there), orders has paths 1 and 2 of 3
 // recorded (ordersTraces): 66.7%, Medium.
-const ordersReport = `orders.OrderWorkflow (orders/orders.go)
+const ordersReport = `0 of 1 workflows meet their target (main number ≥ 80%)
+Branch coverage (all workflows): 3/4 (75.0%)
+Decision pairs (all workflows): 1/2 (50.0%) — an outcome of one decision followed by an outcome of the next
+
+orders.OrderWorkflow (orders/orders.go)
+Main number: path coverage 2/3 (66.7%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 3 (2 covered) — different things the workflow can do, counted by what it does outside itself
 2/3 paths · 66.7% · branches 3/4 · priority Medium
   1. Start -> if in.AmountCents <= 0 --true--> End (completed): covered
   2. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed): covered
@@ -19,8 +26,15 @@ const ordersReport = `orders.OrderWorkflow (orders/orders.go)
 3 paths total · 2 covered · 1 missed · 66.7% project coverage
 Branches: 3/4 (75.0%)
 
+Start here. Tests to write first (a scenario is one distinct way the workflow behaves from outside; missed means no test ran it). Riskiest first:
+  1. [plain logic] orders.OrderWorkflow — orders/orders.go:42
+     Let ChargeCard succeed
+     suggested test name: TestOrder_ChargeCardSucceeds · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:ca5dfe627e
+
 Call outcomes: 1 activity, child workflow or Nexus call checked, 1 outcome no test saw:
   orders/orders.go:41: ChargeCard (activity) in orders.OrderWorkflow: success not seen, failure seen
+
+Tests: test names not recorded in these traces (run pathkit test again to record them)
 
 PathKit read everything in scope
 
@@ -28,13 +42,24 @@ PathKit read everything in scope
 Traces: 2 read · 2 counted · 0 unmatched · 0 stale · 0 incomplete · 0 excluded · 0 unknown workflow · 0 unreadable
 `
 
-const ordersReportSummary = `orders.OrderWorkflow  2/3 paths · 66.7% · priority Medium
+const ordersReportSummary = `0 of 1 workflows meet their target (main number ≥ 80%)
+Branch coverage (all workflows): 3/4 (75.0%)
+Decision pairs (all workflows): 1/2 (50.0%) — an outcome of one decision followed by an outcome of the next
+
+orders.OrderWorkflow  2/3 paths · 66.7% · priority Medium · main number: path coverage 2/3 (66.7%), target 80% not met
 
 3 paths total · 2 covered · 1 missed · 66.7% project coverage
 Branches: 3/4 (75.0%)
 
+Start here. Tests to write first (a scenario is one distinct way the workflow behaves from outside; missed means no test ran it). Riskiest first:
+  1. [plain logic] orders.OrderWorkflow — orders/orders.go:42
+     Let ChargeCard succeed
+     suggested test name: TestOrder_ChargeCardSucceeds · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:ca5dfe627e
+
 Call outcomes: 1 activity, child workflow or Nexus call checked, 1 outcome no test saw:
   orders/orders.go:41: ChargeCard (activity) in orders.OrderWorkflow: not seen: success
+
+Tests: test names not recorded in these traces (run pathkit test again to record them)
 
 PathKit read everything in scope
 
@@ -79,14 +104,18 @@ func TestReportSummaryOneLinePerWorkflow(t *testing.T) {
 	stdout, _, code := run(t, "report", "./...", "--traces", traces, "--summary")
 	lines := strings.Split(stdout, "\n")
 	want := []string{
-		"approval.ApprovalWorkflow             0/4 paths · 0.0% · priority High",
-		"billing.SubscriptionWorkflow          0/3 paths · 0.0% · priority High",
-		"fulfillment.OrderFulfillmentWorkflow  0/4 paths · 0.0% · priority High",
-		"fulfillment.PaymentWorkflow           0/4 paths · 0.0% · priority High",
-		"orders.OrderWorkflow                  2/3 paths · 66.7% · priority Medium",
-		"polling.ReportPollingWorkflow         0/5 paths · 0.0% · priority High",
-		"reports.DailyReportWorkflow           0/6 paths · 0.0% · priority High",
-		"shipment.ShipmentWorkflow             0/9 paths · 0.0% · priority High",
+		"0 of 8 workflows meet their target (main number ≥ 80%)",
+		"Branch coverage (all workflows): 3/50 (6.0%)",
+		"Decision pairs (all workflows): 1/42 (2.4%) — an outcome of one decision followed by an outcome of the next",
+		"",
+		"approval.ApprovalWorkflow             0/4 paths · 0.0% · priority High · main number: path coverage 0/4 (0.0%), target 80% not met",
+		"billing.SubscriptionWorkflow          0/3 paths · 0.0% · priority High · main number: path coverage 0/3 (0.0%), target 80% not met",
+		"fulfillment.OrderFulfillmentWorkflow  0/4 paths · 0.0% · priority High · main number: path coverage 0/4 (0.0%), target 80% not met",
+		"fulfillment.PaymentWorkflow           0/4 paths · 0.0% · priority High · main number: path coverage 0/4 (0.0%), target 80% not met",
+		"orders.OrderWorkflow                  2/3 paths · 66.7% · priority Medium · main number: path coverage 2/3 (66.7%), target 80% not met",
+		"polling.ReportPollingWorkflow         0/5 paths · 0.0% · priority High · main number: path coverage 0/5 (0.0%), target 80% not met",
+		"reports.DailyReportWorkflow           0/6 paths · 0.0% · priority High · main number: path coverage 0/6 (0.0%), target 80% not met",
+		"shipment.ShipmentWorkflow             0/9 paths · 0.0% · priority High · main number: path coverage 0/9 (0.0%), target 80% not met",
 		"",
 		"38 paths total · 2 covered · 36 missed · 5.3% project coverage",
 	}

@@ -134,3 +134,17 @@ Go words used below: a *type assertion* is Go code that treats a value as anothe
 - **Missed-path groups, `rules check` and `suggest` look at listed paths only.** For a workflow with more paths than the list holds, a group, a hit count or a draft covers the listed paths; an entry that hits none of them is not called stale. A group that is a stage path of a big workflow is not shown.
 - **`known-defect` is a person's word.** PathKit cannot check that a bug exists; the entry stays until you remove it, and `rules check` only tells you when it hits nothing or a test ran the path.
 - **The assumptions panel counts claims, not paths, for left-out parts of the map**: a pruned group is one claim however many paths it holds, and stage-only claims on paths beyond the list are not counted.
+
+## Scenarios, the main number and the advice
+
+- **A scenario is what PathKit can see from outside.** It knows the calls it reads (see "Scenarios, the main number and the project headline" in SETUP-GUIDE.md). A place it could not read (the "could not fully read" panel) gives the path a scenario of its own; a workflow over the path cap with such a place has its scenarios `not measured`. A helper call that is summarized counts as known only when its arguments are constants or unchanged parameters.
+- **Over the cap, scenarios are counted from the shape of the map, not from checked paths.** The count can include scenarios that cannot happen (the fact engine proves impossibility path by path), and scenarios no listed path makes are counted as testable. The number is pessimistic, never optimistic.
+- **Two runs of one path can differ inside a summarized helper.** The scenario says "the helper was called", not what happened inside it.
+- **The scenario's failure kind is only what the code branches on.** A workflow that ends with `return err` has the end `failed`, not the kind of error.
+- **Cleanup after a cancel is not its own stage.** `cancel()` (from `workflow.WithCancel`) is a step of the scenario, but the code that runs after a cancel is not cut into a stage of its own.
+- **Test names are best effort.** The recorder finds the test by looking at the goroutine that waits in the Temporal test environment's `ExecuteWorkflow`; with parallel tests (`t.Parallel()`) it cannot tell which is its own and leaves the name blank. A subtest is named by its top-level test.
+- **Scaffolds need a function to mock.** An activity that is a method value, or is started by a text name, gets a `// TODO:` instead of a mock; a signal gets a `nil` payload; a decision on something other than the workflow's input (a result of an activity, a local variable) is left as a TODO line. A scaffold covers the scenario only if its TODO lines are right.
+- **Item ids are scenario ids** and two workflows that make the same steps have the same id; `pathkit scaffold --workflow` picks one.
+- **`pathkit diff` compares what PathKit can read** at both refs; it needs a git repository and a checkout that builds at the base. Decisions are matched by their text, so a rewritten condition is one removed and one new decision.
+- **`--no-network` is Linux only** and needs `unshare` with unprivileged user namespaces; elsewhere it refuses.
+

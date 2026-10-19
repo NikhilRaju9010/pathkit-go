@@ -100,6 +100,18 @@ type Workflow struct {
 	// beyond the cap are not in the file.
 	Truncated bool   `json:"truncated,omitempty"`
 	Paths     []Path `json:"paths"`
+	// Main is the workflow's main number when the file was written (older
+	// files have none; then it is not compared).
+	Main *Main `json:"mainNumber,omitempty"`
+}
+
+// Main is a workflow's main number: its kind ("path", "scenario", "branch" or
+// "handler") and the counts behind it.
+type Main struct {
+	Kind    string  `json:"kind"`
+	Covered int     `json:"covered"`
+	Total   int     `json:"total"`
+	Percent float64 `json:"percent"`
 }
 
 // Path is one listed path.
@@ -115,6 +127,9 @@ func From(res coverage.Result) File {
 	f := File{SchemaVersion: SchemaVersion, Tool: "pathkit-go", Note: Note, Workflows: []Workflow{}}
 	for _, w := range res.Workflows {
 		bw := Workflow{Name: w.Name, Truncated: w.Truncated, Paths: []Path{}}
+		if w.Main.Measured {
+			bw.Main = &Main{Kind: w.Main.Kind, Covered: w.Main.Covered, Total: w.Main.Total, Percent: w.Main.Percent}
+		}
 		for _, p := range w.Paths {
 			bw.Paths = append(bw.Paths, Path{StableID: p.StableID, Bucket: p.Class.Bucket, Covered: p.Covered})
 		}
@@ -220,4 +235,45 @@ func Check(b File, res coverage.Result) (untested, review, lost []Finding) {
 		}
 	}
 	return untested, review, lost
+}
+
+// MainDrop is a workflow whose main number is lower than the baseline's by more
+// than the tolerance, or that has a main number in the baseline and none now.
+type MainDrop struct {
+	Workflow string
+	Kind     string
+	Was, Now Main
+	// NotMeasured: the workflow has nothing to measure now.
+	NotMeasured bool
+}
+
+// CheckMain compares each workflow's main number with the baseline's. Only
+// workflows that have one in the baseline are compared, and only when the
+// kind is the same (a changed kind is returned in changed, for a warning: the
+// two numbers measure different things). tolerance is in percent points.
+func CheckMain(b File, res coverage.Result, tolerance float64) (drops []MainDrop, changed []string) {
+	was := map[string]Main{}
+	for _, w := range b.Workflows {
+		if w.Main != nil {
+			was[w.Name] = *w.Main
+		}
+	}
+	for _, w := range res.Workflows {
+		old, ok := was[w.Name]
+		if !ok {
+			continue
+		}
+		if !w.Main.Measured {
+			drops = append(drops, MainDrop{Workflow: w.Name, Kind: old.Kind, Was: old, NotMeasured: true})
+			continue
+		}
+		if w.Main.Kind != old.Kind {
+			changed = append(changed, fmt.Sprintf("%s: the main number was %s coverage in the baseline and is %s coverage now, so the two are not compared", w.Name, old.Kind, w.Main.Kind))
+			continue
+		}
+		if w.Main.Percent < old.Percent-tolerance {
+			drops = append(drops, MainDrop{Workflow: w.Name, Kind: old.Kind, Was: old, Now: Main{Kind: w.Main.Kind, Covered: w.Main.Covered, Total: w.Main.Total, Percent: w.Main.Percent}})
+		}
+	}
+	return drops, changed
 }

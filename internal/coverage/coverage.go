@@ -78,6 +78,10 @@ type Input struct {
 	// Handlers are what the workflows register (signals, queries, updates and
 	// their validators); the handler table is built from them.
 	Handlers []model.Handler
+	// Scenarios are classification.scenarios.
+	Scenarios ScenarioOptions
+	// MainNumbers are the targets and forced choices of main numbers.
+	MainNumbers MainOptions
 	// Display shortens a file name for the report (the caller's
 	// load.DisplayPath); nil leaves names as they are.
 	Display func(string) string
@@ -120,6 +124,10 @@ type PathResult struct {
 	// Class is the path's bucket and reason. A covered path is always
 	// testable: a real run proves it possible.
 	Class classify.Classification
+	// ScenarioID is the scenario the path belongs to (see Scenario). SameAs is
+	// the ID of the scenario's main path when this is not it: a label only.
+	ScenarioID string
+	SameAs     string
 }
 
 // WorkflowResult is one workflow's coverage.
@@ -176,6 +184,14 @@ type WorkflowResult struct {
 	// AllBranches and AllBranchesTaken count the exits of the whole map (the
 	// same as Branches when the list is whole).
 	AllBranches, AllBranchesTaken int
+	// Scenarios are the distinct lists of external steps the workflow can make.
+	Scenarios ScenarioResult
+	// Pairs is decision-pair coverage (never the main number).
+	Pairs PairResult
+	// Main is the number the workflow is judged by (see MainNumber); Handlers
+	// is its handler coverage.
+	Main     MainNumber
+	Handlers HandlerStats
 }
 
 // PrunedResult is a part of the map left out of the path list.
@@ -202,7 +218,13 @@ type StageResult struct {
 	SplitWhy  string
 	Paths     []StagePathResult
 	Contexts  int
-	CutOff    bool
+	// File and FirstLine..LastLine are where the stage's decisions are; Scenarios
+	// is how many different things its listed paths do outside the workflow (0
+	// for a stage too big to list).
+	File                string
+	FirstLine, LastLine int
+	Scenarios           int
+	CutOff              bool
 	// Branches counts the exits of the stage's decisions, and how many a test took.
 	Branches, BranchesTaken int
 	// Covered, and the buckets of the stage paths (Testable counts needs-review
@@ -266,6 +288,10 @@ type Result struct {
 	LoopRounds []LoopRoundsRow
 	Counts     Counts
 	Breakdown  Breakdown
+	// Targets are the percent each kind of main number has to reach.
+	Targets scope.Targets
+	// Tests is what each Go test covered, from the test names the traces carry.
+	Tests []TestResult
 	// PrunedPaths is how many paths were left out of the lists because the
 	// fact engine shows them impossible (counted exactly, kept as groups), over
 	// all workflows.
@@ -431,6 +457,8 @@ func Compute(in Input) Result {
 		rounds   map[*model.Junction]map[string]bool // loop -> round buckets some counted trace ran
 		beyond   int                                 // traces that fit the map but not the list
 		ran      map[string]bool                     // every prefix of every path a counted trace ran (a path beyond the list too)
+		scenRan  map[string]int                      // scenario ID -> counted traces that ran it
+		pairsRan map[string]bool                     // decision pairs some counted trace ran
 	}
 	states := map[string]*state{}
 	var order []*state
@@ -444,7 +472,7 @@ func Compute(in Input) Result {
 			plan = in.Plan(w.Name, w.Graph)
 		}
 		st := &state{wf: w, paths: lst.PathList, listing: lst, plan: plan, byKey: map[string]int{}, branches: map[string]bool{}, unexp: map[string]*Unexplained{},
-			seen: map[string]bool{}, unitHit: map[string]bool{}, rounds: map[*model.Junction]map[string]bool{}, ran: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
+			seen: map[string]bool{}, unitHit: map[string]bool{}, rounds: map[*model.Junction]map[string]bool{}, ran: map[string]bool{}, scenRan: map[string]int{}, pairsRan: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
 		for k := range st.hits {
 			st.hits[k] = map[string]int{}
 		}
@@ -488,10 +516,12 @@ func Compute(in Input) Result {
 
 	var res Result
 	res.Excluded = in.Excluded
+	res.Targets = in.MainNumbers.Targets
 	res.Breakdown.Policy = policy
 	warn := func(tf TraceFile, kind trace.Kind, format string, args ...any) {
 		res.Warnings = append(res.Warnings, Warning{File: filepath.Base(tf.Path), Workflow: tf.File.Workflow, Kind: kind, Message: fmt.Sprintf(format, args...)})
 	}
+	tests := testObserver{}
 	olderSeen := 0
 	for _, tf := range in.Traces {
 		var older *trace.OlderFormatError
@@ -602,6 +632,12 @@ func Compute(in Input) Result {
 			st.ran[prefix] = true
 		}
 		st.ran[""] = true
+		scenID := model.ScenarioID(st.wf.Graph.Fingerprint(out.Path))
+		st.scenRan[scenID]++
+		tests.add(f.TestName, st.wf.Name, scenID, out.Path)
+		for _, k := range model.DecisionPairsOf(out.Path) {
+			st.pairsRan[k] = true
+		}
 		if !ok { // a path of a workflow with more paths than the list holds
 			res.Counts.BeyondCap++
 			st.beyond++
@@ -729,6 +765,8 @@ func Compute(in Input) Result {
 			}
 			wr.Paths = append(wr.Paths, pr)
 		}
+		wr.Scenarios = scenarios(st.wf, &wr, st.capped, st.scenRan, in.Scenarios)
+		wr.Pairs = pairs(st.wf.Graph, &wr, st.capped, st.pairsRan)
 		for _, taken := range st.branches {
 			if taken {
 				wr.BranchesTaken++
@@ -755,7 +793,14 @@ func Compute(in Input) Result {
 			}
 			res.Warnings = append(res.Warnings, Warning{Workflow: st.wf.Name, Kind: "classification", Message: msg})
 		}
-		finishStages(&wr, st.plan, st.hits, st.seen, st.allExits)
+		finishStages(st.wf.Graph, &wr, st.plan, st.hits, st.seen, st.allExits)
+		if in.Display != nil {
+			for i := range wr.Stages {
+				if wr.Stages[i].File != "" {
+					wr.Stages[i].File = in.Display(wr.Stages[i].File)
+				}
+			}
+		}
 		for gi, pg := range st.listing.Pruned {
 			pr := PrunedResult{Count: pg.Group.Count, Class: pg.Class, Unpruned: st.unpruned[gi]}
 			for _, s := range pg.Group.Prefix {
@@ -799,6 +844,13 @@ func Compute(in Input) Result {
 		loopIn = append(loopIn, loopInput{st.wf.Name, st.wf.Graph, st.rounds})
 	}
 	res.LoopRounds = loopRoundsTable(in, loopIn)
+	res.Tests = tests.results()
+	for i := range res.Workflows {
+		w := &res.Workflows[i]
+		st := states[w.Name]
+		w.Handlers = handlerStats(st.wf.Graph, w.Name, res.Handlers, st.seen, st.unitHit)
+		w.Main = mainNumber(*w, st.wf.Graph, w.Handlers, policy, in.MainNumbers, in.Scenarios.MaxListed)
+	}
 	// Internal assertion: the demotion above makes this impossible. If a
 	// later change breaks it, say so loudly (the caller stops with an error)
 	// instead of hiding a path a test ran.
@@ -908,7 +960,7 @@ func orZero(n *big.Int) *big.Int {
 // test ran (hits are the traces per stage path key), and how many exits of
 // each stage a trace took (seen are the exit IDs recorded; allExits the exits
 // some path takes).
-func finishStages(wr *WorkflowResult, plan *classify.StagePlan, hits []map[string]int, seen map[string]bool, allExits map[string]*model.Exit) {
+func finishStages(g *model.Graph, wr *WorkflowResult, plan *classify.StagePlan, hits []map[string]int, seen map[string]bool, allExits map[string]*model.Exit) {
 	taken := 0
 	for id := range allExits {
 		if seen[id] {
@@ -949,6 +1001,23 @@ func finishStages(wr *WorkflowResult, plan *classify.StagePlan, hits []map[strin
 				sr.Covered++
 			}
 			sr.Paths = append(sr.Paths, pr)
+		}
+		frag := map[string]bool{}
+		for _, sc := range plan.Classes[k] {
+			frag[g.StageFragmentID(sc.Path)] = true
+		}
+		sr.Scenarios = len(frag)
+		for _, j := range stg.Junctions {
+			if sr.File == "" {
+				sr.File = j.Pos.Filename
+			}
+			if j.Pos.Filename != sr.File {
+				continue
+			}
+			if sr.FirstLine == 0 || j.Pos.Line < sr.FirstLine {
+				sr.FirstLine = j.Pos.Line
+			}
+			sr.LastLine = max(sr.LastLine, j.Pos.Line)
 		}
 		wr.Stages = append(wr.Stages, sr)
 	}

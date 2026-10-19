@@ -63,13 +63,65 @@ type Classification struct {
 	// tells PathKit to treat as a call that starts an activity, a child
 	// workflow or a Nexus operation and waits for it.
 	ActivityWrappers []ActivityWrapper
+	// ScenarioMaxListed and ScenarioMaxStates are classification.scenarios:
+	// how many scenarios are listed (default 500) and how many states the
+	// scenario automaton may have before the workflow is not measured
+	// (default 100000). Zero means the default.
+	ScenarioMaxListed, ScenarioMaxStates int
+	// Targets are classification.targets: the percent a workflow's main number
+	// has to reach, for every kind of main number and per kind.
+	Targets Targets
+	// MainForce are classification.main_number.force: a person's choice of the
+	// main number of one workflow.
+	MainForce []MainForce
 	// MaxContexts is classification.engine.max_contexts: how many different
 	// incoming states of a stage the fact engine follows (default 16).
 	MaxContexts int
 }
 
+// Targets are the percent a main number has to reach.
+type Targets struct {
+	Default float64
+	// ByKind has "path", "scenario", "branch" or "handler" when the config sets one.
+	ByKind map[string]float64
+	set    bool // false: the config says nothing, so DefaultTarget
+}
+
+// NewTargets makes targets that the config set (a default and per-kind values).
+func NewTargets(def float64, byKind map[string]float64) Targets {
+	return Targets{Default: def, ByKind: byKind, set: true}
+}
+
+// For is the target for a kind of main number.
+func (t Targets) For(kind string) float64 {
+	if !t.set {
+		return DefaultTarget
+	}
+	if v, ok := t.ByKind[kind]; ok {
+		return v
+	}
+	return t.Default
+}
+
+// DefaultTarget is the target when the config sets none.
+const DefaultTarget = 80
+
+// MainForce is one classification.main_number.force entry.
+type MainForce struct {
+	Workflow string
+	Kind     string // "path", "scenario", "branch" or "handler"
+	Reason   string
+}
+
 // CISettings is classification.ci.
 type CISettings struct {
+	// Tolerance is classification.ci.tolerance: how many percent points a
+	// workflow's main number may be below the baseline before the check fails
+	// (default 0).
+	Tolerance float64
+	// MainFloor is classification.ci.main_floor: the lowest percent any
+	// workflow's main number may have; nil means no floor.
+	MainFloor *float64
 	// Baseline is the baseline file as written in the config ("" none);
 	// relative to the config file's folder (Config.Abs).
 	Baseline string
@@ -163,6 +215,24 @@ type classificationPart struct {
 	ActivityWrappers   []json.RawMessage `json:"activity_wrappers"`
 	DirectReturns      *string           `json:"direct_returns"`
 	Loops              *loopsPart        `json:"loops"`
+	Scenarios          *scenariosPart    `json:"scenarios"`
+	Targets            json.RawMessage   `json:"targets"`
+	MainNumber         *mainNumberPart   `json:"main_number"`
+}
+
+type scenariosPart struct {
+	MaxListed *int `json:"max_listed"`
+	MaxStates *int `json:"max_states"`
+}
+
+type mainNumberPart struct {
+	Force []json.RawMessage `json:"force"`
+}
+
+type forceEntry struct {
+	Workflow *string `json:"workflow"`
+	Kind     *string `json:"kind"`
+	Reason   *string `json:"reason"`
 }
 
 type loopsPart struct {
@@ -198,6 +268,8 @@ type ciEntry struct {
 	FailUnderTestable *float64 `json:"fail_under_testable"`
 	StageFloor        *float64 `json:"stage_floor"`
 	CappedBasis       *string  `json:"capped_basis"`
+	Tolerance         *float64 `json:"tolerance"`
+	MainFloor         *float64 `json:"main_floor"`
 }
 
 type explainedEntry struct {
@@ -435,6 +507,62 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 			c.StageMaxPaths = v
 		}
 	}
+	if p.Scenarios != nil {
+		if v := p.Scenarios.MaxListed; v != nil {
+			if *v < 1 || *v > 100000 {
+				return c, fail(`classification.scenarios.max_listed must be a whole number from 1 to 100000, got %d`, *v)
+			}
+			c.ScenarioMaxListed = *v
+		}
+		if v := p.Scenarios.MaxStates; v != nil {
+			if *v < 10 || *v > 10000000 {
+				return c, fail(`classification.scenarios.max_states must be a whole number from 10 to 10000000, got %d`, *v)
+			}
+			c.ScenarioMaxStates = *v
+		}
+	}
+	c.Targets = Targets{Default: DefaultTarget, set: true}
+	if p.Targets != nil {
+		var raw map[string]*float64
+		if err := strict(p.Targets, &raw); err != nil {
+			return c, fail(`classification.targets must look like {"default": 80, "path": 90, "scenario": 80, "branch": 60, "handler": 80} (%s)`, jsonProblem(p.Targets, err))
+		}
+		for k, v := range raw {
+			if v == nil || *v < 0 || *v > 100 {
+				return c, fail(`classification.targets.%s must be a number from 0 to 100`, k)
+			}
+			switch k {
+			case "default":
+				c.Targets.Default = *v
+			case "path", "scenario", "branch", "handler":
+				if c.Targets.ByKind == nil {
+					c.Targets.ByKind = map[string]float64{}
+				}
+				c.Targets.ByKind[k] = *v
+			default:
+				return c, fail(`classification.targets.%s is not a known key; use "default", "path", "scenario", "branch" or "handler"`, k)
+			}
+		}
+	}
+	if p.MainNumber != nil {
+		for i, raw := range p.MainNumber.Force {
+			where := fmt.Sprintf("classification.main_number.force[%d]", i)
+			var e forceEntry
+			if err := strict(raw, &e); err != nil {
+				return c, fail(`%s must look like {"workflow": "OrderWorkflow", "kind": "branch", "reason": "why this number"} (%s)`, where, jsonProblem(raw, err))
+			}
+			if blank(e.Workflow) {
+				return c, fail(`%s needs a "workflow"`, where)
+			}
+			if e.Kind == nil || (*e.Kind != "path" && *e.Kind != "scenario" && *e.Kind != "branch" && *e.Kind != "handler") {
+				return c, fail(`%s: "kind" must be "path", "scenario", "branch" or "handler"`, where)
+			}
+			if blank(e.Reason) || todoReason(*e.Reason) {
+				return c, fail(`%s needs a "reason" (why this number suits the workflow)`, where)
+			}
+			c.MainForce = append(c.MainForce, MainForce{Workflow: *e.Workflow, Kind: *e.Kind, Reason: *e.Reason})
+		}
+	}
 	c.LoopsModel = "one"
 	if p.Loops != nil && p.Loops.Model != nil {
 		switch *p.Loops.Model {
@@ -571,6 +699,18 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 				return c, fail(`classification.ci.capped_basis must be "stage" or "branch", got %q`, *v)
 			}
 			c.CI.CappedBasis = *v
+		}
+		if v := e.MainFloor; v != nil {
+			if *v < 0 || *v > 100 {
+				return c, fail(`classification.ci.main_floor must be a number from 0 to 100, got %v`, *v)
+			}
+			c.CI.MainFloor = v
+		}
+		if v := e.Tolerance; v != nil {
+			if *v < 0 || *v > 100 {
+				return c, fail(`classification.ci.tolerance must be a number from 0 to 100, got %v`, *v)
+			}
+			c.CI.Tolerance = *v
 		}
 		if v := e.StageFloor; v != nil {
 			if *v < 0 || *v > 100 {

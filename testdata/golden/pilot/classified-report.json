@@ -36,7 +36,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:4937154918"
         },
         {
           "number": 2,
@@ -59,7 +60,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:d0f06a9350"
         },
         {
           "number": 3,
@@ -82,7 +84,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:40640c3f83"
         },
         {
           "number": 4,
@@ -104,7 +107,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:2e33875519"
         }
       ],
       "classification": {
@@ -141,6 +145,107 @@
           "covered": 2,
           "percent": 50
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 2,
+        "total": 4,
+        "percent": 50,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "4",
+        "covered": 2,
+        "testable": 4,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:4937154918",
+            "steps": [
+              "AwaitWithTimeout (wait): failure",
+              "end: failed",
+              "unknown 57d689abe1"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:d0f06a9350",
+            "steps": [
+              "AwaitWithTimeout (wait): success",
+              "if !ok (AwaitWithTimeout): signaled",
+              "end: completed",
+              "unknown 25cd0d80e5"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              2
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:40640c3f83",
+            "steps": [
+              "AwaitWithTimeout (wait): success",
+              "if !ok (AwaitWithTimeout): signaled",
+              "end: completed",
+              "unknown 62dae19ef3"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              3
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:2e33875519",
+            "steps": [
+              "AwaitWithTimeout (wait): success",
+              "if !ok (AwaitWithTimeout): timeout",
+              "end: completed",
+              "unknown 5d9469de15"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              4
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "handlerCoverage": {
+        "covered": 0,
+        "total": 0,
+        "notRecorded": 2
+      },
+      "decisionPairs": {
+        "total": 4,
+        "covered": 3,
+        "percent": 75,
+        "exact": true
       },
       "file": "approval/approval.go",
       "priority": "Medium"
@@ -180,7 +285,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:2c07958908"
         },
         {
           "number": 2,
@@ -204,7 +310,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:c1a8fc187a"
         },
         {
           "number": 3,
@@ -225,7 +332,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:6ffbafb7a7"
         }
       ],
       "classification": {
@@ -262,6 +370,85 @@
           "covered": 2,
           "percent": 66.7
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 2,
+        "total": 3,
+        "percent": 66.7,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "3",
+        "covered": 2,
+        "testable": 3,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:2c07958908",
+            "steps": [
+              "loop for i < s.CyclesPerRun: 1+ rounds",
+              "ChargeMonthly (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:c1a8fc187a",
+            "steps": [
+              "loop for i < s.CyclesPerRun: 1+ rounds",
+              "ChargeMonthly (activity): success",
+              "timer",
+              "continue-as-new",
+              "end: continued-as-new"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              2
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:6ffbafb7a7",
+            "steps": [
+              "loop for i < s.CyclesPerRun: 0 rounds",
+              "continue-as-new",
+              "end: continued-as-new"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              3
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "decisionPairs": {
+        "total": 3,
+        "covered": 3,
+        "percent": 100,
+        "exact": true
       },
       "file": "billing/subscription.go",
       "priority": "Medium"
@@ -300,7 +487,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:1d519a1077"
         },
         {
           "number": 2,
@@ -322,7 +510,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:fafd7eda9e"
         },
         {
           "number": 3,
@@ -345,7 +534,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:498588ff0c"
         },
         {
           "number": 4,
@@ -368,7 +558,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:749cba0baa"
         }
       ],
       "classification": {
@@ -405,6 +596,100 @@
           "covered": 2,
           "percent": 50
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 2,
+        "total": 4,
+        "percent": 50,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "4",
+        "covered": 2,
+        "testable": 4,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:1d519a1077",
+            "steps": [
+              "ReserveInventory (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:fafd7eda9e",
+            "steps": [
+              "ReserveInventory (activity): success",
+              "PaymentWorkflow (child workflow): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              2
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:498588ff0c",
+            "steps": [
+              "ReserveInventory (activity): success",
+              "PaymentWorkflow (child workflow): success",
+              "ShipOrder (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              3
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:749cba0baa",
+            "steps": [
+              "ReserveInventory (activity): success",
+              "PaymentWorkflow (child workflow): success",
+              "ShipOrder (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              4
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "decisionPairs": {
+        "total": 4,
+        "covered": 3,
+        "percent": 75,
+        "exact": true
       },
       "file": "fulfillment/fulfillment.go",
       "priority": "Medium"
@@ -443,7 +728,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:8085a32e4d"
         },
         {
           "number": 2,
@@ -466,7 +752,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:9fd6ec25fd"
         },
         {
           "number": 3,
@@ -489,7 +776,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:b9cd2ebed9"
         },
         {
           "number": 4,
@@ -511,7 +799,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:0ba56f4f68"
         }
       ],
       "classification": {
@@ -548,6 +837,97 @@
           "covered": 2,
           "percent": 50
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 2,
+        "total": 4,
+        "percent": 50,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "4",
+        "covered": 2,
+        "testable": 4,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:8085a32e4d",
+            "steps": [
+              "AuthorizeCard (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:9fd6ec25fd",
+            "steps": [
+              "AuthorizeCard (activity): success",
+              "FraudReview (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              2
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:b9cd2ebed9",
+            "steps": [
+              "AuthorizeCard (activity): success",
+              "FraudReview (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              3
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:0ba56f4f68",
+            "steps": [
+              "AuthorizeCard (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              4
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "decisionPairs": {
+        "total": 4,
+        "covered": 3,
+        "percent": 75,
+        "exact": true
       },
       "file": "fulfillment/payment.go",
       "priority": "Medium"
@@ -586,7 +966,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:b8399a8d47"
         },
         {
           "number": 2,
@@ -608,7 +989,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:752834cc39"
         },
         {
           "number": 3,
@@ -630,7 +1012,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:ca5dfe627e"
         }
       ],
       "classification": {
@@ -667,6 +1050,79 @@
           "covered": 3,
           "percent": 100
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 3,
+        "total": 3,
+        "percent": 100,
+        "measured": true,
+        "target": 80,
+        "met": true,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "3",
+        "covered": 3,
+        "testable": 3,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:b8399a8d47",
+            "steps": [
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:752834cc39",
+            "steps": [
+              "ChargeCard (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              2
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:ca5dfe627e",
+            "steps": [
+              "ChargeCard (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              3
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "decisionPairs": {
+        "total": 2,
+        "covered": 2,
+        "percent": 100,
+        "exact": true
       },
       "file": "orders/orders.go",
       "priority": "Low"
@@ -706,7 +1162,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:eb49c18e98"
         },
         {
           "number": 2,
@@ -729,7 +1186,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:9b230f1985"
         },
         {
           "number": 3,
@@ -752,7 +1210,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:9b230f1985",
+          "sameBehaviourAs": "f399c898b9"
         },
         {
           "number": 4,
@@ -777,7 +1237,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:959db63e3f"
         },
         {
           "number": 5,
@@ -798,7 +1259,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:c414b12475"
         }
       ],
       "classification": {
@@ -835,6 +1297,100 @@
           "covered": 3,
           "percent": 60
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 3,
+        "total": 5,
+        "percent": 60,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "4",
+        "covered": 2,
+        "testable": 4,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:eb49c18e98",
+            "steps": [
+              "loop for attempt <= in.MaxPolls: 1+ rounds",
+              "CheckStatus (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:9b230f1985",
+            "steps": [
+              "loop for attempt <= in.MaxPolls: 1+ rounds",
+              "CheckStatus (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 3,
+            "paths": [
+              2,
+              3
+            ],
+            "pathCount": 2
+          },
+          {
+            "id": "sc:959db63e3f",
+            "steps": [
+              "loop for attempt <= in.MaxPolls: 1+ rounds",
+              "CheckStatus (activity): success",
+              "timer",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              4
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:c414b12475",
+            "steps": [
+              "loop for attempt <= in.MaxPolls: 0 rounds",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              5
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "decisionPairs": {
+        "total": 6,
+        "covered": 5,
+        "percent": 83.3,
+        "exact": true
       },
       "file": "polling/polling.go",
       "priority": "Medium"
@@ -874,7 +1430,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:a1b73b67e9",
+          "sameBehaviourAs": "b64b1d5b2f"
         },
         {
           "number": 2,
@@ -897,7 +1455,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:b0f18dee51"
         },
         {
           "number": 3,
@@ -920,7 +1479,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:08cda7e0e9"
         },
         {
           "number": 4,
@@ -942,7 +1502,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:a1b73b67e9"
         },
         {
           "number": 5,
@@ -965,7 +1526,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:b0f18dee51",
+          "sameBehaviourAs": "a0a936919c"
         },
         {
           "number": 6,
@@ -988,7 +1551,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:08cda7e0e9",
+          "sameBehaviourAs": "5cf66b07a8"
         }
       ],
       "classification": {
@@ -1025,6 +1590,85 @@
           "covered": 3,
           "percent": 50
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 3,
+        "total": 6,
+        "percent": 50,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "3",
+        "covered": 2,
+        "testable": 3,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:b0f18dee51",
+            "steps": [
+              "BuildReport (activity): success",
+              "EmailReport (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              2,
+              5
+            ],
+            "pathCount": 2
+          },
+          {
+            "id": "sc:08cda7e0e9",
+            "steps": [
+              "BuildReport (activity): success",
+              "EmailReport (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 2,
+            "paths": [
+              3,
+              6
+            ],
+            "pathCount": 2
+          },
+          {
+            "id": "sc:a1b73b67e9",
+            "steps": [
+              "BuildReport (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              4,
+              1
+            ],
+            "pathCount": 2
+          }
+        ]
+      },
+      "decisionPairs": {
+        "total": 6,
+        "covered": 4,
+        "percent": 66.7,
+        "exact": true
       },
       "file": "reports/dailyreport.go",
       "priority": "Medium"
@@ -1063,7 +1707,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:b906cedcc2"
         },
         {
           "number": 2,
@@ -1087,7 +1732,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:4087eedc88"
         },
         {
           "number": 3,
@@ -1111,7 +1757,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:e447fd6a48"
         },
         {
           "number": 4,
@@ -1135,7 +1782,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:4087eedc88",
+          "sameBehaviourAs": "1ff4ee340b"
         },
         {
           "number": 5,
@@ -1159,7 +1808,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:e447fd6a48",
+          "sameBehaviourAs": "c5e79ce8ca"
         },
         {
           "number": 6,
@@ -1183,7 +1834,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:4087eedc88",
+          "sameBehaviourAs": "1ff4ee340b"
         },
         {
           "number": 7,
@@ -1207,7 +1860,9 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:e447fd6a48",
+          "sameBehaviourAs": "c5e79ce8ca"
         },
         {
           "number": 8,
@@ -1230,7 +1885,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:86cf31d0e5"
         },
         {
           "number": 9,
@@ -1253,7 +1909,8 @@
           "confidence": "certain",
           "possibleInProduction": true,
           "explanation": "No detector or rule says this path is impossible, so a normal test is expected to be able to run it.",
-          "ruleId": null
+          "ruleId": null,
+          "scenarioId": "sc:3f3d05eaa7"
         }
       ],
       "classification": {
@@ -1290,6 +1947,134 @@
           "covered": 3,
           "percent": 33.3
         }
+      },
+      "mainNumber": {
+        "kind": "path",
+        "covered": 3,
+        "total": 9,
+        "percent": 33.3,
+        "measured": true,
+        "target": 80,
+        "met": false,
+        "why": "the workflow has few enough paths to list them all, so path coverage is the number"
+      },
+      "scenarios": {
+        "measured": true,
+        "count": "5",
+        "covered": 3,
+        "testable": 5,
+        "needsReview": 0,
+        "needsSpecialTest": 0,
+        "cannotBeTested": 0,
+        "fromListedPaths": true,
+        "truncated": false,
+        "list": [
+          {
+            "id": "sc:b906cedcc2",
+            "steps": [
+              "CreateLabel (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              1
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:4087eedc88",
+            "steps": [
+              "CreateLabel (activity): success",
+              "timer",
+              "wait for signal \"delivery-update\"",
+              "signal received c",
+              "cancel context",
+              "NotifyCustomer (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              2,
+              4,
+              6
+            ],
+            "pathCount": 3
+          },
+          {
+            "id": "sc:e447fd6a48",
+            "steps": [
+              "CreateLabel (activity): success",
+              "timer",
+              "wait for signal \"delivery-update\"",
+              "signal received c",
+              "cancel context",
+              "NotifyCustomer (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              3,
+              5,
+              7
+            ],
+            "pathCount": 3
+          },
+          {
+            "id": "sc:86cf31d0e5",
+            "steps": [
+              "CreateLabel (activity): success",
+              "timer",
+              "wait for timeout",
+              "NotifyCustomer (activity): failure",
+              "end: failed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": false,
+            "traces": 0,
+            "paths": [
+              8
+            ],
+            "pathCount": 1
+          },
+          {
+            "id": "sc:3f3d05eaa7",
+            "steps": [
+              "CreateLabel (activity): success",
+              "timer",
+              "wait for timeout",
+              "NotifyCustomer (activity): success",
+              "end: completed"
+            ],
+            "bucket": "testable",
+            "label": null,
+            "covered": true,
+            "traces": 1,
+            "paths": [
+              9
+            ],
+            "pathCount": 1
+          }
+        ]
+      },
+      "handlerCoverage": {
+        "covered": 2,
+        "total": 2
+      },
+      "decisionPairs": {
+        "total": 13,
+        "covered": 5,
+        "percent": 38.5,
+        "exact": true
       },
       "file": "shipment/shipment.go",
       "priority": "High"
@@ -1356,6 +2141,412 @@
   },
   "coverageBasis": "testable",
   "classificationShown": true,
+  "mainHeadline": {
+    "workflowsMeetingTarget": 1,
+    "workflows": 8,
+    "target": 80,
+    "branches": {
+      "total": 50,
+      "covered": 39,
+      "percent": 78
+    }
+  },
+  "tests": [
+    {
+      "name": "TestApprovalApproved",
+      "traces": 1,
+      "workflows": [
+        "approval.ApprovalWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 2,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestApprovalTimesOut",
+      "traces": 1,
+      "workflows": [
+        "approval.ApprovalWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 2,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestDailyReportBuildFails",
+      "traces": 1,
+      "workflows": [
+        "reports.DailyReportWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 2,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestDailyReportFirstRun",
+      "traces": 1,
+      "workflows": [
+        "reports.DailyReportWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 0,
+      "uniqueBranches": 0,
+      "addsNothingNew": true
+    },
+    {
+      "name": "TestDailyReportLaterRunStartsFromLastReport",
+      "traces": 1,
+      "workflows": [
+        "reports.DailyReportWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 0,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestFulfillmentPaymentFailsReleasesStock",
+      "traces": 1,
+      "workflows": [
+        "fulfillment.OrderFulfillmentWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 2,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestFulfillmentSucceeds",
+      "traces": 1,
+      "workflows": [
+        "fulfillment.OrderFulfillmentWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 2,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestOrderChargeFails",
+      "traces": 1,
+      "workflows": [
+        "orders.OrderWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 2,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestOrderCharged",
+      "traces": 1,
+      "workflows": [
+        "orders.OrderWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 2,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestOrderRejected",
+      "traces": 1,
+      "workflows": [
+        "orders.OrderWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 1,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestPaymentBigOrderPassesReview",
+      "traces": 1,
+      "workflows": [
+        "fulfillment.PaymentWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 2,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestPaymentSmallOrder",
+      "traces": 1,
+      "workflows": [
+        "fulfillment.PaymentWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 2,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestPollingCompleteFirstTime",
+      "traces": 1,
+      "workflows": [
+        "polling.ReportPollingWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 0,
+      "uniqueBranches": 0,
+      "addsNothingNew": true
+    },
+    {
+      "name": "TestPollingGivesUp",
+      "traces": 1,
+      "workflows": [
+        "polling.ReportPollingWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 5,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 3,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestPollingJobFailed",
+      "traces": 1,
+      "workflows": [
+        "polling.ReportPollingWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 0,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestPollingPendingThenComplete",
+      "traces": 1,
+      "workflows": [
+        "polling.ReportPollingWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 0,
+      "uniqueBranches": 0,
+      "addsNothingNew": true
+    },
+    {
+      "name": "TestShipmentDelivered",
+      "traces": 1,
+      "workflows": [
+        "shipment.ShipmentWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 4,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 2,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestShipmentLabelFails",
+      "traces": 1,
+      "workflows": [
+        "shipment.ShipmentWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 1,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestShipmentTimerFiresLost",
+      "traces": 1,
+      "workflows": [
+        "shipment.ShipmentWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 3,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestSubscriptionChargeFails",
+      "traces": 1,
+      "workflows": [
+        "billing.SubscriptionWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 2,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 1,
+      "addsNothingNew": false
+    },
+    {
+      "name": "TestSubscriptionContinuesAsNew",
+      "traces": 1,
+      "workflows": [
+        "billing.SubscriptionWorkflow"
+      ],
+      "scenarios": 1,
+      "branches": 4,
+      "uniqueScenarios": 1,
+      "uniqueBranches": 3,
+      "addsNothingNew": false
+    }
+  ],
+  "testsToWriteFirst": [
+    {
+      "rank": 1,
+      "id": "sc:4087eedc88",
+      "workflow": "shipment.ShipmentWorkflow",
+      "tag": "cancel",
+      "file": "shipment/shipment.go",
+      "line": 56,
+      "hint": "Send the signal \"delivery-update\", then cancel the workflow, then make NotifyCustomer fail",
+      "testName": "TestShipment_SignalDeliveryUpdateCancelledNotifyCustomerFails",
+      "covers": "3 paths and 1 branch no test has taken",
+      "paths": 3,
+      "branches": 1,
+      "pathNumber": 2
+    },
+    {
+      "rank": 2,
+      "id": "sc:4937154918",
+      "workflow": "approval.ApprovalWorkflow",
+      "tag": "cancel",
+      "file": "approval/approval.go",
+      "line": 34,
+      "hint": "Cancel the workflow while it waits",
+      "testName": "TestApproval_Cancelled",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 1
+    },
+    {
+      "rank": 3,
+      "id": "sc:498588ff0c",
+      "workflow": "fulfillment.OrderFulfillmentWorkflow",
+      "tag": "compensation",
+      "file": "fulfillment/fulfillment.go",
+      "line": 41,
+      "hint": "Make ShipOrder fail",
+      "testName": "TestOrderFulfillment_ShipOrderFails",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 3
+    },
+    {
+      "rank": 4,
+      "id": "sc:b0f18dee51",
+      "workflow": "reports.DailyReportWorkflow",
+      "tag": "activity failure",
+      "file": "reports/dailyreport.go",
+      "line": 37,
+      "hint": "Make EmailReport fail",
+      "testName": "TestDailyReport_EmailReportFails",
+      "covers": "2 paths and 1 branch no test has taken",
+      "paths": 2,
+      "branches": 1,
+      "pathNumber": 2
+    },
+    {
+      "rank": 5,
+      "id": "sc:1d519a1077",
+      "workflow": "fulfillment.OrderFulfillmentWorkflow",
+      "tag": "activity failure",
+      "file": "fulfillment/fulfillment.go",
+      "line": 24,
+      "hint": "Make ReserveInventory fail",
+      "testName": "TestOrderFulfillment_ReserveInventoryFails",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 1
+    },
+    {
+      "rank": 6,
+      "id": "sc:8085a32e4d",
+      "workflow": "fulfillment.PaymentWorkflow",
+      "tag": "activity failure",
+      "file": "fulfillment/payment.go",
+      "line": 16,
+      "hint": "Make AuthorizeCard fail",
+      "testName": "TestPayment_AuthorizeCardFails",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 1
+    },
+    {
+      "rank": 7,
+      "id": "sc:9fd6ec25fd",
+      "workflow": "fulfillment.PaymentWorkflow",
+      "tag": "activity failure",
+      "file": "fulfillment/payment.go",
+      "line": 22,
+      "hint": "Make FraudReview fail",
+      "testName": "TestPayment_FraudReviewFails",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 2
+    },
+    {
+      "rank": 8,
+      "id": "sc:eb49c18e98",
+      "workflow": "polling.ReportPollingWorkflow",
+      "tag": "activity failure",
+      "file": "polling/polling.go",
+      "line": 24,
+      "hint": "Make CheckStatus fail",
+      "testName": "TestReportPolling_CheckStatusFails",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 1
+    },
+    {
+      "rank": 9,
+      "id": "sc:86cf31d0e5",
+      "workflow": "shipment.ShipmentWorkflow",
+      "tag": "activity failure",
+      "file": "shipment/shipment.go",
+      "line": 56,
+      "hint": "Let the wait time out (send nothing), then make NotifyCustomer fail",
+      "testName": "TestShipment_TimesOutNotifyCustomerFails",
+      "covers": "1 path and 1 branch no test has taken",
+      "paths": 1,
+      "branches": 1,
+      "pathNumber": 8
+    },
+    {
+      "rank": 10,
+      "id": "sc:6ffbafb7a7",
+      "workflow": "billing.SubscriptionWorkflow",
+      "tag": "continue-as-new",
+      "file": "billing/subscription.go",
+      "line": 20,
+      "hint": "Make the loop run no rounds, then make the workflow continue as new",
+      "testName": "TestSubscription_ContinuesAsNew",
+      "covers": "1 path",
+      "paths": 1,
+      "branches": 0,
+      "pathNumber": 3
+    }
+  ],
   "unread": [
     {
       "workflow": "approval.ApprovalWorkflow",

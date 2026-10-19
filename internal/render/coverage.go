@@ -69,6 +69,7 @@ func CoverageTextFull(res coverage.Result, threshold *float64, tags, hints, omit
 	var b strings.Builder
 	b.WriteString(CapWarning(res))
 	b.WriteString(ZeroPathWarning(res))
+	b.WriteString(MainHeadlineBlock(res)) // after the warnings, which stay first
 	single := len(res.Workflows) == 1
 	for i, w := range res.Workflows {
 		if i > 0 {
@@ -82,6 +83,9 @@ func CoverageTextFull(res coverage.Result, threshold *float64, tags, hints, omit
 			name += " [module " + w.Module + "]"
 		}
 		fmt.Fprintf(&b, "Workflow: %s\n", name)
+		for _, l := range MainBlock(w) {
+			b.WriteString(l + "\n")
+		}
 		fmt.Fprintf(&b, "%s\n", TotalLine(model.PathList{List: make([]model.Path, len(w.Paths)), Truncated: w.Truncated}, model.DefaultMaxPaths))
 		var th *float64
 		if single {
@@ -107,6 +111,7 @@ func CoverageTextFull(res coverage.Result, threshold *float64, tags, hints, omit
 			if tags {
 				line += ClassTag(p.Class)
 			}
+			line += SameAs(p, w.Paths)
 			if p.Covered {
 				covered = append(covered, line)
 			} else {

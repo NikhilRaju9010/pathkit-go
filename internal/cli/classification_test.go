@@ -15,7 +15,7 @@ import (
 
 // additiveKeys are the JSON fields added with path classification. Every
 // other key and value must be exactly what it was before.
-var additivePathKeys = []string{"stableId", "bucket", "label", "source", "confidence", "possibleInProduction", "explanation", "ruleId", "proof"}
+var additivePathKeys = []string{"stableId", "bucket", "label", "source", "confidence", "possibleInProduction", "explanation", "ruleId", "proof", "scenarioId", "sameBehaviourAs"}
 
 func stripAdditive(v any) {
 	switch x := v.(type) {
@@ -24,12 +24,18 @@ func stripAdditive(v any) {
 			delete(x, k)
 		}
 		if _, ok := x["pathList"]; ok {
+			for _, k := range []string{"scenarioId", "sameBehaviourAs", "mainNumber", "scenarios", "handlerCoverage", "decisionPairs"} { // scenarios and main numbers (M9)
+				delete(x, k)
+			}
 			delete(x, "classification") // the per-workflow count
 		}
 		if _, ok := x["workflows"]; ok {
 			delete(x, "classification") // the top-level count
 			delete(x, "coverageBasis")
 			delete(x, "classificationShown")
+			delete(x, "tests")                                                     // what each Go test covered (M10.7)
+			delete(x, "testsToWriteFirst")                                         // the advice (M10.1)
+			delete(x, "mainHeadline")                                              // workflows meeting their target (M9.7)
 			delete(x, "unread")                                                    // the "could not fully read" panel (M7.8)
 			for _, k := range []string{"callOutcomes", "handlers", "loopRounds"} { // the outcome, handler and loop tables (M8)
 				delete(x, k)

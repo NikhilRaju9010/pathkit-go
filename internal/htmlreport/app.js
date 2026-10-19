@@ -187,6 +187,7 @@
     }
     row('Path id', r[1]);
     row('Status', STATUS[r[2]]);
+    if (r.length > 8 && r[8] > 0) { row('Same behaviour as', 'path ' + r[8] + ' (it makes the same steps outside the workflow)'); }
     if (D.c) {
       row('Bucket', str(r[3]));
       row('Label', str(r[4]));

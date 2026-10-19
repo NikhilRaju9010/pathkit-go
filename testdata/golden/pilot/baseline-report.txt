@@ -1,4 +1,11 @@
+1 of 8 workflows meet their target (main number ≥ 80%)
+Branch coverage (all workflows): 39/50 (78.0%)
+Decision pairs (all workflows): 28/42 (66.7%) — an outcome of one decision followed by an outcome of the next
+
 approval.ApprovalWorkflow (approval/approval.go)
+Main number: path coverage 2/4 (50.0%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 4 (2 covered) — different things the workflow can do, counted by what it does outside itself
 2/4 paths · 50.0% · branches 4/6 · priority Medium
   1. Start -> AwaitWithTimeout (wait) --failure--> End (failed): missed
   2. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --signaled--> if decision == "approved" --true--> End (completed): covered
@@ -6,12 +13,18 @@ approval.ApprovalWorkflow (approval/approval.go)
   4. Start -> AwaitWithTimeout (wait) --success--> if !ok (AwaitWithTimeout) --timeout--> End (completed): covered
 
 billing.SubscriptionWorkflow (billing/subscription.go)
+Main number: path coverage 2/3 (66.7%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 3 (2 covered) — different things the workflow can do, counted by what it does outside itself
 2/3 paths · 66.7% · branches 5/5 · priority Medium
   1. Start -> for i < s.CyclesPerRun --iterate--> ChargeMonthly (activity) --failure--> End (failed): covered
   2. Start -> for i < s.CyclesPerRun --iterate--> ChargeMonthly (activity) --success--> retry --> for i < s.CyclesPerRun --exit--> End (continued-as-new): covered
   3. Start -> for i < s.CyclesPerRun --exit--> End (continued-as-new): missed
 
 fulfillment.OrderFulfillmentWorkflow (fulfillment/fulfillment.go)
+Main number: path coverage 2/4 (50.0%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 4 (2 covered) — different things the workflow can do, counted by what it does outside itself
 2/4 paths · 50.0% · branches 4/6 · priority Medium
   1. Start -> ReserveInventory (activity) --failure--> End (failed): missed
   2. Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --failure--> End (failed) [compensation (defer)]: covered
@@ -19,6 +32,9 @@ fulfillment.OrderFulfillmentWorkflow (fulfillment/fulfillment.go)
   4. Start -> ReserveInventory (activity) --success--> PaymentWorkflow (child workflow) --success--> ShipOrder (activity) --success--> End (completed) [compensation (defer)]: covered
 
 fulfillment.PaymentWorkflow (fulfillment/payment.go)
+Main number: path coverage 2/4 (50.0%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 4 (2 covered) — different things the workflow can do, counted by what it does outside itself
 2/4 paths · 50.0% · branches 4/6 · priority Medium
   1. Start -> AuthorizeCard (activity) --failure--> End (failed): missed
   2. Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --true--> FraudReview (activity) --failure--> End (failed): missed
@@ -26,42 +42,86 @@ fulfillment.PaymentWorkflow (fulfillment/payment.go)
   4. Start -> AuthorizeCard (activity) --success--> if o.AmountCents > 100_000 --false--> End (completed): covered
 
 orders.OrderWorkflow (orders/orders.go)
+Main number: path coverage 3/3 (100.0%) · target 80% met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 3 (3 covered) — different things the workflow can do, counted by what it does outside itself
 3/3 paths · 100.0% · branches 4/4 · priority Low
   1. Start -> if in.AmountCents <= 0 --true--> End (completed): covered
   2. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed): covered
   3. Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --success--> End (completed): covered
 
 polling.ReportPollingWorkflow (polling/polling.go)
+Main number: path coverage 3/5 (60.0%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 4 (2 covered) — different things the workflow can do, counted by what it does outside itself
 3/5 paths · 60.0% · branches 7/8 · priority Medium
   1. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --failure--> End (failed): missed
   2. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --case "complete"--> End (completed): covered
-  3. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --case "failed"--> End (completed): covered
+  3. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --case "failed"--> End (completed): covered (same behaviour as path 2)
   4. Start -> for attempt <= in.MaxPolls --iterate--> CheckStatus (activity) --success--> switch status --default--> retry --> for attempt <= in.MaxPolls --exit--> End (completed): covered
   5. Start -> for attempt <= in.MaxPolls --exit--> End (completed): missed
 
 reports.DailyReportWorkflow (reports/dailyreport.go)
+Main number: path coverage 3/6 (50.0%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 3 (2 covered) — different things the workflow can do, counted by what it does outside itself
 3/6 paths · 50.0% · branches 5/6 · priority Medium
-  1. Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --failure--> End (failed): missed
+  1. Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --failure--> End (failed): missed (same behaviour as path 4)
   2. Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --success--> EmailReport (activity) --failure--> End (failed): missed
   3. Start -> if workflow.HasLastCompletionResult(ctx) --true--> BuildReport (activity) --success--> EmailReport (activity) --success--> End (completed): covered
   4. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --failure--> End (failed): covered
-  5. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --failure--> End (failed): missed
-  6. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --success--> End (completed): covered
+  5. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --failure--> End (failed): missed (same behaviour as path 2)
+  6. Start -> if workflow.HasLastCompletionResult(ctx) --false--> BuildReport (activity) --success--> EmailReport (activity) --success--> End (completed): covered (same behaviour as path 3)
 
 shipment.ShipmentWorkflow (shipment/shipment.go)
+Main number: path coverage 3/9 (33.3%) · target 80% not met
+  Why this number: the workflow has few enough paths to list them all, so path coverage is the number.
+Scenarios: 5 (3 covered) — different things the workflow can do, counted by what it does outside itself
 3/9 paths · 33.3% · branches 6/9 · priority High
   1. Start -> CreateLabel (activity) --failure--> End (failed): covered
   2. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "delivered"--> NotifyCustomer (activity) --failure--> End (failed): missed
   3. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "delivered"--> NotifyCustomer (activity) --success--> End (completed): covered
-  4. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "returned"--> NotifyCustomer (activity) --failure--> End (failed): missed
-  5. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "returned"--> NotifyCustomer (activity) --success--> End (completed): missed
-  6. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --default--> NotifyCustomer (activity) --failure--> End (failed): missed
-  7. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --default--> NotifyCustomer (activity) --success--> End (completed): missed
+  4. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "returned"--> NotifyCustomer (activity) --failure--> End (failed): missed (same behaviour as path 2)
+  5. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --case "returned"--> NotifyCustomer (activity) --success--> End (completed): missed (same behaviour as path 3)
+  6. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --default--> NotifyCustomer (activity) --failure--> End (failed): missed (same behaviour as path 2)
+  7. Start -> CreateLabel (activity) --success--> select (Selector) --signal "delivery-update"--> switch u.Status --default--> NotifyCustomer (activity) --success--> End (completed): missed (same behaviour as path 3)
   8. Start -> CreateLabel (activity) --success--> select (Selector) --timeout--> NotifyCustomer (activity) --failure--> End (failed): missed
   9. Start -> CreateLabel (activity) --success--> select (Selector) --timeout--> NotifyCustomer (activity) --success--> End (completed): covered
 
 38 paths total · 20 covered · 18 missed · 52.6% project coverage
 Branches: 39/50 (78.0%)
+
+Start here. Tests to write first (a scenario is one distinct way the workflow behaves from outside; missed means no test ran it). Riskiest first:
+  1. [cancel] shipment.ShipmentWorkflow — shipment/shipment.go:56
+     Send the signal "delivery-update", then cancel the workflow, then make NotifyCustomer fail
+     suggested test name: TestShipment_SignalDeliveryUpdateCancelledNotifyCustomerFails · covers 3 paths and 1 branch no test has taken · to write it: pathkit scaffold sc:4087eedc88
+  2. [cancel] approval.ApprovalWorkflow — approval/approval.go:34
+     Cancel the workflow while it waits
+     suggested test name: TestApproval_Cancelled · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:4937154918
+  3. [compensation] fulfillment.OrderFulfillmentWorkflow — fulfillment/fulfillment.go:41
+     Make ShipOrder fail
+     suggested test name: TestOrderFulfillment_ShipOrderFails · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:498588ff0c
+  4. [activity failure] reports.DailyReportWorkflow — reports/dailyreport.go:37
+     Make EmailReport fail
+     suggested test name: TestDailyReport_EmailReportFails · covers 2 paths and 1 branch no test has taken · to write it: pathkit scaffold sc:b0f18dee51
+  5. [activity failure] fulfillment.OrderFulfillmentWorkflow — fulfillment/fulfillment.go:24
+     Make ReserveInventory fail
+     suggested test name: TestOrderFulfillment_ReserveInventoryFails · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:1d519a1077
+  6. [activity failure] fulfillment.PaymentWorkflow — fulfillment/payment.go:16
+     Make AuthorizeCard fail
+     suggested test name: TestPayment_AuthorizeCardFails · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:8085a32e4d
+  7. [activity failure] fulfillment.PaymentWorkflow — fulfillment/payment.go:22
+     Make FraudReview fail
+     suggested test name: TestPayment_FraudReviewFails · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:9fd6ec25fd
+  8. [activity failure] polling.ReportPollingWorkflow — polling/polling.go:24
+     Make CheckStatus fail
+     suggested test name: TestReportPolling_CheckStatusFails · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:eb49c18e98
+  9. [activity failure] shipment.ShipmentWorkflow — shipment/shipment.go:56
+     Let the wait time out (send nothing), then make NotifyCustomer fail
+     suggested test name: TestShipment_TimesOutNotifyCustomerFails · covers 1 path and 1 branch no test has taken · to write it: pathkit scaffold sc:86cf31d0e5
+  10. [continue-as-new] billing.SubscriptionWorkflow — billing/subscription.go:20
+     Make the loop run no rounds, then make the workflow continue as new
+     suggested test name: TestSubscription_ContinuesAsNew · covers 1 path · to write it: pathkit scaffold sc:6ffbafb7a7
 
 Handlers: 3 registered (signals, queries, updates and update validators), 0 with a gap; for 2 of them a recorded run cannot show whether a test used them ("not recorded"):
   query status (approval.ApprovalWorkflow, registered at approval/approval.go:22): exercised by a test: not recorded
@@ -85,6 +145,8 @@ Call outcomes: 12 activity, child workflow or Nexus calls checked, 7 outcomes no
 Loop rounds: 2 loops on the map, 2 loops with a round count no test ran:
   billing/subscription.go:20: for i < s.CyclesPerRun in billing.SubscriptionWorkflow: 0 rounds not seen, 1 round seen, 2+ rounds seen
   polling/polling.go:21: for attempt <= in.MaxPolls in polling.ReportPollingWorkflow: 0 rounds not seen, 1 round seen, 2+ rounds seen
+
+Tests: 21 recorded; 3 add nothing the others do not cover: TestDailyReportFirstRun, TestPollingCompleteFirstTime, TestPollingPendingThenComplete
 
 PathKit could not fully read 1 place:
   approval/approval.go:29: closure not mapped func literal (approval.ApprovalWorkflow) — its Temporal calls are not steps of any path (a goroutine, a deferred cleanup or a function stored for later is not followed)

@@ -1,9 +1,12 @@
-name: Nightly soundness
+name: Nightly soundness and public corpus
 
 # A long run of the soundness test: 10,000 random programs, with the fact
 # engine's "cannot be tested" claims checked against what the programs really
-# do. It runs on Linux only, once a night and on demand. The normal CI
-# workflow (ci.yml) is not changed by this file.
+# do. A second job runs PathKit on a public corpus (the Temporal Go samples,
+# cloned at a pinned commit) and fails when the "could not fully read" panel
+# grows over its stored baseline or a path a test ran is not testable (a false
+# claim). Both run on Linux only, once a night and on demand. The normal CI
+# workflow (ci.yml) is not changed by this file. No job here uses a secret.
 on:
   schedule:
     - cron: "17 3 * * *"
@@ -30,3 +33,29 @@ jobs:
         env:
           PATHKIT_SOUNDNESS_N: "10000"
         run: go test -timeout 80m -run TestNoFalseCannotBeTestedClaims -v ./internal/soundness
+
+  corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # the public corpus and the commit it is pinned to (see .github/corpus/baseline.json)
+      CORPUS_REPO: https://github.com/temporalio/samples-go
+      CORPUS_COMMIT: e979e6ed40721a7561530c095b3f8899fbc84950
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build PathKit
+        run: go build -o "$RUNNER_TEMP/pathkit" ./cmd/pathkit
+
+      - name: Get the corpus at the pinned commit
+        run: |
+          git clone --quiet "$CORPUS_REPO" "$RUNNER_TEMP/corpus"
+          git -C "$RUNNER_TEMP/corpus" checkout --quiet "$CORPUS_COMMIT"
+
+      - name: Run PathKit on the corpus and compare with the baseline
+        run: python3 .github/corpus/check.py "$RUNNER_TEMP/pathkit" "$RUNNER_TEMP/corpus" .github/corpus/baseline.json
