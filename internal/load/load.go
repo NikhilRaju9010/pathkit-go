@@ -89,6 +89,11 @@ func FindModules(dir string) []string {
 	if err != nil {
 		return nil
 	}
+	// The Go tools name files by their real path (macOS temp folders are reached
+	// through a link), and the overlay must use those names.
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
 	var out []string
 	var walk func(d string, depth int)
 	walk = func(d string, depth int) {

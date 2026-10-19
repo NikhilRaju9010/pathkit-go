@@ -3,6 +3,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -82,5 +83,29 @@ func TestFolderWithSeveralModules(t *testing.T) {
 		if _, has := w.(map[string]any)["module"]; has {
 			t.Errorf("a single module's workflow carries a module field")
 		}
+	}
+}
+
+// The folder may be reached through a link (macOS temporary folders are): the
+// tests are still recorded, because the modules are named by their real folder.
+func TestFolderWithSeveralModulesThroughALink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("links need extra rights on Windows")
+	}
+	real := t.TempDir()
+	writeModule(t, real, "alpha", "example.com/alpha")
+	writeModule(t, real, "beta", "example.com/beta")
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("cannot make a link here:", err)
+	}
+	t.Chdir(t.TempDir())
+	traces := filepath.Join(t.TempDir(), "traces")
+	if _, stderr, code := pathkit(t, "test", link, "--traces", traces); code != 0 {
+		t.Fatalf("pathkit test: exit %d\n%s", code, stderr)
+	}
+	doc := summarizeReport(t, link, traces, "")
+	if tr := doc["traces"].(map[string]any); tr["counted"].(float64) != 2 {
+		t.Errorf("traces: %v", tr)
 	}
 }
