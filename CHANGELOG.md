@@ -31,6 +31,12 @@ Two milestones: honest numbers on huge workflows, and reading more Temporal code
 - **`docs/CONSTRUCTS.md`** lists 26 shapes, each handled or reported, with a fixture and an `expected.json` in `testdata/constructs` that a test checks.
 - **Trace files** gain an optional `recorder` field. Older traces are read and counted as before; a step kind they cannot hold is shown as not recorded.
 
+### Things that move for some existing projects
+
+- **Version gates under the cap.** A `workflow.GetVersion` check written as a yes/no variable, with `!`, or as a one-line function now gives the old side the label `version-gate-old-branch` (needs-special-test), where before those paths were plain testable. Testable counts, the testable denominator and `fail_under_testable` can change for a project with such gates. Path ids do not change.
+- **Stage ids of a workflow that had a stage too big to list.** The stage is now cut into pieces, so the stages after it are numbered again and their stage path ids (`g5:...`) change. Workflows whose stages were all small keep every id.
+- **A folder with no `go.mod` above it but modules below it** used to stop with "no go.mod found"; it is now read module by module.
+
 ### Added to every report (new lines and keys)
 
 `PathKit read everything in scope` (or the panel), the handler table, the call outcome table and the loop rounds table in the text and HTML report; `unread`, `handlers`, `callOutcomes` and `loopRounds` in the JSON. The golden files of the sample project, `internal/cli/testdata` and the test expectations that pin the report text were updated for these additions (`PATHKIT_UPDATE_GOLDEN=1`, `PATHKIT_UPDATE_HTML_GOLDEN=1`); `testdata/golden/model/snapshot.txt` and the older `coverage_orders.json` / `report_orders.json` goldens were not touched.
