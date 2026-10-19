@@ -169,7 +169,7 @@ func runBatch(t *testing.T, programs []Program) *observed {
 	}
 	cmd := exec.Command("go", "test", "-vet=off", "-overlay="+overlay, "-count=1", "./progs")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "PK_TRACES="+traces)
+	cmd.Env = append(cmd.Environ(), "PK_TRACES="+traces, "PATHKIT_TESTNAMES=off") // test names are not what this test checks, and the dump costs time inside a workflow // Environ keeps the PWD that follows cmd.Dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("running the generated programs failed: %v\n%s", err, firstLines(string(out), 60))
 	}

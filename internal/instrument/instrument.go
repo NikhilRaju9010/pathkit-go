@@ -969,7 +969,7 @@ func pathkitRet{{.N}}[{{.TypeParams}} any](r *pathkitRecorder, {{.Params}}) ({{.
 func pathkitTestName() string {
 	// only a "go test" binary has a test to name (and the dump of every goroutine
 	// is not worth its cost anywhere else)
-	if len(pathkitos.Args) == 0 || !(pathkitstrings.HasSuffix(pathkitos.Args[0], ".test") || pathkitstrings.HasSuffix(pathkitos.Args[0], ".test.exe")) {
+	if pathkitos.Getenv("PATHKIT_TESTNAMES") == "off" || len(pathkitos.Args) == 0 || !(pathkitstrings.HasSuffix(pathkitos.Args[0], ".test") || pathkitstrings.HasSuffix(pathkitos.Args[0], ".test.exe")) {
 		return ""
 	}
 	buf := make([]byte, 1<<16)
@@ -979,7 +979,7 @@ func pathkitTestName() string {
 			buf = buf[:n]
 			break
 		}
-		if len(buf) >= 1<<24 {
+		if len(buf) >= 1<<19 { // a very long dump: not worth the time inside a workflow
 			return ""
 		}
 		buf = make([]byte, 2*len(buf))

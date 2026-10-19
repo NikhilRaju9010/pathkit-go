@@ -1086,7 +1086,7 @@ The report lists the 10 tests worth writing first (`--summary`, the full text, t
 
 ### Which test covers what
 
-Every trace now records the name of the Go test that made it (from the test's call stack; blank when several parallel tests make it ambiguous; traces from before show "test name not recorded"). The report has one line, the HTML a table, and JSON `tests`: per test its runs, scenarios and branches, how many only it covers, and the tests that add nothing the others do not cover.
+Every trace now records the name of the Go test that made it (from the test's call stack; blank when several parallel tests make it ambiguous; traces from before show "test name not recorded"). Set the environment variable `PATHKIT_TESTNAMES=off` to skip this (it asks Go for the stacks of all goroutines when a workflow ends). The report has one line, the HTML a table, and JSON `tests`: per test its runs, scenarios and branches, how many only it covers, and the tests that add nothing the others do not cover.
 
 ### Exports
 
