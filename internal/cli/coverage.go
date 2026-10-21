@@ -16,6 +16,7 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"github.com/NikhilRaju9010/pathkit-go/internal/render"
+	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 )
 
 type coverageOptions struct {
@@ -27,6 +28,8 @@ type coverageOptions struct {
 	paths   bool
 	// unmatched adds the unmatched-trace report (--unmatched).
 	unmatched bool
+	// technical prints the text exactly as PathKit 0.4.0 did.
+	technical bool
 }
 
 func newCoverageCommand() *cobra.Command {
@@ -55,6 +58,7 @@ on stderr; they never change the exit code.`,
 	f.StringVar(&opt.measure.coverageBasis, "coverage-basis", "", "which coverage --fail-under checks: `basis`: testable or overall (default: overall; testable when the config enables classification)")
 	f.StringVar(&opt.measure.failUnder, "fail-under", "", "exit 2 when path coverage is below this `percent` (0-100)")
 	f.BoolVar(&opt.json, "json", false, "print JSON instead of text")
+	f.BoolVar(&opt.technical, "technical", false, "print the text exactly as PathKit 0.4.0 did (the technical names, no branch headline), for scripts that read it")
 	f.BoolVar(&opt.hints, "hints", false, "under every testable path no test ran, say what a test must make happen to run it")
 	f.BoolVar(&opt.paths, "paths", false, "list the paths of a workflow with more paths than the list holds (by default only its counts, stages and groups are printed)")
 	f.BoolVar(&opt.unmatched, "unmatched", false, "add a report of the traces that fit no path: where each left the map, what the map expected, and the likely cause")
@@ -100,6 +104,11 @@ func runCoverage(cmd *cobra.Command, target string, opt coverageOptions) error {
 		output += "\n" + render.ExcludedBlock(m.res.Excluded, m.excludedBy) + render.TracesLine(m.res.Counts)
 		if opt.unmatched {
 			output += "\n" + render.UnmatchedSection(m.res)
+		}
+		if !opt.technical {
+			// branch coverage first, in plain names; the rest as before, in plain names too
+			head := strings.Join(render.BranchHeadlineLines(m.res, advice.MissedOutcomes(m.res, load.DisplayPath, 1)), "\n")
+			output = head + "\n\n" + render.Plain(output)
 		}
 	}
 	return finish(cmd, "coverage", m, output, output, opt.out, opt.clean, nil)
@@ -168,6 +177,8 @@ type (
 		// SplitAdvice names the biggest stage as a candidate child workflow; absent
 		// when the main number is path coverage.
 		SplitAdvice string `json:"splitAdvice,omitempty"`
+		// SplitHelperCandidates: helpers whose decisions the paths repeat (advice only).
+		SplitHelperCandidates []string `json:"splitHelperCandidates,omitempty"`
 	}
 	jsonScenario struct {
 		ID      string   `json:"id"`
@@ -298,6 +309,11 @@ type (
 		// Decision pairs: an outcome of one decision followed by an outcome of the
 		// next. Never the main number.
 		DecisionPairs *jsonPairs `json:"decisionPairs,omitempty"`
+		// Added with branch-first coverage (stable branch IDs, see docs/DESIGN.md D31).
+		BranchCoverage    *jsonBranchCoverage    `json:"branchCoverage,omitempty"`
+		Outcomes          []jsonOutcome          `json:"outcomes,omitempty"`
+		ConditionCoverage *jsonConditionCoverage `json:"conditionCoverage,omitempty"`
+		Conditions        []jsonConditionPart    `json:"conditions,omitempty"`
 	}
 	jsonPairs struct {
 		jsonCount
@@ -388,9 +404,14 @@ type (
 		Traces        jsonTraces     `json:"traces"`
 		FailUnder     *jsonFailUnder `json:"failUnder"`
 		// Added with path classification.
-		Classification      jsonClassification `json:"classification"`
-		CoverageBasis       string             `json:"coverageBasis"`
-		ClassificationShown bool               `json:"classificationShown"`
+		// Added with branch-first coverage.
+		BranchCoverage    *jsonBranchCoverage    `json:"branchCoverage,omitempty"`
+		ConditionCoverage *jsonConditionCoverage `json:"conditionCoverage,omitempty"`
+		// Added with the decision check; absent until "pathkit check-decisions" ran.
+		DecisionCheck       *coverage.DecisionCheck `json:"decisionCheck,omitempty"`
+		Classification      jsonClassification      `json:"classification"`
+		CoverageBasis       string                  `json:"coverageBasis"`
+		ClassificationShown bool                    `json:"classificationShown"`
 		// Added with the known-defect label; absent when no path has it.
 		BlockedByKnownBugs int `json:"blockedByKnownBugs,omitempty"`
 		// Added with the three headline numbers; absent unless a workflow has
@@ -437,6 +458,59 @@ type (
 		// Added with the assumptions panel: every assumption, on or off, with
 		// how many claims rest on it; absent when classification is off.
 		AssumptionPanel []jsonAssumption `json:"assumptionPanel,omitempty"`
+	}
+	// jsonBranchCoverage is branch coverage over the decision outcomes that can
+	// happen: possible leaves out the ones shown impossible (impossible) and keeps
+	// the ones blocked by a known bug.
+	jsonBranchCoverage struct {
+		Covered            int     `json:"covered"`
+		Possible           int     `json:"possible"`
+		Impossible         int     `json:"impossible"`
+		BlockedByKnownBugs int     `json:"blockedByKnownBugs"`
+		Percent            float64 `json:"percent"`
+		Grade              string  `json:"grade"`
+	}
+	// jsonConditionCoverage counts the parts of && / || conditions: two values
+	// (true, false) to see for each part.
+	jsonConditionCoverage struct {
+		Covered     int     `json:"covered"`
+		Total       int     `json:"total"`
+		Percent     float64 `json:"percent"`
+		NotRecorded bool    `json:"notRecorded,omitempty"`
+	}
+	jsonConditionPart struct {
+		ID       string `json:"id"`
+		Part     string `json:"part"`
+		Decision string `json:"decision"`
+		Function string `json:"function"`
+		File     string `json:"file"`
+		Line     int    `json:"line"`
+		True     bool   `json:"seenTrue"`
+		False    bool   `json:"seenFalse"`
+	}
+	jsonOutcome struct {
+		ID       string `json:"id"`
+		File     string `json:"file"`
+		Line     int    `json:"line"`
+		Function string `json:"function"`
+		Decision string `json:"decision"`
+		Outcome  string `json:"outcome"`
+		// Status is "covered", "missed", "impossible" or "blocked".
+		Status string `json:"status"`
+		Helper bool   `json:"helper,omitempty"`
+		// Cleanup: the decision runs under a disconnected context (cleanup after a cancel).
+		Cleanup bool `json:"cleanup,omitempty"`
+		// Label and Why are set for an impossible or blocked outcome.
+		Label *string         `json:"label"`
+		Why   *string         `json:"why"`
+		Proof []jsonProofStep `json:"proof,omitempty"`
+		// Sites and SitesTaken: the copies of a helper's decision (call sites) and
+		// how many a test took. Per-call-site detail is in this JSON only.
+		Sites           int      `json:"sites"`
+		SitesTaken      int      `json:"sitesTaken"`
+		MissedPaths     int      `json:"missedPaths"`
+		MissedScenarios int      `json:"missedScenarios"`
+		Exits           []string `json:"exits"`
 	}
 	jsonHeadline struct {
 		// PathCoverage: the workflows whose paths are all listed (testable
@@ -566,6 +640,38 @@ func proofJSON(ps []classify.ProofStep) []jsonProofStep {
 	return out
 }
 
+// branchJSON is branch coverage in JSON: the percent is over the outcomes that
+// can happen, and a workflow with none says so instead of grading nothing.
+func branchJSON(b coverage.BranchSummary, g scope.Grades) *jsonBranchCoverage {
+	out := &jsonBranchCoverage{Covered: b.Covered, Possible: b.Possible, Impossible: b.Impossible, BlockedByKnownBugs: b.Blocked, Percent: math.Round(b.Percent()*10) / 10}
+	out.Grade = g.Grade(b.Percent())
+	if b.Possible == 0 {
+		out.Grade = "no decisions to test"
+	}
+	return out
+}
+
+func conditionJSON(c coverage.ConditionSummary) (*jsonConditionCoverage, []jsonConditionPart) {
+	if c.Total == 0 {
+		return nil, nil
+	}
+	var parts []jsonConditionPart
+	for _, p := range c.Parts {
+		parts = append(parts, jsonConditionPart{ID: p.ID, Part: p.Text, Decision: p.Decision, Function: p.Func, File: filepath.ToSlash(p.File), Line: p.Line, True: p.True, False: p.False})
+	}
+	return &jsonConditionCoverage{Covered: c.Covered, Total: c.Total, Percent: math.Round(c.Percent()*10) / 10, NotRecorded: c.NotRecorded}, parts
+}
+
+func outcomesJSON(w coverage.WorkflowResult) []jsonOutcome {
+	var out []jsonOutcome
+	for _, o := range w.Outcomes {
+		jo := jsonOutcome{ID: o.ID, File: filepath.ToSlash(o.File), Line: o.Line, Function: o.Func, Decision: o.Decision, Outcome: o.Outcome, Status: o.Status, Helper: o.Helper, Cleanup: o.Cleanup,
+			Label: optional(o.Label), Why: optional(o.Why), Proof: proofJSON(o.Proof), Sites: o.Sites, SitesTaken: o.SitesTaken, MissedPaths: o.MissedPaths, MissedScenarios: o.MissedScenarios, Exits: o.Exits}
+		out = append(out, jo)
+	}
+	return out
+}
+
 func count1(covered, total int) jsonCount {
 	return jsonCount{Total: total, Covered: covered, Percent: math.Round(coverage.Percent(covered, total)*10) / 10}
 }
@@ -592,6 +698,9 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 		Classification: classificationJSON(res.Breakdown), CoverageBasis: string(bi.basis), ClassificationShown: bi.shown,
 	}
 	out.BlockedByKnownBugs = render.BlockedByKnownBugs(res)
+	out.BranchCoverage = branchJSON(res.BranchCov, res.BranchSettings.Grades)
+	out.ConditionCoverage, _ = conditionJSON(res.Conditions)
+	out.DecisionCheck = res.DecisionCheck
 	if h, ok := res.Headline(); ok {
 		out.Headline = &jsonHeadline{PathCoverage: count1r(h.PathCovered, h.PathTotal, strconv.Itoa(h.PathWorkflows)+" workflows under the cap"), PathWorkflows: h.PathWorkflows, WorkflowsTooBigForPathCoverage: h.TooBig,
 			StageCoverage: count1r(h.StageCovered, h.StageTotal, "no stage paths to measure"), StagesTooBigToList: h.StagesTooBig, BranchCoverage: count1r(h.BranchCovered, h.BranchTotal, "no branches")}
@@ -636,6 +745,9 @@ func coverageJSON(res coverage.Result, threshold *float64, bi basisInfo) jsonCov
 				ScenarioID: p.ScenarioID, SameBehaviourAs: p.SameAs})
 		}
 		jw.MainNumber, jw.Scenarios, jw.HandlerCoverage = mainJSON(w)
+		jw.BranchCoverage = branchJSON(w.BranchCov, res.BranchSettings.Grades)
+		jw.Outcomes = outcomesJSON(w)
+		jw.ConditionCoverage, jw.Conditions = conditionJSON(w.Conditions)
 		if w.Pairs.Total > 0 {
 			jw.DecisionPairs = &jsonPairs{jsonCount: count1(w.Pairs.Covered, w.Pairs.Total), Exact: w.Pairs.Exact}
 		}
@@ -820,7 +932,7 @@ func loopRoundsJSON(res coverage.Result) []jsonLoopRounds {
 // mainJSON is a workflow's main number, scenarios and handler coverage.
 func mainJSON(w coverage.WorkflowResult) (*jsonMain, *jsonScenarios, *jsonHandlerCoverage) {
 	m := &jsonMain{Kind: w.Main.Kind, Covered: w.Main.Covered, Total: w.Main.Total, Percent: w.Main.Percent, Measured: w.Main.Measured,
-		Target: w.Main.Target, Met: w.Main.Met, Why: w.Main.Why, Forced: w.Main.ForcedReason, SplitAdvice: render.SplitAdvice(w, nil)}
+		Target: w.Main.Target, Met: w.Main.Met, Why: w.Main.Why, Forced: w.Main.ForcedReason, SplitAdvice: render.SplitAdvice(w, nil), SplitHelperCandidates: helperCandidates(w)}
 	s := &jsonScenarios{Measured: w.Scenarios.Measured, Why: w.Scenarios.Why, Count: "0"}
 	if w.Scenarios.Measured {
 		sc := w.Scenarios
@@ -838,4 +950,16 @@ func mainJSON(w coverage.WorkflowResult) (*jsonMain, *jsonScenarios, *jsonHandle
 		h = &jsonHandlerCoverage{Covered: w.Handlers.Covered, Total: w.Handlers.Total, NotRecorded: w.Handlers.NotRecorded}
 	}
 	return m, s, h
+}
+
+// helperCandidates are the helper lines of render.SplitCandidates (the first
+// line, when it is the biggest section, is splitAdvice already).
+func helperCandidates(w coverage.WorkflowResult) []string {
+	var out []string
+	for _, l := range render.SplitCandidates(w, nil) {
+		if strings.HasPrefix(l, "Helper candidate:") {
+			out = append(out, l)
+		}
+	}
+	return out
 }

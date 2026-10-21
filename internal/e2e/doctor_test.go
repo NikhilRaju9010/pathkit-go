@@ -117,3 +117,47 @@ func TestDoctorGitIgnore(t *testing.T) {
 		t.Errorf("ignored should be fine:\n%s", out)
 	}
 }
+
+// A .pathkit folder copied from another folder names files outside this module:
+// doctor says so and suggests "pathkit clean", and clean removes that overlay.
+// A go.mod older than Go 1.18 is reported too (the recorder uses generics).
+func TestDoctorStalePathkitFolder(t *testing.T) {
+	dir := fixtureCopy(t)
+	if _, stderr, c := pathkit(t, "test", "./..."); c != 0 {
+		t.Fatalf("test: %d %s", c, stderr)
+	}
+	// a fine overlay is not a problem
+	if out, _, _ := pathkit(t, "doctor"); strings.Contains(out, "holds data from another folder") {
+		t.Errorf("a fresh overlay is fine:\n%s", out)
+	}
+	other := filepath.Join(t.TempDir(), "elsewhere", "x.go")
+	overlay := filepath.Join(dir, ".pathkit", "overlay", "overlay.json")
+	if err := os.WriteFile(overlay, []byte(`{"Replace": {"`+filepath.ToSlash(other)+`": "`+filepath.ToSlash(filepath.Join(dir, ".pathkit", "overlay", "000_x.go"))+`"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, _, code := pathkit(t, "doctor")
+	if code != 1 || !strings.Contains(out, ".pathkit holds data from another folder") || !strings.Contains(out, `run "pathkit clean"`) {
+		t.Fatalf("stale overlay: exit %d\n%s", code, out)
+	}
+	if out, _, _ := pathkit(t, "clean"); !strings.Contains(out, "removed .pathkit/overlay") {
+		t.Errorf("clean should remove the stale overlay:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Dir(overlay)); err == nil {
+		t.Error("the overlay folder is still there")
+	}
+	if out, _, _ := pathkit(t, "doctor"); strings.Contains(out, "holds data from another folder") {
+		t.Errorf("after clean:\n%s", out)
+	}
+	// near miss: a go.mod that says go 1.17
+	mod, _ := os.ReadFile(filepath.Join(dir, "go.mod"))
+	old := strings.Replace(string(mod), "go 1.26.0", "go 1.17", 1)
+	if old == string(mod) {
+		t.Skip("the fixture's go line is not the expected one")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, _ := pathkit(t, "doctor"); !strings.Contains(out, "go.mod says go 1.17") {
+		t.Errorf("an old go line should be reported:\n%s", out)
+	}
+}

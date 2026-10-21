@@ -49,6 +49,9 @@ type Config struct {
 	// coverage basis); it is off by default, and without it PathKit prints
 	// exactly what it printed before.
 	Classification Classification
+
+	// Branches is the "branches" section: grade bands and the target grade.
+	Branches Branches
 }
 
 // Abs resolves a path written in the file against the file's folder.
@@ -124,6 +127,7 @@ type file struct {
 	AllowStale *bool          `json:"allowStale"`
 
 	Classification *classificationPart `json:"classification"`
+	Branches       *branchesPart       `json:"branches"`
 }
 
 type workflowsPart struct {
@@ -241,6 +245,11 @@ func Read(path string) (*Config, error) {
 		}
 		c.Classification = cl
 	}
+	br, err := readBranches(f.Branches, fail)
+	if err != nil {
+		return nil, err
+	}
+	c.Branches = br
 	return c, nil
 }
 

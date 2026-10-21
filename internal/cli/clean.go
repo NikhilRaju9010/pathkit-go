@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/instrument"
 	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
 )
 
@@ -36,6 +37,13 @@ func newCleanCommand() *cobra.Command {
 					return userError("%v", err)
 				}
 				cutoff = time.Now().Add(-age)
+			}
+			// an overlay copied from another folder names files outside this module: it is
+			// not ours to keep, and PathKit rewrites that folder anyway
+			if root := instrument.ModuleRoot(cwd); root != "" && instrument.StaleOverlay(overlayDir, root) != "" {
+				if err := os.RemoveAll(overlayDir); err == nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "pathkit clean: removed %s (it named files outside this module: copied from another folder?)\n", overlayDir)
+				}
 			}
 			n, err := trace.ClearOlderThan(dir, cutoff)
 			if err != nil {

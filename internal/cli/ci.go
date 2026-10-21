@@ -10,6 +10,7 @@ import (
 	"github.com/NikhilRaju9010/pathkit-go/internal/classify"
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/render"
+	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 )
 
 // The CI check (path classification). It is only ever active
@@ -58,10 +59,18 @@ type ciState struct {
 	checked      bool // a baseline was read and compared
 	// mainFloor and tolerance are classification.ci.main_floor and tolerance;
 	// drops are the workflows whose main number fell below the baseline's.
-	mainFloor    *float64
-	tolerance    float64
-	drops        []baseline.MainDrop
-	kindsChanged []string
+	mainFloor *float64
+	tolerance float64
+	// branchFloor is classification.ci.branch_floor, or (floorDefault) the
+	// commendable band a baseline with branch data brings; branchDrops are the
+	// places whose branch coverage fell below the baseline's.
+	branchFloor   *float64
+	branchSet     scope.Branches
+	floorDefault  bool
+	branchDrops   []baseline.BranchDrop
+	branchFloorIn string
+	drops         []baseline.MainDrop
+	kindsChanged  []string
 	// anchors are this run's numbered rule entries (written with the
 	// baseline); anchorWarnings are the ones that moved since it was.
 	anchors        []baseline.RuleAnchor
@@ -94,6 +103,10 @@ func prepareCI(cmd *cobra.Command, opt ciOptions, sc *scoped, sf scopeFlags, fun
 	}
 	st.cappedBasis = ci.CappedBasis
 	st.mainFloor, st.tolerance = ci.MainFloor, ci.Tolerance
+	if ci.BranchFloor != nil {
+		st.branchFloor, st.branchFloorIn = ci.BranchFloor, cfg.Path
+	}
+	st.branchSet = cfg.BranchSettings()
 	if ci.MainFloor != nil {
 		st.floorFrom = cfg.Path
 	}
@@ -141,7 +154,7 @@ func prepareCI(cmd *cobra.Command, opt ciOptions, sc *scoped, sf scopeFlags, fun
 	if opt.allowLostTests && st.write {
 		return nil, userError("--allow-lost-tests has no effect with --write-baseline (nothing is checked while the baseline is written)")
 	}
-	if st.baselinePath == "" && st.floor == nil && st.stageFloor == nil && st.mainFloor == nil {
+	if st.baselinePath == "" && st.floor == nil && st.stageFloor == nil && st.mainFloor == nil && st.branchFloor == nil {
 		return nil, nil
 	}
 	return st, nil
@@ -158,6 +171,13 @@ func (st *ciState) compare(res coverage.Result) error {
 	}
 	st.untested, st.review, st.lost = baseline.Check(b, res)
 	st.drops, st.kindsChanged = baseline.CheckMain(b, res, st.tolerance)
+	st.branchDrops = baseline.CheckBranches(b, res, st.tolerance)
+	if st.branchFloor == nil && b.Branches != nil {
+		// a baseline written with branch coverage brings the commendable band as the floor
+		f := st.branchSet.Grades.Commendable
+		st.branchFloor, st.floorDefault = &f, true
+		st.branchFloorIn = "the commendable grade (branches.grades)"
+	}
 	st.checked = true
 	st.anchorWarnings = baseline.AnchorChanges(b.RuleAnchors, st.anchors)
 	return nil
@@ -211,6 +231,30 @@ func (st *ciState) failures(res coverage.Result) [][]string {
 				out = append(out, []string{fmt.Sprintf("%s: main number (%s coverage %d/%d) %s is below classification.ci.main_floor %s (in %s)", w.Name, w.Main.Kind, w.Main.Covered, w.Main.Total, render.Pct(w.Main.Percent, nil), render.Threshold(*st.mainFloor), st.floorFrom)})
 			}
 		}
+	}
+	// --allow-lost-tests also lets a branch drop, and the floor a baseline brings by
+	// itself, pass: a lost test is the usual reason, and the flag says that is fine.
+	if st.branchFloor != nil && !(st.floorDefault && st.allowLost) {
+		floor := *st.branchFloor
+		if res.BranchCov.Possible > 0 && res.BranchCov.Percent() < floor {
+			out = append(out, []string{fmt.Sprintf("branch coverage %s (%d of %d decision outcomes) is below classification.ci.branch_floor %s (in %s)", render.Pct(res.BranchCov.Percent(), st.branchFloor), res.BranchCov.Covered, res.BranchCov.Possible, render.Threshold(floor), st.branchFloorIn)})
+		}
+		for _, w := range res.Workflows {
+			if w.BranchCov.Possible > 0 && w.BranchCov.Percent() < floor {
+				out = append(out, []string{fmt.Sprintf("%s: branch coverage %s (%d of %d decision outcomes) is below classification.ci.branch_floor %s (in %s)", w.Name, render.Pct(w.BranchCov.Percent(), st.branchFloor), w.BranchCov.Covered, w.BranchCov.Possible, render.Threshold(floor), st.branchFloorIn)})
+			}
+		}
+	}
+	for _, d := range st.branchGateDrops() {
+		who := "branch coverage of the project"
+		if d.Workflow != "" {
+			who = d.Workflow + ": branch coverage"
+		}
+		tol := ""
+		if st.tolerance > 0 {
+			tol = fmt.Sprintf(" by more than classification.ci.tolerance %s", render.Threshold(st.tolerance))
+		}
+		out = append(out, []string{fmt.Sprintf("%s fell from %s (%d/%d) in the baseline %s to %s (%d/%d)%s", who, render.Pct(d.Was.Percent, nil), d.Was.Covered, d.Was.Possible, st.baselinePath, render.Pct(d.Now.Percent, nil), d.Now.Covered, d.Now.Possible, tol)})
 	}
 	text := pathTexts(res)
 	list := func(fs []baseline.Finding, what func(int) string) {
@@ -330,15 +374,23 @@ func pathTexts(res coverage.Result) map[string]map[int]string {
 // The "ci" part of --json; absent when the CI check is off.
 type (
 	jsonCI struct {
-		Baseline       *string         `json:"baseline"`
-		BaselineMode   string          `json:"baselineMode"` // "check", "write" or "none"
-		Floor          *jsonCIFloor    `json:"floor"`
-		StageFloor     *jsonCIFloor    `json:"stageFloor,omitempty"`
-		NewUntested    []jsonCIFinding `json:"newUntested"`
-		NewNeedsReview []jsonCIFinding `json:"newNeedsReview"`
-		LostTests      []jsonCIFinding `json:"lostTests"`
-		LostAllowed    bool            `json:"lostTestsAllowed"`
-		Passed         bool            `json:"passed"`
+		Baseline     *string      `json:"baseline"`
+		BaselineMode string       `json:"baselineMode"` // "check", "write" or "none"
+		Floor        *jsonCIFloor `json:"floor"`
+		StageFloor   *jsonCIFloor `json:"stageFloor,omitempty"`
+		// Added with branch-first coverage.
+		BranchFloor    *jsonCIFloor     `json:"branchFloor,omitempty"`
+		BranchDrops    []jsonBranchDrop `json:"branchDrops,omitempty"`
+		NewUntested    []jsonCIFinding  `json:"newUntested"`
+		NewNeedsReview []jsonCIFinding  `json:"newNeedsReview"`
+		LostTests      []jsonCIFinding  `json:"lostTests"`
+		LostAllowed    bool             `json:"lostTestsAllowed"`
+		Passed         bool             `json:"passed"`
+	}
+	jsonBranchDrop struct {
+		Workflow string  `json:"workflow"` // "" for the project
+		Was      float64 `json:"was"`
+		Now      float64 `json:"now"`
 	}
 	jsonCIFloor struct {
 		Threshold float64 `json:"threshold"`
@@ -389,6 +441,20 @@ func (st *ciState) json(res coverage.Result) *jsonCI {
 		out.StageFloor = &jsonCIFloor{Threshold: *st.stageFloor, Passed: coverage.Percent(covered, total) >= *st.stageFloor}
 		out.Passed = out.Passed && out.StageFloor.Passed
 	}
+	if st.branchFloor != nil && !(st.floorDefault && st.allowLost) {
+		pass := res.BranchCov.Possible == 0 || res.BranchCov.Percent() >= *st.branchFloor
+		for _, w := range res.Workflows {
+			if w.BranchCov.Possible > 0 && w.BranchCov.Percent() < *st.branchFloor {
+				pass = false
+			}
+		}
+		out.BranchFloor = &jsonCIFloor{Threshold: *st.branchFloor, Passed: pass}
+		out.Passed = out.Passed && pass
+	}
+	for _, d := range st.branchGateDrops() {
+		out.BranchDrops = append(out.BranchDrops, jsonBranchDrop{Workflow: d.Workflow, Was: d.Was.Percent, Now: d.Now.Percent})
+		out.Passed = false
+	}
 	text := pathTexts(res)
 	conv := func(fs []baseline.Finding) []jsonCIFinding {
 		out := []jsonCIFinding{}
@@ -412,4 +478,13 @@ func (st *ciState) mainDrops() []baseline.MainDrop {
 		return nil
 	}
 	return st.drops
+}
+
+// branchGateDrops are the branch coverage drops that fail the check (none with
+// --allow-lost-tests, see mainDrops).
+func (st *ciState) branchGateDrops() []baseline.BranchDrop {
+	if st.allowLost {
+		return nil
+	}
+	return st.branchDrops
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/instrument"
 	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 	"github.com/NikhilRaju9010/pathkit-go/internal/trace"
 )
@@ -120,6 +121,15 @@ func runDoctor(cmd *cobra.Command, traces string) []checkResult {
 		add("ok", "inside a Go module or workspace ("+displayDir(cwd, root)+")", "")
 	}
 
+	// 1b. a .pathkit folder copied from another place, and a module too old for the
+	// recorder's generic helper
+	if msg := instrument.StaleOverlay(overlayDir, instrument.ModuleRoot(cwd)); msg != "" {
+		add("problem", ".pathkit holds data from another folder: "+msg, "run \"pathkit clean\" (it removes that overlay, and the trace files), then \"pathkit test ./...\" again")
+	}
+	if v, ok := goDirective(filepath.Join(findUp(cwd, "go.mod"), "go.mod")); ok && v < 18 {
+		add("problem", fmt.Sprintf("go.mod says go 1.%d; the code PathKit adds for recording needs Go 1.18 or newer", v), "raise the go line in go.mod (the recorded tests are compiled with it)")
+	}
+
 	// 2. the config
 	cfg, cfgErr := scope.Load("", cwd)
 	switch {
@@ -175,6 +185,9 @@ func runDoctor(cmd *cobra.Command, traces string) []checkResult {
 		add("ok", fmt.Sprintf("%s read", count(counts.Read, "trace")), "")
 		if counts.Stale > 0 {
 			add("problem", fmt.Sprintf("%s recorded for an older version of the code (stale)", count(counts.Stale, "trace")), "run \"pathkit test ./...\" again")
+		}
+		if counts.Unknown > 0 {
+			add("problem", fmt.Sprintf("%s are for workflows this folder does not have (traces copied from another folder?)", count(counts.Unknown, "trace")), "run \"pathkit clean\" and then \"pathkit test ./...\"")
 		}
 		if counts.Unreadable > 0 {
 			add("problem", fmt.Sprintf("%s could not be read (a trace format this PathKit does not know, or a damaged file)", count(counts.Unreadable, "trace")), "run \"pathkit clean\" and then \"pathkit test ./...\"")
@@ -320,4 +333,26 @@ func gitIgnoreProblem(cwd string) string {
 		return ".pathkit/ (traces, the overlay and the reports) is not ignored by git"
 	}
 	return ""
+}
+
+// goDirective reads the minor version of the "go 1.N" line of a go.mod file.
+func goDirective(gomod string) (int, bool) {
+	if gomod == "" {
+		return 0, false
+	}
+	raw, err := os.ReadFile(gomod)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "go "); ok {
+			var maj, min int
+			if _, err := fmt.Sscanf(strings.TrimSpace(rest), "%d.%d", &maj, &min); err == nil && maj == 1 {
+				return min, true
+			}
+			return 0, false
+		}
+	}
+	return 0, false
 }

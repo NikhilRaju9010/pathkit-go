@@ -234,6 +234,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 		in.Classifier, in.Policy, in.Explained = engine.Classify, engine.Policy(), engine.Explained()
 		in.Listing, in.Plan = engine.Listing, engine.PlanStages
 	}
+	in.BranchSettings = sc.cfg.BranchSettings()
 	if cfg := sc.cfg; cfg != nil {
 		cl := cfg.Classification
 		in.Scenarios = coverage.ScenarioOptions{MaxListed: cl.ScenarioMaxListed, MaxStates: cl.ScenarioMaxStates}
@@ -241,6 +242,7 @@ func measure(cmd *cobra.Command, cmdName, target string, opt measureOptions) (*m
 	}
 	m.workflows = workflows
 	m.res = coverage.Compute(in)
+	m.res.DecisionCheck = readDecisionCheck()
 	if m.res.InternalError != nil {
 		return nil, userError("%v", m.res.InternalError)
 	}

@@ -82,6 +82,15 @@ func Fresh(ctx workflow.Context, in Input) error {
 	if _, stderr, code := pathkit(t, "diff", "--base", "main", "--fail-on-untested-new"); code != 2 || !strings.Contains(stderr, "no test") {
 		t.Errorf("--fail-on-untested-new: exit %d %q", code, stderr)
 	}
+	// the branch gate: Fresh's outcomes are new and no test took any of them
+	if out, stderr, code := pathkit(t, "diff", "--base", "main", "--min-new-branch-coverage", "90"); code != 2 || !strings.Contains(stderr, "below --min-new-branch-coverage 90%") ||
+		!strings.Contains(stderr, "fresh.go") || !strings.Contains(out, "New or changed decision outcomes: 0 of ") {
+		t.Errorf("--min-new-branch-coverage: exit %d\nstdout %s\nstderr %q", code, out, stderr)
+	}
+	// without the flag the older output has no such line
+	if plain, _, _ := pathkit(t, "diff", "--base", "main"); strings.Contains(plain, "New or changed decision outcomes") {
+		t.Errorf("the line is only printed when asked for:\n%s", plain)
+	}
 	// markdown and json
 	md, _, _ := pathkit(t, "diff", "--base", "main", "--markdown")
 	if !strings.Contains(md, "| Change | What | Where | Tested |") || !strings.Contains(md, "**no**") {
@@ -117,6 +126,11 @@ func TestFreshFails(t *testing.T)  { run(t, Fresh, Input{}) }
 		t.Errorf("the decision is tested now:\n%s", out)
 	}
 	_ = code
+	// every new decision outcome of Fresh has a test now, except the failures
+	// of the second activity: the gate at 60% passes, at 100% it names what is left
+	if _, stderr, code := pathkit(t, "diff", "--base", "main", "--min-new-branch-coverage", "10"); code != 0 {
+		t.Errorf("gate at 10%%: exit %d %q", code, stderr)
+	}
 
 	// no leftover worktree, also after an error
 	if _, _, code := pathkit(t, "diff", "--base", "no-such-ref"); code == 0 {

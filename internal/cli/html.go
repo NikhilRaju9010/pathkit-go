@@ -107,6 +107,7 @@ func reportHTML(cmd *cobra.Command, m *measured, path string) func() error {
 		page, err := htmlreport.Report(htmlreport.ReportInput{
 			Header: header(t, m.sc), Result: m.res, Threshold: m.threshold, ExcludedBy: m.excludedBy, Trend: runs, Classification: m.classView(), CustomLabels: m.customLabels, Assumptions: m.assumptions, Panel: m.panel,
 			TopTests: advice.TestsToWriteFirst(m.res, load.DisplayPath, render.TopTests),
+			Outcomes: advice.MissedOutcomes(m.res, load.DisplayPath, 0),
 		})
 		if err != nil {
 			return err

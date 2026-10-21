@@ -193,7 +193,89 @@
         "covered": 1,
         "percent": 50,
         "exact": true
-      }
+      },
+      "branchCoverage": {
+        "covered": 3,
+        "possible": 4,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 75,
+        "grade": "commendable"
+      },
+      "outcomes": [
+        {
+          "id": "b:8c9ef03309f3",
+          "file": "orders/orders.go",
+          "line": 28,
+          "function": "OrderWorkflow",
+          "decision": "if in.AmountCents <= 0",
+          "outcome": "true",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J1.true"
+          ]
+        },
+        {
+          "id": "b:f67e38f09ade",
+          "file": "orders/orders.go",
+          "line": 28,
+          "function": "OrderWorkflow",
+          "decision": "if in.AmountCents <= 0",
+          "outcome": "false",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.false"
+          ]
+        },
+        {
+          "id": "b:2ea769b9e239",
+          "file": "orders/orders.go",
+          "line": 42,
+          "function": "OrderWorkflow",
+          "decision": "ChargeCard (activity)",
+          "outcome": "failure",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.failure"
+          ]
+        },
+        {
+          "id": "b:9623beae1ff3",
+          "file": "orders/orders.go",
+          "line": 42,
+          "function": "OrderWorkflow",
+          "decision": "ChargeCard (activity)",
+          "outcome": "success",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.success"
+          ]
+        }
+      ]
     }
   ],
   "excluded": [],
@@ -222,6 +304,14 @@
     "threshold": 60,
     "passed": true,
     "basis": "overall"
+  },
+  "branchCoverage": {
+    "covered": 3,
+    "possible": 4,
+    "impossible": 0,
+    "blockedByKnownBugs": 0,
+    "percent": 75,
+    "grade": "commendable"
   },
   "classification": {
     "buckets": {

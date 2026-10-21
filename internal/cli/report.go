@@ -31,6 +31,8 @@ type reportOptions struct {
 	unmatched bool
 	// groups adds the missed paths grouped by first untested step (--groups).
 	groups bool
+	// technical prints the older wording and layout, exactly as version 0.4.0 did.
+	technical bool
 }
 
 func newReportCommand() *cobra.Command {
@@ -79,6 +81,7 @@ writes that file.`,
 	f.BoolVar(&opt.paths, "paths", false, "list the paths of a workflow with more paths than the list holds (by default only its counts, stages and groups are printed)")
 	f.BoolVar(&opt.unmatched, "unmatched", false, "add a report of the traces that fit no path: where each left the map, what the map expected, and the likely cause")
 	f.BoolVar(&opt.groups, "groups", false, "add the testable paths no test ran, grouped by the first step no test took (biggest group first, with where it is and how to cover it)")
+	f.BoolVar(&opt.technical, "technical", false, "print the technical wording and layout PathKit 0.4.0 printed (path-first, with the technical names), for scripts that read the text")
 	f.BoolVar(&opt.noColor, "no-color", false, "never colour the output (also: the config's \"noColor\", or the NO_COLOR environment variable)")
 	f.BoolVar(&opt.measure.allowStale, "allow-stale", false, "also count traces recorded for an older version of a workflow, when they still fit a path")
 	f.BoolVar(&opt.clean, "clean", false, "delete the trace files after the report (only when the report was produced)")
@@ -172,6 +175,9 @@ func runReport(cmd *cobra.Command, target string, opt reportOptions) error {
 	if opt.summary && opt.hints {
 		fmt.Fprintln(cmd.ErrOrStderr(), "pathkit report: --hints ignored because --summary was passed (it lists no paths).")
 	}
+	if !opt.technical {
+		return finish(cmd, "report", m, qaReportText(cmd, m, opt, by), qaReportText(cmd, m, opt, by), outFile, opt.clean, html)
+	}
 	ro := render.ReportOptions{Summary: opt.summary, Threshold: m.overallThreshold(), ExcludedBy: by, Classification: m.classView(), Hints: opt.hints, OmitCappedPaths: !opt.paths, ExtraLines: m.ci.floorLines(m.res), TopTests: advice.TestsToWriteFirst(m.res, load.DisplayPath, render.TopTests)}
 	plain := render.ReportText(m.res, ro)
 	printed := plain
@@ -256,6 +262,10 @@ type (
 		Handlers          []jsonHandlerRow  `json:"handlers,omitempty"`
 		CallOutcomes      []jsonCallOutcome `json:"callOutcomes,omitempty"`
 		LoopRounds        []jsonLoopRounds  `json:"loopRounds,omitempty"`
+		// Added with branch-first coverage.
+		BranchCoverage    *jsonBranchCoverage     `json:"branchCoverage,omitempty"`
+		ConditionCoverage *jsonConditionCoverage  `json:"conditionCoverage,omitempty"`
+		DecisionCheck     *coverage.DecisionCheck `json:"decisionCheck,omitempty"`
 	}
 	jsonGroup struct {
 		Workflow string   `json:"workflow"`
@@ -295,7 +305,7 @@ func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisIn
 	c := coverageJSON(res, threshold, bi)
 	out := jsonReport{SchemaVersion: c.SchemaVersion, Tool: c.Tool, Workflows: []jsonReportWorkflow{}, Excluded: c.Excluded,
 		ExcludedBy: []string{}, Total: c.Total, Branches: c.Branches, Traces: c.Traces, FailUnder: c.FailUnder,
-		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs, Headline: c.Headline, MainHeadline: c.MainHeadline, Tests: c.Tests, TestsToWriteFirst: c.TestsToWriteFirst, LeftOutImpossible: c.LeftOutImpossible, Unread: c.Unread, Handlers: c.Handlers, CallOutcomes: c.CallOutcomes, LoopRounds: c.LoopRounds}
+		Classification: c.Classification, CoverageBasis: c.CoverageBasis, ClassificationShown: c.ClassificationShown, PathCap: c.PathCap, Assumptions: c.Assumptions, AssumptionPanel: c.AssumptionPanel, BlockedByKnownBugs: c.BlockedByKnownBugs, Headline: c.Headline, MainHeadline: c.MainHeadline, Tests: c.Tests, TestsToWriteFirst: c.TestsToWriteFirst, LeftOutImpossible: c.LeftOutImpossible, Unread: c.Unread, Handlers: c.Handlers, CallOutcomes: c.CallOutcomes, LoopRounds: c.LoopRounds, BranchCoverage: c.BranchCoverage, ConditionCoverage: c.ConditionCoverage, DecisionCheck: c.DecisionCheck}
 	out.ExcludedBy = append(out.ExcludedBy, by...)
 	for i, w := range c.Workflows {
 		// Forward slashes on every system, so the JSON is the same everywhere;
@@ -307,4 +317,27 @@ func reportJSON(res coverage.Result, threshold *float64, by []string, bi basisIn
 		out.Workflows = append(out.Workflows, rw)
 	}
 	return out
+}
+
+// qaReportText is the report for people: branch coverage first, the older
+// report under "More detail" (the unmatched and groups sections stay in it).
+func qaReportText(cmd *cobra.Command, m *measured, opt reportOptions, by []string) string {
+	items := advice.MissedOutcomes(m.res, load.DisplayPath, 0)
+	qo := render.QAOptions{Summary: opt.summary, Items: items}
+	if !opt.summary {
+		ro := render.ReportOptions{Threshold: m.overallThreshold(), ExcludedBy: by, Classification: m.classView(), Hints: opt.hints, OmitCappedPaths: !opt.paths, ExtraLines: m.ci.floorLines(m.res), TopTests: advice.TestsToWriteFirst(m.res, load.DisplayPath, render.TopTests)}
+		detail := render.ReportText(m.res, ro)
+		if opt.unmatched {
+			detail += "\n" + render.UnmatchedSection(m.res)
+		}
+		if opt.groups {
+			sec := render.GroupsText(m.res)
+			if sec == "" {
+				sec = "Missed paths by first untested step: none (every testable path has a test).\n"
+			}
+			detail += "\n" + sec
+		}
+		qo.Detail = detail
+	}
+	return render.QAReportText(m.res, qo)
 }

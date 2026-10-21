@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/advice"
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
 	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
@@ -21,6 +22,8 @@ type diffOptions struct {
 	base              string
 	markdown, asJSON  bool
 	failOnUntestedNew bool
+	// minNewBranch is --min-new-branch-coverage; nil when not asked for.
+	minNewBranch float64
 }
 
 func newDiffCommand() *cobra.Command {
@@ -55,6 +58,7 @@ request cannot add untested behaviour.`,
 	f.StringVar(&opt.measure.traces, "traces", defaultTraceDir, "folder the trace files are in (the config's \"traces\" sets another default)")
 	f.BoolVar(&opt.markdown, "markdown", false, "print markdown, for a pull request comment")
 	f.BoolVar(&opt.asJSON, "json", false, "print JSON instead of text")
+	f.Float64Var(&opt.minNewBranch, "min-new-branch-coverage", -1, "exit with code 2 when the new or changed decision outcomes are tested below this `percent` (0-100), naming each outcome no test took")
 	f.BoolVar(&opt.failOnUntestedNew, "fail-on-untested-new", false, "exit with code 2 when a new decision or scenario has no test")
 	addScopeFlags(cmd, &opt.measure.scope, false)
 	return cmd
@@ -85,7 +89,12 @@ type hdSnap struct {
 	Exercised         string
 }
 
+type outSnap struct {
+	Workflow, ID, Where, Sentence, Status string
+}
+
 type snapshot struct {
+	outcomes  map[string]outSnap // by workflow and branch ID
 	workflows map[string]bool
 	decisions map[string]decSnap
 	scenarios map[string]scSnap
@@ -95,7 +104,7 @@ type snapshot struct {
 }
 
 func takeSnapshot(m *measured) snapshot {
-	s := snapshot{workflows: map[string]bool{}, decisions: map[string]decSnap{}, scenarios: map[string]scSnap{}, handlers: map[string]hdSnap{}, unmeasured: map[string]string{}}
+	s := snapshot{outcomes: map[string]outSnap{}, workflows: map[string]bool{}, decisions: map[string]decSnap{}, scenarios: map[string]scSnap{}, handlers: map[string]hdSnap{}, unmeasured: map[string]string{}}
 	graphs := map[string]*model.Graph{}
 	for _, w := range m.workflows {
 		graphs[w.Name] = w.Graph
@@ -114,6 +123,9 @@ func takeSnapshot(m *measured) snapshot {
 				}
 				s.decisions[w.Name+"\x00"+j.StableLabel()] = d
 			}
+		}
+		for _, o := range w.Outcomes {
+			s.outcomes[w.Name+"\x00"+o.ID] = outSnap{Workflow: w.Name, ID: o.ID, Where: fmt.Sprintf("%s:%d", filepath.ToSlash(load.DisplayPath(o.File)), o.Line), Sentence: advice.Sentence(o), Status: o.Status}
 		}
 		if !w.Scenarios.Measured {
 			s.unmeasured[w.Name] = w.Scenarios.Why
@@ -157,6 +169,16 @@ type diffResult struct {
 	Untested  int      `json:"untestedNew"`
 	Notes     []string `json:"notes,omitempty"`
 	NoChanges bool     `json:"noChanges"`
+	// NewOutcomes counts the decision outcomes that are new or changed (a changed
+	// decision has a new branch ID) and how many of them a test took.
+	NewOutcomes *newOutcomes `json:"newOutcomes,omitempty"`
+}
+
+type newOutcomes struct {
+	Total     int       `json:"total"`
+	Covered   int       `json:"covered"`
+	Percent   float64   `json:"percent"`
+	Uncovered []outSnap `json:"uncovered,omitempty"`
 }
 
 func compare(base, now snapshot) diffResult {
@@ -231,6 +253,26 @@ func compare(base, now snapshot) diffResult {
 	for _, w := range sortedKeys(now.unmeasured) {
 		d.Notes = append(d.Notes, fmt.Sprintf("%s: scenarios are not measured (%s), so only its decisions are compared", w, now.unmeasured[w]))
 	}
+	no := &newOutcomes{}
+	for _, k := range sortedKeys(now.outcomes) {
+		if _, had := base.outcomes[k]; had {
+			continue
+		}
+		o := now.outcomes[k]
+		switch o.Status {
+		case coverage.OutcomeImpossible:
+			continue // can't happen: not asked of a test
+		case coverage.OutcomeCovered:
+			no.Covered++
+		default:
+			no.Uncovered = append(no.Uncovered, o)
+		}
+		no.Total++
+	}
+	if no.Total > 0 {
+		no.Percent = coverage.Percent(no.Covered, no.Total)
+		d.NewOutcomes = no
+	}
 	d.NoChanges = len(d.Changes) == 0
 	return d
 }
@@ -287,6 +329,9 @@ func runDiff(cmd *cobra.Command, target string, opt diffOptions) error {
 		return err
 	}
 	res := compare(baseSnap, nowSnap)
+	if !cmd.Flags().Changed("min-new-branch-coverage") {
+		res.NewOutcomes = nil // asked for with the flag only: the older output stays as it was
+	}
 	res.Base = fmt.Sprintf("%s (%s)", opt.base, sha[:min(10, len(sha))])
 
 	var out string
@@ -309,6 +354,18 @@ func runDiff(cmd *cobra.Command, target string, opt diffOptions) error {
 		out = diffText(res)
 	}
 	fmt.Fprint(cmd.OutOrStdout(), out)
+	if cmd.Flags().Changed("min-new-branch-coverage") {
+		if opt.minNewBranch < 0 || opt.minNewBranch > 100 {
+			return userError("--min-new-branch-coverage must be a number from 0 to 100, got %v", opt.minNewBranch)
+		}
+		if no := res.NewOutcomes; no != nil && no.Percent < opt.minNewBranch {
+			var lines []string
+			for _, u := range no.Uncovered {
+				lines = append(lines, fmt.Sprintf("  %s: %s (%s)", u.Where, u.Sentence, u.Workflow))
+			}
+			return &exitError{code: ExitBelowThreshold, msg: fmt.Sprintf("the new or changed decision outcomes are tested at %.1f%% (%d of %d), below --min-new-branch-coverage %v%%; no test took:", no.Percent, no.Covered, no.Total, opt.minNewBranch), detail: lines}
+		}
+	}
 	if opt.failOnUntestedNew && res.Untested > 0 {
 		return belowThresholdError("%s new %s no test (the traces of this run cover nothing of them)", count(res.Untested, "decision or scenario"), map[bool]string{true: "has", false: "have"}[res.Untested == 1])
 	}
@@ -358,7 +415,7 @@ func baseSnapshot(root, rel, sha, target string, opt diffOptions, sink *bytes.Bu
 	dir := filepath.Join(wt, rel)
 	if _, statErr := os.Stat(dir); statErr != nil {
 		// the folder did not exist at the base: everything is new
-		return snapshot{workflows: map[string]bool{}, decisions: map[string]decSnap{}, scenarios: map[string]scSnap{}, handlers: map[string]hdSnap{}, unmeasured: map[string]string{}}, nil
+		return snapshot{outcomes: map[string]outSnap{}, workflows: map[string]bool{}, decisions: map[string]decSnap{}, scenarios: map[string]scSnap{}, handlers: map[string]hdSnap{}, unmeasured: map[string]string{}}, nil
 	}
 	if err := os.Chdir(dir); err != nil {
 		return snap, userError("could not enter %s: %v", dir, err)
@@ -398,6 +455,12 @@ func diffText(res diffResult) string {
 	fmt.Fprintf(&b, "Compared with %s\n", res.Base)
 	if res.NoChanges {
 		b.WriteString("No workflow, decision, scenario or handler is new, removed or changed.\n")
+	}
+	if no := res.NewOutcomes; no != nil {
+		fmt.Fprintf(&b, "New or changed decision outcomes: %d of %d tested (%.1f%%)\n", no.Covered, no.Total, no.Percent)
+		for _, u := range no.Uncovered {
+			fmt.Fprintf(&b, "  - no test: %s: %s (%s)\n", u.Where, u.Sentence, u.Workflow)
+		}
 	}
 	t := tally(res)
 	for _, k := range kindOrder {

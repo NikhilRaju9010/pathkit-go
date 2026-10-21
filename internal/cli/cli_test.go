@@ -9,11 +9,33 @@ import (
 )
 
 // run calls Run in-process and returns what it printed and its exit code.
+// run runs a command the way these tests have always run it. The text of
+// report and coverage is the technical text of PathKit 0.4.0 (--technical) so
+// the older expectations keep proving that nothing in it changed; runDefault
+// runs the command with no such flag, to test the text made for people.
 func run(t *testing.T, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
+	return runDefault(t, technicalText(args)...)
+}
+
+func runDefault(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, errOut bytes.Buffer
 	code = Run(args, &out, &errOut)
 	return out.String(), errOut.String(), code
+}
+
+// technicalText adds --technical to a report or coverage command.
+func technicalText(args []string) []string {
+	if len(args) == 0 || (args[0] != "report" && args[0] != "coverage") {
+		return args
+	}
+	for _, a := range args {
+		if a == "--technical" || a == "--technical=false" {
+			return args
+		}
+	}
+	return append(append([]string{}, args...), "--technical")
 }
 
 func TestErrorsUseOneLineStyleAndExitCode1(t *testing.T) {

@@ -317,8 +317,11 @@ func TestCILostTest(t *testing.T) {
 	want := "pathkit report: 1 path had a test in the baseline " + base + " and has none now:\n" +
 		"  orders.OrderWorkflow path 2 (" + ids[2] + ", now testable): Start -> if in.AmountCents <= 0 --false--> ChargeCard (activity) --failure--> End (failed)\n" +
 		"pathkit report: orders.OrderWorkflow: main number (path coverage) fell from 66.7% (2/3) in the baseline " + base + " to 33.3% (1/3)\n"
-	if code != ExitBelowThreshold || stderr != want || !strings.Contains(stdout, "1/3 paths") {
-		t.Fatalf("lost: code=%d stderr=%q\nwant %q", code, stderr, want)
+	// The baseline was written by this PathKit, so it holds branch coverage and its
+	// checks come first (M11, B6); the lines about lost tests and the main number
+	// are exactly the ones they always were.
+	if code != ExitBelowThreshold || !strings.HasSuffix(stderr, want) || !strings.Contains(stderr, "branch coverage 25.0% (1 of 4 decision outcomes) is below classification.ci.branch_floor 75%") || !strings.Contains(stdout, "1/3 paths") {
+		t.Fatalf("lost: code=%d stderr=%q\nwant it to end with %q", code, stderr, want)
 	}
 	out, _, _ := run(t, "report", "--traces", traces, "--config", cfg, "--baseline", base, "--json")
 	ci := decode(t, out)["ci"].(map[string]any)
@@ -393,5 +396,88 @@ func TestCIMainNumber(t *testing.T) {
 	bad := ciConfig(t, `{"enabled": true, "ci": {"main_floor": 120}}`)
 	if _, stderr, code := run(t, "report", "--traces", traces, "--config", bad); code != ExitError || !strings.Contains(stderr, "main_floor") {
 		t.Errorf("bad floor: code=%d stderr=%q", code, stderr)
+	}
+}
+
+// The branch gates: ci.branch_floor, and a baseline that holds branch
+// coverage (which brings the commendable band as a floor and fails a drop).
+// An older baseline, with no branch data, keeps working exactly as before.
+func TestCIBranchCoverage(t *testing.T) {
+	traces := ordersTraces(t) // 3 of 4 decision outcomes: 75%, commendable
+	inPilot(t)
+	base := filepath.Join(t.TempDir(), "b.json")
+	cfg := ciConfig(t, `{"enabled": true}`)
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", cfg, "--write-baseline", "--baseline", base); code != ExitOK {
+		t.Fatalf("write: %q", stderr)
+	}
+	raw, _ := os.ReadFile(base)
+	if !strings.Contains(string(raw), `"branchCoverage"`) || !strings.Contains(string(raw), `"possible": 4`) {
+		t.Fatalf("the baseline has no branch coverage:\n%s", raw)
+	}
+	// an explicit floor above the project's and the workflow's coverage
+	high := ciConfig(t, `{"enabled": true, "ci": {"branch_floor": 80}}`)
+	_, stderr, code := run(t, "report", "--traces", traces, "--config", high)
+	if code != ExitBelowThreshold || !strings.Contains(stderr, "branch coverage 75.0% (3 of 4 decision outcomes) is below classification.ci.branch_floor 80%") ||
+		!strings.Contains(stderr, "orders.OrderWorkflow: branch coverage 75.0%") {
+		t.Errorf("floor: code=%d stderr=%q", code, stderr)
+	}
+	// a floor that is met
+	low := ciConfig(t, `{"enabled": true, "ci": {"branch_floor": 70}}`)
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", low); code != ExitOK {
+		t.Errorf("floor met: code=%d stderr=%q", code, stderr)
+	}
+	// the baseline brings the commendable band (75) as the floor: met here
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", cfg, "--baseline", base); code != ExitOK {
+		t.Errorf("baseline floor: code=%d stderr=%q", code, stderr)
+	}
+	// a team that asks for more in branches.grades raises that floor
+	strict := writeConfig(t, `{"packages": [`+jsonString(absPath(t, pilot+"/orders"))+`], "classification": {"enabled": true}, "branches": {"grades": {"acceptable": 60, "commendable": 80, "exemplary": 95}}}`)
+	_, stderr, code = run(t, "report", "--traces", traces, "--config", strict, "--baseline", base)
+	if code != ExitBelowThreshold || !strings.Contains(stderr, "is below classification.ci.branch_floor 80% (in the commendable grade") {
+		t.Errorf("strict grades: code=%d stderr=%q", code, stderr)
+	}
+	// a drop below the baseline: the baseline says 100%
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["branchCoverage"] = map[string]any{"covered": 4, "possible": 4, "percent": 100.0}
+	for _, w := range doc["workflows"].([]any) {
+		w.(map[string]any)["branchCoverage"] = map[string]any{"covered": 4, "possible": 4, "percent": 100.0}
+	}
+	dropped, _ := json.Marshal(doc)
+	dropFile := filepath.Join(t.TempDir(), "drop.json")
+	if err := os.WriteFile(dropFile, dropped, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code = run(t, "report", "--traces", traces, "--config", cfg, "--baseline", dropFile)
+	if code != ExitBelowThreshold || !strings.Contains(stderr, "branch coverage of the project fell from 100.0% (4/4)") {
+		t.Errorf("drop: code=%d stderr=%q", code, stderr)
+	}
+	// ... unless the tolerance allows it
+	tol := ciConfig(t, `{"enabled": true, "ci": {"tolerance": 30}}`)
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", tol, "--baseline", dropFile); code != ExitOK {
+		t.Errorf("tolerance: code=%d stderr=%q", code, stderr)
+	}
+	// an older baseline without branch data: no branch check at all
+	for _, w := range doc["workflows"].([]any) {
+		delete(w.(map[string]any), "branchCoverage")
+	}
+	delete(doc, "branchCoverage")
+	oldRaw, _ := json.Marshal(doc)
+	oldFile := filepath.Join(t.TempDir(), "old.json")
+	if err := os.WriteFile(oldFile, oldRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", strict, "--baseline", oldFile); code != ExitOK {
+		t.Errorf("old baseline: code=%d stderr=%q", code, stderr)
+	}
+	// json
+	out, _, _ := run(t, "report", "--traces", traces, "--config", high, "--json")
+	if !strings.Contains(out, `"branchFloor"`) {
+		t.Errorf("json has no branchFloor:\n%s", out)
+	}
+	if _, stderr, code := run(t, "report", "--traces", traces, "--config", ciConfig(t, `{"enabled": true, "ci": {"branch_floor": 120}}`)); code != ExitError || !strings.Contains(stderr, "branch_floor") {
+		t.Errorf("bad floor: code=%d %q", code, stderr)
 	}
 }

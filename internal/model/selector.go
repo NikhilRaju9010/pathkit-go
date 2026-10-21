@@ -48,6 +48,9 @@ func (b *builder) checkSelector(stmt *ast.ExprStmt, call *ast.CallExpr) (*select
 	never := func(n ast.Node, format string, args ...any) *UnsupportedError {
 		return &UnsupportedError{Construct: "workflow.Selector", Pos: b.fset.Position(n.Pos()), Reason: fmt.Sprintf(format, args...)}
 	}
+	if info, handled, u := b.chainedSelector(stmt, call); handled {
+		return info, u
+	}
 	recv, ok := ast.Unparen(call.Fun.(*ast.SelectorExpr).X).(*ast.Ident)
 	var obj *types.Var
 	if ok {
@@ -311,4 +314,58 @@ func (b *builder) stringText(e ast.Expr) string {
 		return strconv.Quote(constant.StringVal(tv.Value))
 	}
 	return types.ExprString(e)
+}
+
+// chainedSelector reads a selector that is built and used in one expression:
+//
+//	workflow.NewSelector(ctx).AddFuture(f, func(...) {...}).AddReceive(ch, func(...) {...}).Select(ctx)
+//
+// handled is false when the Select call is not on such a chain (the selector
+// then lives in a variable, which checkSelector reads). A chain has exactly the
+// Add… calls written in it and one Select, so every run has the same exits.
+func (b *builder) chainedSelector(stmt *ast.ExprStmt, call *ast.CallExpr) (info *selectorInfo, handled bool, u *UnsupportedError) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	var adds []*ast.CallExpr
+	x := ast.Unparen(sel.X)
+	for {
+		c, isCall := x.(*ast.CallExpr)
+		if !isCall {
+			return nil, false, nil // a variable: the usual shape
+		}
+		if isPkgFunc(b.calledFunc(c), workflowPkg, "NewSelector", "NewNamedSelector") {
+			break
+		}
+		if !b.isSelectorMethod(c, selectorAddMethods...) {
+			return nil, false, nil
+		}
+		adds = append(adds, c)
+		inner, isSel := c.Fun.(*ast.SelectorExpr)
+		if !isSel {
+			return nil, false, nil
+		}
+		x = ast.Unparen(inner.X)
+	}
+	never := func(n ast.Node, format string, args ...any) *UnsupportedError {
+		return &UnsupportedError{Construct: "workflow.Selector", Pos: b.fset.Position(n.Pos()), Reason: fmt.Sprintf(format, args...)}
+	}
+	if len(adds) == 0 {
+		return nil, true, never(call, "the selector has no Add… calls")
+	}
+	for _, c := range adds {
+		i := callbackArg[methodName(c)]
+		if i >= len(c.Args) {
+			return nil, true, never(c, "%s has no callback", methodName(c))
+		}
+		if _, isLit := ast.Unparen(c.Args[i]).(*ast.FuncLit); !isLit {
+			return nil, true, never(c, "the callback of %s must be an inline func literal, so PathKit can follow it", methodName(c))
+		}
+	}
+	// every call of a chain starts where the chain starts: order them by the method name
+	slices.SortFunc(adds, func(x, y *ast.CallExpr) int {
+		return int(x.Fun.(*ast.SelectorExpr).Sel.Pos() - y.Fun.(*ast.SelectorExpr).Sel.Pos())
+	})
+	return &selectorInfo{name: "(chained)", stmt: stmt, adds: adds}, true, nil
 }

@@ -9,6 +9,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+
+	"golang.org/x/tools/go/packages"
 )
 
 // EdgeID names one exit of one junction, like "J2.failure". Its field is
@@ -200,6 +202,25 @@ type Graph struct {
 	fn   *ast.FuncDecl
 	fset *token.FileSet
 	pkg  *types.Package
+	// modDir is the folder of the Go module the workflow is in ("" when
+	// unknown); branch IDs use file names relative to it.
+	modDir string
+	// wfPkg is the workflow's package; modPkgs caches the packages of its module
+	// whose source was read in this run (see ModulePackage).
+	wfPkg   *packages.Package
+	modPkgs map[string]*packages.Package
+
+	// branches are the outcomes of the decisions, made on first use (see Branches).
+	branches     []*Branch
+	branchByExit map[*Exit]string
+	occOf        map[*Junction]int
+	declOf       map[*Junction]branchDecl
+	conditions   []*Condition
+	// cleanup marks (see InCleanup), found on first use
+	cleanupObjs    map[types.Object]bool
+	cleanupRegions []cleanupRegion
+	conditionsOK   bool
+	condsByStmt    map[ast.Node][]*Condition
 
 	trusted func(ast.Expr) bool
 
