@@ -503,6 +503,106 @@
     }
   }
 
+  // The parts made for people who test: tooltips on the "i" markers, the
+  // decision checklists (only missed, a page at a time), the copy buttons, and
+  // opening what a link points into. Only textContent and attributes are used.
+  function ui() {
+    if (typeof document.querySelectorAll !== 'function' || typeof document.addEventListener !== 'function') { return; }
+    var tipBox = null, tipBtn = null, pinned = false;
+    function closeTip() {
+      if (tipBox) { tipBox.hidden = true; }
+      if (tipBtn) { tipBtn.setAttribute('aria-expanded', 'false'); }
+      tipBtn = null; pinned = false;
+    }
+    function showTip(btn) {
+      var def = document.getElementById('g-' + btn.getAttribute('data-tip'));
+      if (!def) { return; }
+      if (!tipBox) {
+        tipBox = document.createElement('div');
+        tipBox.className = 'tipbox'; tipBox.id = 'pk-tip'; tipBox.setAttribute('role', 'tooltip'); tipBox.hidden = true;
+        document.body.appendChild(tipBox);
+      }
+      if (tipBtn && tipBtn !== btn) { tipBtn.setAttribute('aria-expanded', 'false'); }
+      tipBox.textContent = def.textContent.replace(/\s+/g, ' ').trim();
+      tipBox.hidden = false;
+      var r = btn.getBoundingClientRect();
+      var w = Math.min(320, document.documentElement.clientWidth - 24);
+      tipBox.style.width = w + 'px';
+      tipBox.style.top = (window.pageYOffset + r.bottom + 6) + 'px';
+      tipBox.style.left = Math.max(12, Math.min(window.pageXOffset + r.left, window.pageXOffset + document.documentElement.clientWidth - w - 12)) + 'px';
+      btn.setAttribute('aria-expanded', 'true');
+      tipBtn = btn;
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('button.tip'), function (btn) {
+      btn.setAttribute('aria-expanded', 'false');
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (tipBtn === btn && pinned) { closeTip(); return; }
+        showTip(btn); pinned = true;
+      });
+      btn.addEventListener('mouseenter', function () { if (!pinned) { showTip(btn); } });
+      btn.addEventListener('mouseleave', function () { if (!pinned) { closeTip(); } });
+      btn.addEventListener('focus', function () { if (!pinned) { showTip(btn); } });
+      btn.addEventListener('blur', function () { if (!pinned) { closeTip(); } });
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeTip(); } });
+    document.addEventListener('click', function (e) {
+      if (tipBox && !(tipBox.contains && tipBox.contains(e.target))) { closeTip(); }
+    });
+
+    var PAGE = 25, printing2 = false;
+    function drawChk(box) {
+      var lis = Array.prototype.slice.call(box.querySelectorAll('li.dec'));
+      var only = box.querySelector('[data-only-missed]');
+      var list = (only && only.checked) ? lis.filter(function (li) { return li.className.indexOf('hasmissed') >= 0; }) : lis;
+      var shown = printing2 ? list.length : (box.pkShown || PAGE);
+      lis.forEach(function (li) { li.hidden = true; });
+      list.slice(0, shown).forEach(function (li) { li.hidden = false; });
+      var pager = box.querySelector('.pager');
+      if (pager) {
+        pager.hidden = list.length <= PAGE;
+        var more = pager.querySelector('[data-more]');
+        if (more) { more.hidden = shown >= list.length; }
+        var sh = pager.querySelector('.showing');
+        if (sh) { sh.textContent = 'Showing ' + Math.min(shown, list.length) + ' of ' + list.length + ' decisions'; }
+      }
+    }
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('[data-chk]'));
+    boxes.forEach(function (box) {
+      var only = box.querySelector('[data-only-missed]');
+      if (only) { only.addEventListener('change', function () { box.pkShown = PAGE; drawChk(box); }); }
+      var more = box.querySelector('[data-more]');
+      if (more) { more.addEventListener('click', function () { box.pkShown = (box.pkShown || PAGE) + PAGE; drawChk(box); }); }
+      drawChk(box);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('button.copy'), function (btn) {
+      btn.addEventListener('click', function () {
+        var text = btn.getAttribute('data-copy');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = 'Copy name'; }, 1500);
+          }, function () {});
+        }
+      });
+    });
+    function openFor(id) {
+      var el = id ? document.getElementById(id) : null;
+      for (var n = el; n; n = n.parentNode) {
+        if (n.tagName === 'DETAILS' || n.tagName === 'details') { n.open = true; }
+      }
+    }
+    function fromHash() { var h = location.hash || ''; if (h.length > 1) { openFor(h.slice(1)); } }
+    window.addEventListener('hashchange', fromHash);
+    window.addEventListener('beforeprint', function () {
+      printing2 = true;
+      Array.prototype.forEach.call(document.querySelectorAll('details'), function (d) { d.open = true; });
+      boxes.forEach(drawChk);
+    });
+    window.addEventListener('afterprint', function () { printing2 = false; boxes.forEach(drawChk); });
+    fromHash();
+  }
+
   function start() {
     W.forEach(function (w, wi) {
       states.push({ status: '', bucket: '', label: '', sort: 'n', dir: 1, page: 1, size: 50, open: {}, ui: null });
@@ -543,6 +643,7 @@
       drawAudit();
     });
     jump();
+    ui();
   }
   start();
 }());

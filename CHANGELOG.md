@@ -1,6 +1,34 @@
 # Changelog
 
-All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is part of the versions being prepared (v0.2.0 to v0.4.0, not tagged). The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
+All notable changes to PathKit for Go are listed here. PathKit has not had a tagged release yet, so everything below is part of the versions being prepared (v0.2.0 to v0.5.0, not tagged). The first version also contains the base tool: `analyze`, `test`, `coverage` and `report` (text, JSON and HTML), and the `.pathkitrc.json` scope settings.
+
+## v0.5.0 (not tagged yet)
+
+One milestone (M11): branch coverage as the headline, engine upgrades for more kinds of code, reports and commands made for the people who write tests, and the decision check. Nothing is tagged yet. Every existing JSON key keeps its name, value and meaning; new keys are added. Traces from v0.2.0 to v0.4.0 are still read and counted (what an old trace lacks is "not recorded"). The text of `report`, `report --summary` and `coverage` is redesigned; **`--technical` prints exactly the v0.4.0 text** (a test runs all the older text expectations and goldens through it).
+
+### Branch coverage first
+
+- **Branch coverage is the headline** everywhere (text, `--summary`, the page, JSON `branchCoverage`): decision outcomes that can happen, grade (`branches.grades`, default 60 / 75 / 90; `branches.target_grade`), outcomes proven impossible left out and listed ("can't happen"), outcomes blocked by a known bug kept in on a line of their own, two-step combinations, each part of a condition (`conditionCoverage`; trace field `conditions`, recorder 4), and one plain summary sentence. "N of M workflows at <grade> or better" replaces "meet their target" in the headline (the older data stays in the JSON and in More detail).
+- **Stable branch IDs** (`b:…`, no line numbers) for every decision outcome; a helper's outcome is counted once per helper in every helpers mode. JSON `outcomes`.
+- **The to-do list is missed outcomes**, riskiest first, with a plain sentence and a suggested test name (`pathkit next`, `--top`, `--scaffold`, `--json`; first list of the report, the page and `--summary`).
+- **New commands**: `pathkit branches` (`--missed`, `--workflow`, `--json`, `--technical`), `pathkit next`, `pathkit check-decisions`.
+- **Gates**: `classification.ci.branch_floor`, branch coverage in the baseline file (a drop below it or below the floor fails with exit 2; a baseline written again by this version therefore starts to enforce the floor, 75% by default, and the baseline from an older PathKit does not), `pathkit diff --min-new-branch-coverage`.
+- **The decision check** (`check-decisions`, `--sample`, `--base`, `--workflow`, `-p`, `--timeout`, `--json`, `--allow-network`, `--list`): forces covered decisions to go the other way (a plain `if`; an error check of an activity, child workflow or timer) and reruns the tests that went through them; noticed, survived, no visible effect, flaky; "Tests notice wrong decisions" and the survivors in the reports (`decisionCheck`). Switches and loops are not forced yet.
+
+### Engine
+
+- **Smarter `&x`** (E1): forgotten only at the `Get` / `Receive` / `json.Unmarshal` call that writes through it.
+- **Summaries of plain functions** of the same module (E2): types, nil-ness, constants and the types a map the function builds stores under each constant key.
+- **"Possible bug" label** `likely-defect` (E3): a type switch case or comparison that can only be taken by dereferencing a pointer; needs-review, never "can't happen"; `detectors.disable` accepts it.
+- **The scenario-merge safety check understands loops** (L1).
+- **Chained selectors** (`workflow.NewSelector(ctx).AddFuture(...).Select(ctx)`) are mapped (O1).
+
+### Reports
+
+- **Plain names** (R1) and a **page for people** (R2, R3): branch coverage card, what to test next, workflows worst first, a decision checklist per workflow (with the cleanup after a cancel as a labelled block, O2), tooltips on every term, a plain glossary; the older page is the closed **More detail** part. Helper regions are offered next to the biggest section as split candidates (O3).
+- **Scaffolds fill in the input** from the facts on the path, an activity's result and a signal's payload, and name the exact condition in a TODO when they cannot (L2). `pathkit doctor` reports a `.pathkit` folder copied from another folder, and `pathkit clean` removes that overlay (L4).
+- **Changed output (listed on purpose)**: the default text of `report`, `report --summary` and `coverage`; the page layout; the unsolved-input TODO wording of scaffolds; the JSON keys `branchCoverage`, `outcomes`, `conditionCoverage`, `conditions`, `decisionCheck`, `mainNumber.splitHelperCandidates`, `ci.branchFloor`, `ci.branchDrops`; the baseline file's `branchCoverage` (an older PathKit refuses a baseline written by this version: it checks for unknown keys).
+- **Changed expectations (listed on purpose)**: the fixtures `unknownIface`, `unknownMap` and `activityLike` (opaque stand-ins) now go through function values, because a plain function with a visible body is read (E2); the fixture `PossibleAddressTakenLater` became `ImpossibleBeforeAddressTaken` (its decision comes before the call that writes through `&x`); the old one-call chain fixture is now `SelectorChainedOne` and is mapped, while `SelectorNotInVariable` (kept in the frozen map) now uses a selector made by a helper, which is still refused.
 
 ## v0.4.0 (not tagged yet)
 

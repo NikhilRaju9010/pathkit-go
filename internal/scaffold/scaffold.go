@@ -10,11 +10,9 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
-	"go/constant"
 	"go/format"
 	"go/token"
 	"go/types"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,8 +54,11 @@ var fixedImportNames = map[string]bool{"testing": true, "time": true, "errors": 
 	"github.com/stretchr/testify/mock": true, "go.temporal.io/sdk/temporal": true, "go.temporal.io/sdk/workflow": true}
 
 type builder struct {
-	g       *model.Graph
-	info    *types.Info
+	g    *model.Graph
+	info *types.Info
+	// execOf maps the variable an activity's result is read into to the call that
+	// starts the activity (see rootsOf).
+	execOf  map[types.Object]*ast.CallExpr
 	imports map[string]string // import path -> name used in the file
 	used    map[string]bool   // names taken
 	todos   []string
@@ -113,7 +114,7 @@ func Generate(item advice.Item, g *model.Graph, path model.Path) (Test, error) {
 	// names the test's own code uses: no parameter may take them, and no import
 	// may be named like a parameter
 	reserved := map[string]bool{"testing": true, "t": true, "env": true, "suite": true, "err": true, "result": true, "errors": true, "time": true, "mock": true, "temporal": true, "testsuite": true, "again": true}
-	b := &builder{g: g, info: g.TypesInfo(), imports: map[string]string{}, used: reserved}
+	b := &builder{g: g, info: g.TypesInfo(), imports: map[string]string{}, used: reserved, execOf: map[types.Object]*ast.CallExpr{}}
 	var out bytes.Buffer
 	w := func(format string, args ...any) { fmt.Fprintf(&out, format+"\n", args...) }
 
@@ -155,8 +156,15 @@ func Generate(item advice.Item, g *model.Graph, path model.Path) (Test, error) {
 			cancel = true
 		}
 	}
-	assigns, unsolved := b.solveInputs(path, params2map(params, func(p param) types.Object { return p.obj }))
-	mocks, signals, notes := b.mocks(path)
+	paramNames := map[types.Object]string{}
+	for _, p := range params {
+		if p.obj != nil {
+			paramNames[p.obj] = p.name
+		}
+	}
+	sol := b.solveAll(fn, b.stepsFor(path), paramNames)
+	mocks, signals, notes := b.mocks(path, sol, fn)
+	assigns, unsolved := sortedAssigns(sol.inputs), sol.unsolved
 
 	// The function.
 	w("// %s runs %s through the scenario %s:", item.TestName, item.Workflow, scenarioNote(item))
@@ -203,7 +211,14 @@ func Generate(item advice.Item, g *model.Graph, path model.Path) (Test, error) {
 	for _, s := range signals {
 		delay++
 		b.pkgName("time", "time")
-		w("\tenv.RegisterDelayedCallback(func() { env.SignalWorkflow(%s, nil) }, %d*time.Millisecond) %s", strconv.Quote(s), delay, b.todo("send the payload the signal %q carries instead of nil", s))
+		for _, l := range s.prelude {
+			w("\t%s", l)
+		}
+		if s.payload == "nil" {
+			w("\tenv.RegisterDelayedCallback(func() { env.SignalWorkflow(%s, nil) }, %d*time.Millisecond) %s", strconv.Quote(s.name), delay, b.todo("send the payload the signal %q carries instead of nil", s.name))
+		} else {
+			w("\tenv.RegisterDelayedCallback(func() { env.SignalWorkflow(%s, %s) }, %d*time.Millisecond)", strconv.Quote(s.name), s.payload, delay)
+		}
 	}
 	if cancel {
 		delay++
@@ -269,16 +284,6 @@ func scenarioNote(it advice.Item) string {
 	return "(a group of paths: " + it.ID + ")"
 }
 
-func params2map[T any](ps []T, get func(T) types.Object) map[types.Object]bool {
-	m := map[types.Object]bool{}
-	for _, p := range ps {
-		if o := get(p); o != nil {
-			m[o] = true
-		}
-	}
-	return m
-}
-
 // workflowRef is how the workflow function is named in ExecuteWorkflow.
 func (b *builder) workflowRef(fn *ast.FuncDecl) string {
 	if fn.Recv == nil || len(fn.Recv.List) == 0 {
@@ -317,17 +322,91 @@ type entry struct {
 	rets       []types.Type
 	fail       bool
 	kindOfFail string
+	// prelude are lines that build the value the call returns; retOverride is
+	// that value ("" for the zero value).
+	prelude     []string
+	retOverride string
+}
+
+// sig is a signal the test sends: its name, the value it carries ("nil" when
+// PathKit could not tell) and the lines that build the value.
+type sig struct {
+	name, payload string
+	prelude       []string
+}
+
+// stepsFor turns the decisions of a path into what the solver reads.
+func (b *builder) stepsFor(path model.Path) []stepInfo {
+	var out []stepInfo
+	for _, s := range path.Steps {
+		j, e := s.Junction, s.Exit
+		switch j.Kind {
+		case model.PlainIf:
+			if ifs, ok := j.Stmt.(*ast.IfStmt); ok {
+				out = append(out, stepInfo{cond: ifs.Cond, want: e.Label == "true", text: j.Label, side: e.Label})
+			}
+		case model.Switch:
+			ts, ok := j.Stmt.(*ast.TypeSwitchStmt)
+			if !ok {
+				continue
+			}
+			var x ast.Expr
+			switch a := ts.Assign.(type) {
+			case *ast.ExprStmt:
+				if ta, ok := a.X.(*ast.TypeAssertExpr); ok {
+					x = ta.X
+				}
+			case *ast.AssignStmt:
+				if len(a.Rhs) == 1 {
+					if ta, ok := a.Rhs[0].(*ast.TypeAssertExpr); ok {
+						x = ta.X
+					}
+				}
+			}
+			if x == nil {
+				continue
+			}
+			info := &typeSwitchInfo{x: x}
+			if cc, ok := e.Road.(*ast.CaseClause); ok && len(cc.List) > 0 {
+				te := cc.List[0]
+				if tv, ok := b.info.Types[te]; ok && tv.IsNil() {
+					info.isNil = true
+				} else {
+					info.t = b.info.TypeOf(te)
+				}
+			}
+			out = append(out, stepInfo{text: j.Label, side: e.Label, typeSwitch: info})
+		}
+	}
+	return out
 }
 
 // mocks reads the path's checked calls (their outcomes) and signals.
-func (b *builder) mocks(path model.Path) (lines, signals, notes []string) {
+func (b *builder) mocks(path model.Path, sol *solved, fn *ast.FuncDecl) (lines []string, signals []sig, notes []string) {
 	var entries []entry
+	payloads := b.signalPayloads(fn)
+	resVar := map[*ast.CallExpr]types.Object{}
+	for o, c := range b.execOf {
+		resVar[c] = o
+	}
 	for i, s := range path.Steps {
 		j, e := s.Junction, s.Exit
 		switch {
 		case j.Kind == model.Selector && strings.HasPrefix(e.Label, "signal "):
 			if name, err := strconv.Unquote(strings.TrimPrefix(e.Label, "signal ")); err == nil {
-				signals = append(signals, name)
+				sg := sig{name: name, payload: "nil"}
+				if obj := payloads[name]; obj != nil {
+					if as := sol.payloads[obj]; len(as) > 0 {
+						if rt := sol.roots[obj]; rt != nil {
+							sg.prelude = append(sg.prelude, fmt.Sprintf("%s := %s", rt.name, b.zero(rt.typ)))
+							for _, a := range sortedAssigns(as) {
+								sg.prelude = append(sg.prelude, fmt.Sprintf("%s = %s", a.lhs, a.rhs))
+							}
+							sg.payload = rt.name
+						}
+					}
+				}
+				signals = append(signals, sg)
 			} else {
 				notes = append(notes, b.todo("send the signal %s before the timeout", e.Label))
 			}
@@ -349,6 +428,28 @@ func (b *builder) mocks(path model.Path) (lines, signals, notes []string) {
 						break
 					}
 				}
+			} else if obj := resVar[call]; obj != nil {
+				// a later decision on a field of the result: give the result those values
+				if as := sol.results[obj]; len(as) > 0 && len(ent.rets) == 1 {
+					rt := sol.roots[obj]
+					switch {
+					case rt != nil && types.Identical(ent.rets[0], rt.typ):
+						ent.prelude = append(ent.prelude, fmt.Sprintf("%s := %s", rt.name, b.zero(rt.typ)))
+						ent.retOverride = rt.name
+					case rt != nil:
+						if p, ok := ent.rets[0].Underlying().(*types.Pointer); ok && types.Identical(p.Elem(), rt.typ) {
+							ent.prelude = append(ent.prelude, fmt.Sprintf("%s := %s", rt.name, b.zero(rt.typ)))
+							ent.retOverride = "&" + rt.name
+						}
+					}
+					if ent.retOverride != "" {
+						for _, a := range sortedAssigns(as) {
+							ent.prelude = append(ent.prelude, fmt.Sprintf("%s = %s", a.lhs, a.rhs))
+						}
+					} else {
+						notes = append(notes, b.todo("give the result of %s the values `%s` needs: its type does not match the variable that reads it", j.Label, strings.Join(assignTexts(as), ", ")))
+					}
+				}
 			}
 			entries = append(entries, ent)
 		}
@@ -357,10 +458,48 @@ func (b *builder) mocks(path model.Path) (lines, signals, notes []string) {
 	for _, e := range entries {
 		count[e.kind+e.fn]++
 	}
+	done := map[string]bool{}
 	for _, e := range entries {
+		for _, l := range e.prelude {
+			if !done[l] {
+				done[l] = true
+				lines = append(lines, l)
+			}
+		}
 		lines = append(lines, b.mockLine(e, count[e.kind+e.fn] > 1))
 	}
+	// Every other call of the workflow (a call whose result nothing checks, or
+	// one the path does not reach) succeeds, so the run does not stop at an
+	// activity nobody registered. These come after the path's own mocks, which
+	// are used first.
+	seen := map[string]bool{}
+	var defaults []string
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok || !b.isExecute(c) {
+			return true
+		}
+		ent, ok, _ := b.entryFor(c)
+		if !ok || seen[ent.kind+ent.fn] {
+			return true
+		}
+		seen[ent.kind+ent.fn] = true
+		defaults = append(defaults, b.mockLine(ent, false))
+		return true
+	})
+	if len(defaults) > 0 {
+		lines = append(lines, "// Every other call of the workflow succeeds.")
+		lines = append(lines, defaults...)
+	}
 	return lines, signals, notes
+}
+
+func assignTexts(as []assign) []string {
+	var out []string
+	for _, a := range as {
+		out = append(out, a.lhs+" = "+a.rhs)
+	}
+	return out
 }
 
 func isHelperResult(j *model.Junction) bool { return strings.Contains(j.Label, ", via ") }
@@ -445,6 +584,9 @@ func (b *builder) mockLine(e entry, once bool) string {
 	for _, t := range e.rets {
 		rets = append(rets, b.zero(t))
 	}
+	if e.retOverride != "" && len(rets) == 1 {
+		rets[0] = e.retOverride
+	}
 	if e.fail {
 		rets = append(rets, b.failure(e.kindOfFail))
 	} else {
@@ -484,205 +626,9 @@ type assign struct{ lhs, rhs string }
 // solveInputs works out assignments to the workflow's parameters that make the
 // decisions of the path go the way the path goes. A decision it cannot solve
 // is returned as text for a TODO line.
-func (b *builder) solveInputs(path model.Path, params map[types.Object]bool) ([]assign, []string) {
-	var out []assign
-	var unsolved []string
-	have := map[string]string{}
-	for _, s := range path.Steps {
-		j := s.Junction
-		if j.Kind != model.PlainIf {
-			continue
-		}
-		ifs, ok := j.Stmt.(*ast.IfStmt)
-		if !ok {
-			continue
-		}
-		want := s.Exit.Label == "true"
-		as, err := b.solve(ifs.Cond, want, params)
-		if err != "" {
-			unsolved = append(unsolved, fmt.Sprintf("make `%s` %s by setting the input (%s)", strings.TrimPrefix(j.Label, "if "), s.Exit.Label, err))
-			continue
-		}
-		for _, a := range as {
-			if prev, dup := have[a.lhs]; dup {
-				if prev != a.rhs {
-					unsolved = append(unsolved, fmt.Sprintf("make `%s` %s: it needs %s = %s, but an earlier decision needs %s", strings.TrimPrefix(j.Label, "if "), s.Exit.Label, a.lhs, a.rhs, prev))
-				}
-				continue
-			}
-			have[a.lhs] = a.rhs
-			out = append(out, a)
-		}
-	}
-	return out, unsolved
-}
-
-// solve returns assignments that make cond evaluate to want.
-func (b *builder) solve(cond ast.Expr, want bool, params map[types.Object]bool) ([]assign, string) {
-	cond = ast.Unparen(cond)
-	switch x := cond.(type) {
-	case *ast.UnaryExpr:
-		if x.Op == token.NOT {
-			return b.solve(x.X, !want, params)
-		}
-	case *ast.BinaryExpr:
-		switch x.Op {
-		case token.LAND, token.LOR:
-			// both sides when the whole is true for &&, or false for ||
-			both := (x.Op == token.LAND) == want
-			l, why := b.solve(x.X, want, params)
-			if !both {
-				if why == "" {
-					return l, ""
-				}
-				return b.solve(x.Y, want, params) // one side is enough
-			}
-			if why != "" {
-				return nil, why
-			}
-			r, why := b.solve(x.Y, want, params)
-			if why != "" {
-				return nil, why
-			}
-			return append(l, r...), ""
-		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ:
-			return b.solveCompare(x, want, params)
-		}
-	}
-	if tv, ok := b.info.Types[cond]; ok && isBool(tv.Type) {
-		lhs, why := b.target(cond, params)
-		if why != "" {
-			return nil, why
-		}
-		return []assign{{lhs, strconv.FormatBool(want)}}, ""
-	}
-	return nil, "PathKit does not solve this kind of condition"
-}
-
 func isBool(t types.Type) bool {
 	bt, ok := t.Underlying().(*types.Basic)
 	return ok && bt.Info()&types.IsBoolean != 0
-}
-
-// target writes the assignable expression of a parameter or a field of it.
-func (b *builder) target(e ast.Expr, params map[types.Object]bool) (string, string) {
-	e = ast.Unparen(e)
-	switch x := e.(type) {
-	case *ast.Ident:
-		o := b.info.Uses[x]
-		if o == nil || !params[o] {
-			return "", "it does not read the workflow's input directly"
-		}
-		return x.Name, ""
-	case *ast.SelectorExpr:
-		if sel := b.info.Selections[x]; sel == nil || sel.Kind() != types.FieldVal {
-			return "", "it reads a method or a package value"
-		}
-		root, why := b.target(x.X, params)
-		if why != "" {
-			return "", why
-		}
-		if _, isRoot := ast.Unparen(x.X).(*ast.Ident); !isRoot {
-			if _, isPtr := b.info.TypeOf(x.X).Underlying().(*types.Pointer); isPtr {
-				return "", "it goes through a pointer field that the test would have to create first"
-			}
-		}
-		return root + "." + x.Sel.Name, ""
-	}
-	return "", "it reads something other than a field of the input"
-}
-
-func (b *builder) solveCompare(x *ast.BinaryExpr, want bool, params map[types.Object]bool) ([]assign, string) {
-	left, right, op := x.X, x.Y, x.Op
-	if tv, ok := b.info.Types[left]; ok && tv.Value != nil { // constant on the left: swap
-		left, right = right, left
-		switch op {
-		case token.LSS:
-			op = token.GTR
-		case token.LEQ:
-			op = token.GEQ
-		case token.GTR:
-			op = token.LSS
-		case token.GEQ:
-			op = token.LEQ
-		}
-	}
-	tv, ok := b.info.Types[right]
-	if !ok || tv.Value == nil {
-		return nil, "it compares with something that is not a constant"
-	}
-	lhs, why := b.target(left, params)
-	if why != "" {
-		return nil, why
-	}
-	if !want { // not (a op c) is (a inverse-op c)
-		switch op {
-		case token.EQL:
-			op = token.NEQ
-		case token.NEQ:
-			op = token.EQL
-		case token.LSS:
-			op = token.GEQ
-		case token.LEQ:
-			op = token.GTR
-		case token.GTR:
-			op = token.LEQ
-		case token.GEQ:
-			op = token.LSS
-		}
-	}
-	lt := b.info.TypeOf(left)
-	bt, isBasic := lt.Underlying().(*types.Basic)
-	if !isBasic {
-		return nil, "the value is not a number, a text or a bool"
-	}
-	typeName := b.typeString(lt)
-	conv := func(lit string) string {
-		if _, named := lt.(*types.Named); named {
-			return typeName + "(" + lit + ")"
-		}
-		return lit
-	}
-	switch {
-	case bt.Info()&types.IsInteger != 0:
-		c, exact := constant.Int64Val(constant.ToInt(tv.Value))
-		if !exact {
-			return nil, "the number is too big for PathKit"
-		}
-		if c == math.MaxInt64 || c == math.MinInt64 {
-			return nil, "the number is at the edge of what PathKit can solve"
-		}
-		v := c
-		switch op {
-		case token.EQL, token.LEQ, token.GEQ:
-			v = c
-		case token.NEQ, token.GTR:
-			v = c + 1
-		case token.LSS:
-			v = c - 1
-		}
-		if bt.Info()&types.IsUnsigned != 0 && v < 0 {
-			return nil, "the value would be below zero"
-		}
-		return []assign{{lhs, conv(strconv.FormatInt(v, 10))}}, ""
-	case bt.Info()&types.IsString != 0:
-		s := constant.StringVal(tv.Value)
-		switch op {
-		case token.EQL:
-			return []assign{{lhs, conv(strconv.Quote(s))}}, ""
-		case token.NEQ:
-			return []assign{{lhs, conv(strconv.Quote(s + "x"))}}, ""
-		}
-		return nil, "PathKit does not solve an ordering of texts"
-	case bt.Info()&types.IsBoolean != 0:
-		c := constant.BoolVal(tv.Value)
-		v := c
-		if op == token.NEQ {
-			v = !c
-		}
-		return []assign{{lhs, strconv.FormatBool(v)}}, ""
-	}
-	return nil, "PathKit does not solve this kind of value"
 }
 
 // ---- files ----

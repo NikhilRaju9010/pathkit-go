@@ -1,6 +1,7 @@
 name: Nightly soundness and public corpus
 
-# A long run of the soundness test: 10,000 random programs, with the fact
+# Long runs of the soundness test: 10,000 random programs from the fixed seeds and
+# 10,000 from a new seed every night (printed in the log), with the fact
 # engine's "cannot be tested" claims checked against what the programs really
 # do. A second job runs PathKit on a public corpus (the Temporal Go samples,
 # cloned at a pinned commit) and fails when the "could not fully read" panel
@@ -16,7 +17,9 @@ permissions:
   contents: read
 
 jobs:
-  soundness:
+  # The fixed seeds (1 to 5) are run every night, so a program that once failed
+  # is looked at again; they include the programs listed in TestKnownPrograms.
+  soundness-fixed-seeds:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -29,9 +32,42 @@ jobs:
             go.sum
             testdata/pilot/go.sum
 
-      - name: Soundness test (10,000 programs)
+      - name: Soundness test, fixed seeds (10,000 programs)
         env:
           PATHKIT_SOUNDNESS_N: "10000"
+          PATHKIT_SOUNDNESS_SEEDS: "1,2,3,4,5"
+        run: go test -timeout 80m -run TestNoFalseCannotBeTestedClaims -v ./internal/soundness
+
+  # A new seed every night, on top of the fixed ones, so the test keeps looking at
+  # programs nobody has run before. The seed is printed in the log and in the job
+  # summary: to run the same programs again,
+  #   PATHKIT_SOUNDNESS_SEED=<seed> PATHKIT_SOUNDNESS_N=10000 go test -run TestNoFalseCannotBeTestedClaims ./internal/soundness
+  soundness-new-seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            testdata/pilot/go.sum
+
+      - name: Pick tonight's seed
+        id: seed
+        run: |
+          # not one of the fixed seeds (1 to 5): the day number and the run number
+          seed=$(( ( $(date -u +%s) / 86400 ) * 10 + ${GITHUB_RUN_NUMBER} % 10 + 100 ))
+          echo "value=${seed}" >> "$GITHUB_OUTPUT"
+          echo "Tonight's soundness seed: ${seed}"
+          echo "Tonight's soundness seed: \`${seed}\` (repeat it with PATHKIT_SOUNDNESS_SEED=${seed} PATHKIT_SOUNDNESS_N=10000)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Soundness test, tonight's seed (10,000 programs)
+        env:
+          PATHKIT_SOUNDNESS_N: "10000"
+          PATHKIT_SOUNDNESS_SEED: ${{ steps.seed.outputs.value }}
         run: go test -timeout 80m -run TestNoFalseCannotBeTestedClaims -v ./internal/soundness
 
   corpus:

@@ -112,3 +112,54 @@ func TestPageScriptWorks(t *testing.T) {
 		t.Logf("audit rows (header included) = %v", c["audit"])
 	}
 }
+
+// The parts made for people who test work from the keyboard: focusing an "i"
+// marker opens its tooltip, Escape and a click elsewhere close it, hovering
+// opens and leaving closes it, and the checklists filter and page. Run under
+// Node with a small DOM stub; skipped when Node is not installed.
+func TestPageUIWorks(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is not installed; the page script is not run")
+	}
+	in := manyPaths(10)
+	var outs []coverage.OutcomeResult
+	for i := 0; i < 60; i++ {
+		st := coverage.OutcomeMissed
+		if i%3 == 0 {
+			st = coverage.OutcomeCovered
+		}
+		outs = append(outs, coverage.OutcomeResult{ID: fmt.Sprintf("b:%012d", i), File: "p/w.go", Line: 10 + i, Func: "W", Decision: fmt.Sprintf("if x%d > 0", i), Outcome: "true", Status: st, Sites: 1})
+	}
+	in.Result.Workflows[0].Outcomes = outs
+	in.Result.Workflows[0].BranchCov = coverage.BranchSummary{Covered: 20, Possible: 60}
+	in.Result.BranchCov = in.Result.Workflows[0].BranchCov
+	cmd := exec.Command(node, "testdata/ui.js")
+	cmd.Stdin = strings.NewReader(mustReport(t, in))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script failed: %v\n%s", err, out)
+	}
+	var got struct {
+		Checks map[string]any `json:"checks"`
+	}
+	line := string(out[strings.LastIndex(strings.TrimSpace(string(out)), "\n")+1:])
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	c := got.Checks
+	for _, k := range []string{"openedByFocus", "closedByEscape", "openedByClick", "closedByOutside", "openedByHover", "closedByLeave"} {
+		if c[k] != true {
+			t.Errorf("%s = %v", k, c[k])
+		}
+	}
+	if c["expanded"] != "true" {
+		t.Errorf("aria-expanded after focus = %v", c["expanded"])
+	}
+	if n, _ := c["tips"].(float64); n < 5 {
+		t.Errorf("only %v tooltip markers on the page", c["tips"])
+	}
+	if c["decisions"] != 60.0 || c["shownFirst"] != 25.0 || c["onlyMissedShown"] != c["onlyMissedExpected"] || c["onlyMissedShown"] != 25.0 {
+		t.Errorf("checklist: %v", c)
+	}
+}

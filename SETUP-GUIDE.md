@@ -25,6 +25,9 @@ PathKit answers one question about Temporal Go workflows: **"which execution pat
 | `pathkit init` | Writes a starting `.pathkitrc.json` (only if there is none) and lists the modules and workflows it finds (section 10). |
 | `pathkit doctor` | Checks the setup and the traces in plain words; exit `1` when it finds problems (section 10). |
 | `pathkit diff --base <git-ref>` | What a change adds to the workflows, and whether tests cover it (section 10). |
+| `pathkit branches [folder \| folder/...]` | Branch coverage, the headline: how many decision outcomes your tests took, one row per workflow, worst first; `--missed`, `--workflow`, `--json`, `--technical` (section 6a). |
+| `pathkit next [folder \| folder/...]` | The decision outcomes to test next, riskiest first, with a suggested test name; `--top`, `--scaffold`, `--json` (section 6a). |
+| `pathkit check-decisions [folder \| folder/...]` | Forces covered decisions to go the other way and checks that a test fails; keeps the score in `.pathkit/decision-check.json` (section 6a). |
 | `pathkit --version` | Prints the installed version. |
 
 ## 1. Requirements
@@ -434,6 +437,7 @@ With `"classification": {"enabled": true}` PathKit also marks some paths by itse
 | `impossible-type` | A type switch case, or a type assertion, that no type the value can hold takes. The value is one the function built (a map or slice that only received a `string` and a `*string`, an interface variable assigned a `string`), or one Temporal decoded (assumption `default-json-converter`: an `interface{}` filled by the default JSON converter holds only a string, float64, bool, nil, `[]interface{}` or `map[string]interface{}`). `pathkit explain` shows the stores that built the list of types. | cannot-be-tested |
 | `impossible-nil` | `v == nil` taken true, for an interface that holds a typed value: a nil `*string` stored in an `interface{}` makes a non-nil interface. For a map element, only when the key is proven to be in the map (a missing key gives nil). | cannot-be-tested |
 | `unknown-input-type` | An untested path takes a type switch case on a value PathKit cannot follow, and no test has taken that case. The reports list these by type switch (file:line, number of paths): one test per switch usually settles a whole group. Never for a path a test ran. | needs-review |
+| `likely-defect` | A type switch case or a comparison that can only be taken by dereferencing a pointer the code did not dereference: `case string` when the value is a `*string`, or `== ""` on an interface that holds a `*string`. As written it can never happen, so most likely the code has a bug. PathKit does **not** call it impossible: it is needs-review, with the hint "This value is a pointer (*string). Did you mean to dereference it?". Other impossible cases of the same switch (say `case int`) stay `impossible-type`. Turn it off with `detectors.disable` (the path then stays testable). Not covered yet: a type assertion `x.(string)` on such a value. | needs-review |
 | `possible-correlation` | An untested path that asks about the same value twice and would be impossible if nothing had changed it, but PathKit had to forget the value in between (a loop that assigns it, an `if` or loop PathKit does not decide; for a value whose address is taken, two checks with no call in between). PathKit cannot tell, so it asks a person: needs-review, naming both steps. Never set for a path a test ran. | needs-review |
 | `contradictory-get-result` | A value Temporal fills in once with `fut.Get(ctx, &res)` (a local struct or pointer-to-struct variable, `var res T`), read by two decisions after the Get, that together need one bool field to be both true and false. Reads inside `&&` (when true) and `\|\|` (when false) count: `if res.Approved` false and `if res.Approved && other` true is impossible. Refused when anything else could write the result: a second Get, another `&`, an assignment, `++`, a method call on it (pointer receivers take the address themselves), a copy of the pointer, a closure, a `defer` or loop around the Get. | cannot-be-tested |
 
@@ -448,7 +452,7 @@ Where the channel came from is followed only in the simple, certain cases: a loc
   "detectors": { "disable": [ { "name": "closed-signal-channel", "reason": "our tests close signal channels with a fake" } ] } } }
 ```
 
-A misspelled detector name is an error that lists the real names. The fact engine's three names are `value-flow`, `possible-correlation` and `unknown-input-type`; to turn the whole engine off write `"engine": { "enabled": false }` inside `classification` (the default is on).
+A misspelled detector name is an error that lists the real names. The fact engine's four names are `value-flow`, `possible-correlation`, `unknown-input-type` and `likely-defect`; to turn the whole engine off write `"engine": { "enabled": false }` inside `classification` (the default is on).
 
 **The assumption `no-custom-interceptor`.** A map or slice you pass to an activity, a child workflow or a signal (`workflow.ExecuteActivity`, `ExecuteChildWorkflow`, `SignalExternalWorkflow`) stays as it was after the call, because the SDK turns the arguments into bytes when you make the call; so a later type switch or length check on it can be settled. Those claims say `no-custom-interceptor` in their reason, in the text report (`Assumption no-custom-interceptor: on; N claims rest on it`), the HTML glossary and the JSON (`assumptions`, in `coverage` and in `report`). A local activity (`ExecuteLocalActivity`) does not copy its arguments, so a map passed to one is not followed. If your code registers an interceptor (an `Interceptors` option on the client or worker, a type built on the SDK's interceptor base types, or an `InterceptWorkflow` method), PathKit switches this off by itself and says so; to switch it off yourself: `"classification": { "assumptions": { "no_custom_interceptor": "off" } }`.
 
@@ -464,6 +468,7 @@ A label says *why* PathKit put a path in a bucket. Several are close; none was r
 | `loop-minimum`, `impossible-loop-exit`, `same-list-loops` | The loop labels. `impossible-loop-exit` is automatic: a `for cond` loop whose condition is true when it starts, left without a single trip (detector `loop-exit-before-first-trip`). `loop-minimum` is the label of a **config rule** you write: a loop your input guarantees to run at least once, so its skip side is impossible. `same-list-loops` is about **two** loops over the same list that must run the same number of times. |
 | `dead-code`, `after-continue-as-new`, `update-handler-continue-as-new` | Steps that cannot run because the code before them ended the run: `dead-code` is any return, panic or similar; the other two are Continue-As-New in the workflow function and inside an update handler. |
 | `impossible-type`, `impossible-nil`, `unknown-input-type` | `impossible-type` and `impossible-nil` are claims (cannot-be-tested) PathKit can prove from the types a value holds. `unknown-input-type` is what PathKit says when it **cannot** follow the value: needs-review, never a claim. |
+| `likely-defect` | Looks like `impossible-type`, but it is the case where the only reason is that the value is a pointer and the code tests the pointed-to type or value. Needs-review (a bug to look at), not a claim. |
 | `possible-correlation`, `model-limit`, `concurrency-order`, `needs-review` | All needs-review, all "PathKit is not sure". `possible-correlation`: two checks of one value that would contradict if nothing changed it. `model-limit`: PathKit's model cannot draw the behaviour (also used when a trace shows a claim may be wrong). `concurrency-order`: event order between coroutines. `needs-review` alone: anything unrecognized. |
 | `manual`, `known-defect` | Both set by a person. `manual`: the path cannot happen (cannot-be-tested), with a reason. `known-defect`: the path **can** happen, but a known bug blocks every test from reaching it (needs-review). The report counts these as "Blocked by known bugs"; fix the bug and remove the entry. A test that runs the path makes it testable by itself. |
 | `version-gate-old-branch`, `history-limit`, `workflow-task-failure`, `unfinished-handlers` | needs-special-test: possible in production, reachable only with a special test set-up. |
@@ -922,6 +927,71 @@ A flag always beats the config file, including `--json=false`. The exit codes ar
 
 Everything else (`workflows`, `excluded`, `total`, `branches`, `traces`, `failUnder`) means exactly the same as in `coverage --json`.
 
+## 6a. Branch coverage first: the headline, `branches`, `next` and `check-decisions`
+
+From version 0.5.0 the text of `report` and `coverage`, the new commands `branches` and `next`, and the web page start with **branch coverage**, in plain words. (A *decision* is an `if`, the error check of an activity call, a `switch`, a loop or a wait on several things; each way it can go is an *outcome*. Branch coverage is the share of the outcomes that can happen that your tests took.)
+
+```
+Branch coverage: 204 / 211 outcomes that can happen — 96.7% — exemplary (3 can't happen, removed)
+Two-step combinations: 80/120 (66.7%)  ·  Each part of a condition: 30/40 (75.0%)  ·  Blocked by known bugs: 2
+Tests notice wrong decisions: 88.0% (last check 2026-10-20)
+Possible bugs found: 2
+Tests cover 204 of 211 decision outcomes that can happen (96.7%, exemplary). 7 are never tested; the riskiest is a cancel at main.go:212.
+```
+
+Then one row per workflow, worst first (outcomes tested, grade, missed, two-step combinations) and "N of M workflows at commendable or better"; then **What to test next** (the top 10 missed outcomes; 5 with `--summary`), each with its risk, place, a plain sentence of what never happened ("SaveRecord never failed with a timeout here"), a suggested test name and how many paths and scenarios a test of it would cover. The older report (paths, scenarios, sections of the workflow, left-out groups, code PathKit could not read, assumptions, loop rounds, call outcomes, handlers) is under **More detail**, in plain names; the full report only.
+
+**The rules.** Branch coverage is always measured: no cap, never "not measured" (a workflow with no decisions says "no decisions to test"). An outcome PathKit proves cannot happen is left out of the total ("can't happen", listed with the proof); this needs the whole workflow to be known, so a workflow over the path cap removes nothing. An outcome blocked by a known bug stays in the total, on its own line. An outcome a test took is always counted. A helper function's decisions are counted once per helper, however many places call it (covered when any call covers it). Signal-query-update handlers that PathKit maps (update handlers and validators) are in the total. An `&&` / `||` condition is one decision; "each part of a condition" counts each part as seen true and false when it was evaluated (the parts after the one that decides are not evaluated, so they are seen less often). It needs traces recorded by this version: older traces say "not recorded".
+
+**Grades.** `needs work` below 60%, `acceptable` from 60%, `commendable` from 75%, `exemplary` from 90%. A team can change the limits and the grade it aims for:
+
+```json
+{ "branches": { "grades": { "acceptable": 60, "commendable": 75, "exemplary": 90 }, "target_grade": "commendable" } }
+```
+
+The limits must satisfy 0 < acceptable < commendable < exemplary <= 100; `target_grade` is `acceptable`, `commendable` or `exemplary`. "N of M workflows at <grade> or better" uses it (a workflow with no decisions to test is not counted).
+
+**The plain names.** Every technical word has a plain name in the reports for people; the technical name is in the tooltip of the web page, in its glossary, in the JSON and in `--technical`.
+
+| Technical | Shown as |
+| --- | --- |
+| branch / exit | Decision outcome |
+| testable | Can be tested |
+| cannot-be-tested | Can't happen |
+| needs-special-test | Needs a special test |
+| needs-review | Needs a person to check |
+| known-defect | Blocked by a known bug |
+| likely-defect | Possible bug |
+| decision pairs | Two-step combinations |
+| condition coverage | Each part of a condition |
+| trace | Test run |
+| unmatched trace | Test run PathKit couldn't place |
+| stage | Section of the workflow |
+| scenario | Scenario |
+| stableId | Path ID |
+| pruned groups | Left out (can't happen) |
+| unread panel | Code PathKit couldn't read |
+| assumptions | What PathKit assumes |
+
+`--technical` (on `report`, `report --summary`, `coverage` and `branches`) prints the technical wording and layout of version 0.4.0 exactly, for scripts that read the text. The JSON never changes its existing keys; version 0.5.0 adds `branchCoverage` (`covered`, `possible`, `impossible`, `blockedByKnownBugs`, `percent`, `grade`) for the project and each workflow, `outcomes` (one entry per decision outcome: stable `id` of the form `b:…`, place, status `covered`, `missed`, `impossible` or `blocked`, label and proof, `sites`, `sitesTaken`, `missedPaths`, `missedScenarios`, `exits`, `cleanup`), `conditionCoverage` and `conditions`, `decisionCheck` when a check was run, and `mainNumber.splitHelperCandidates`.
+
+**The branch ID.** `b:` and 12 hex digits of a hash of the file (relative to the module), the function the decision is written in, the decision's text, the outcome's label and the order of identical decisions in that function. It holds no line number, so it stays the same when unrelated code moves.
+
+**`pathkit branches`** prints the headline and the table of workflows; `--missed` lists every missed outcome with its place and sentence, `--workflow <name>` shows one workflow, `--json` prints data. **`pathkit next`** prints what to test next (`--top N`, default 10, `0` for all); `--scaffold` writes a test skeleton for each (section 10). Both end with a line naming the next useful command.
+
+**The CI gates.** `classification.ci.branch_floor` (0 to 100) fails the check (exit 2) when branch coverage of the project, or of any workflow with decisions, is below it. The baseline file now also stores branch coverage; a baseline that has it brings the commendable limit as the floor when no `branch_floor` is set, and fails a drop below the baseline by more than `classification.ci.tolerance`. A baseline written by an older version has no branch data and is checked as before. With `--allow-lost-tests` the default floor and a drop do not fail the check. `pathkit diff --base <ref> --min-new-branch-coverage 90` exits `2` when the new or changed decision outcomes are covered below 90%, and names each outcome no test took.
+
+**`pathkit check-decisions`** answers: *do my tests fail when a decision goes the wrong way?* It takes the decisions your tests already cover, forces each one to take another outcome that can happen, and re-runs only the tests that went through it (PathKit knows them from the test names in the traces; when it does not, it runs the package's tests). Each decision is **noticed** (a test failed), **survived** (every test still passed: no test checks it), **no visible effect** (it survived and, as far as the scenario model can tell, forcing it cannot change anything the workflow does outside itself), or **flaky** (the result changed when it was run again). The share noticed is "Tests notice wrong decisions" in the reports; the survivors are listed ("`If amount > limit` is forced to yes every time, and no test fails", with its place).
+
+```bash
+pathkit test ./...
+pathkit check-decisions ./... --sample 50 -p 4
+```
+
+Flags: `--sample N` (N decisions, chosen the same way every time), `--base <ref>` (only decisions new or changed since the ref), `--workflow`, `-p N` (runs at the same time), `--timeout` (a forced run that takes longer counts as noticed), `--json`, `--list` (only list what would be checked), `--allow-network`. The tests are run with no network (like `pathkit test --no-network`); the command refuses when that is not available, unless `--allow-network` is given. Your source is never changed: the forcing happens in the marked-up copy used by `go test -overlay`, switched on by the environment variable `PATHKIT_FLIP=<branch id>` (nothing happens when it is not set), and a forced run writes no trace. A package whose tests fail before any change is skipped and named. **Not every decision can be forced yet**: a plain `if`, and the `err != nil` check of an activity, child workflow or timer call, can; a `switch`, a loop, a wait on several things and a `return call()` check cannot, and are listed as not checked with the reason. The result is kept in `.pathkit/decision-check.json`.
+
+**The web page** follows the same order: branch coverage as a large percentage with its grade, three to five small cards, **What to test next** (with a copy button for each test name), the workflows worst first, a **Decision checklist** per workflow (each decision in a plain sentence, each outcome ticked "Tested", crossed "Missed", or marked "Can't happen" or "Blocked by a known bug"; a filter "Only missed"; paged for long lists; the decisions that run under a disconnected context after a cancel are a labelled block of their own), **More detail** (closed, with everything the page showed before), and a glossary. Every term, number and badge has an "i" marker with a tooltip (it opens on hover, on keyboard focus and on a tap, and closes with Escape or a click elsewhere); a printed page has no tooltips, and the glossary carries the same text. Status is always an icon and a word, never colour alone.
+
 ## 7. A shareable web page (`--html`)
 
 `report --html` also writes the report as **one web page**, which you can open in any browser, attach to an issue or an email, or send to someone without Go:
@@ -937,6 +1007,7 @@ Open the file in your browser: double-click it, or run `xdg-open .pathkit/report
 
 **What's on it,** top to bottom:
 - **Header:** the folder, the time, the config used and the PathKit version.
+- **From version 0.5.0 the page starts with branch coverage** (section 6a: the percentage and grade, small cards, what to test next, the workflows worst first, a decision checklist per workflow). Everything below in this list is the older page, now inside the closed **More detail** part, with a plain glossary after it.
 - **A bar** with links to *Summary*, *Workflows*, *Paths*, *Glossary* and *Detector audit*, and a **search box** that looks in every path table (by path id, label, reason or the text of the path).
 - **Summary:** the project total and branch coverage, worded exactly like the terminal; five cards (**testable coverage**, **overall coverage**, **paths**, **covered**, **missed**) with one plain sentence saying what testable and overall mean; and, with classification on, one bar and a count for each of the four buckets.
 - **Workflows:** one row per workflow with its file, its **High/Medium/Low label** (the word as well as the colour), its coverage and how many paths it has (`truncated` when the list was cut at 2000 paths).
@@ -1055,7 +1126,7 @@ Workflow: scope.lowerFlow (added by config)
 | `failUnder`, `allowStale` | Coverage threshold (0–100) / accept traces from changed code (see section 5). |
 | `out`, `json`, `noColor` | `report` output: write to a file (relative to the config file), print JSON, no colour (section 6). A flag always wins. |
 | `classification` | Marking paths yourself, and switching on the testable/overall block (`enabled`). See "Marking paths as untestable" in section 5. The section's `ci` key is described in "The CI check" in section 5. Newer keys: `helpers.mode` (`inline`, `summarize`, `auto`), `activity_wrappers`, `direct_returns` (`report`, `step`), `loops.model` (`one`; `zero-one-many` is reserved), `ci.capped_basis` (`stage`, `branch`), `stages.max_paths`, `engine.max_contexts`. See "Helpers: copied in, or summarized", "Reading more code shapes" and "Honest numbers on huge workflows". |
-| `classification` (newer keys) | `scenarios.max_listed` (default 500) and `scenarios.max_states` (default 100000); `targets` (`default` 80, and `path`, `scenario`, `branch`, `handler`); `main_number.force` (`workflow`, `kind`, `reason`); `ci.tolerance` and `ci.main_floor` (percent). See "Scenarios, the main number and the project headline" in section 5. |
+| `classification` (newer keys) | `scenarios.max_listed` (default 500) and `scenarios.max_states` (default 100000); `targets` (`default` 80, and `path`, `scenario`, `branch`, `handler`); `main_number.force` (`workflow`, `kind`, `reason`); `ci.tolerance`, `ci.main_floor` and `ci.branch_floor` (percent); the top-level `branches` key: `grades` (`acceptable`, `commendable`, `exemplary`) and `target_grade`; `detectors.disable` also accepts `likely-defect`. See "Scenarios, the main number and the project headline" in section 5. |
 | `html` | `report` only: `true` writes `.pathkit/report.html` (from the current folder), a path writes there (relative to the config file), `false` writes none (section 7). `--html` always wins, including `--html=false`. |
 
 Every key is used and covered by a test. (`out`, `json`, `noColor` and `html` in the config are for `report` only; `coverage` and `analyze` use only their own flags.) Any other key (such as `"workflow"` instead of `"workflows"`) is an error.
@@ -1068,9 +1139,13 @@ The report lists the 10 tests worth writing first (`--summary`, the full text, t
 
 ### `pathkit scaffold`
 
+From version 0.5.0 a scaffold sets the **input values from the facts on the path**: equal to a constant, not equal to some constants, in a range, nil or not nil, empty or not empty (a list, a map, a text), a bool, and the type an interface value holds (from a type switch case). It fills the workflow's input, the **result of an activity** (so a later decision on a field of the result goes the right way: the mock returns a prepared value) and the **payload of a signal**. When a value cannot be derived, a `// TODO:` names the exact condition and what it needs ("set Request.Type so that `req.Type == \"RESET\"` is true"). Every other activity of the workflow gets a default success mock, so the run does not stop at an activity nobody registered.
+
 `pathkit scaffold sc:3fa94c0d17` (an id from the list; `--workflow` picks one when the same id fits several workflows) or `pathkit scaffold --top 3` writes a Go test with `go.temporal.io/sdk/testsuite`: the environment, the workflow registered, `OnActivity` / `OnWorkflow` mocks that return the outcome the scenario needs (a success with zero values; a failure of the needed kind: `NewTimeoutError`, `NewCanceledError`, `NewApplicationError`, or a non-retryable error), delayed signals and a delayed cancel, an input that makes the plain decisions go the way the scenario goes (when PathKit can work it out: a bool, `x == 3`, `s != "a"`, `&&`, `||`, `!`), and the assertions. Everything else is a `// TODO:` line. It is printed to the screen; `--out <folder>` writes `pathkit_scaffold_<workflow>_test.go` into that folder (use the workflow's own package folder so the test compiles) and **never overwrites a file**. The mocks use `github.com/stretchr/testify/mock`, which the Temporal test suite already needs. Methods and activities named by a text cannot be mocked by reference; PathKit writes a TODO for them.
 
 ### `pathkit init` and `pathkit doctor`
+
+`pathkit doctor` also reports a `.pathkit` folder copied from another folder (its overlay names files outside this module; `pathkit clean` removes that overlay and the trace files), traces for workflows this folder does not have, and a `go.mod` older than Go 1.18 (the recording code uses generics).
 
 `pathkit init` writes a starting `.pathkitrc.json` (every package, classification on, scenario list size, a target of 80) only if there is none; if there is one it changes nothing and prints the settings it would add. It lists the modules and workflows it finds.
 
@@ -1095,6 +1170,10 @@ Every trace now records the name of the Go test that made it (from the test's ca
 ### The trend chart
 
 The HTML page draws a small inline SVG chart of the headline (the share of workflows meeting their target, and branch coverage) over the last report runs kept in `report-history.json`. It needs two runs written by this version; no library, no outside file.
+
+### The nightly soundness runs
+
+`.github/workflows/nightly.yml` also runs the soundness test twice a night, in two jobs: once with the fixed seeds (1 to 5, 10,000 programs; a program that once failed is generated again every night) and once with a new seed every night (10,000 more programs). The seed is printed in the log and in the job summary; to run the same programs again on your machine, use `PATHKIT_SOUNDNESS_SEED=<seed> PATHKIT_SOUNDNESS_N=10000 go test -run TestNoFalseCannotBeTestedClaims ./internal/soundness`. The programs that failed once are also checked in every normal test run (`TestKnownPrograms`).
 
 ### The nightly check on a public corpus
 

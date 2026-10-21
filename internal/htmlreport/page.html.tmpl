@@ -1,3 +1,4 @@
+{{define "tip"}}<button type="button" class="tip" data-tip="{{.Key}}" aria-describedby="g-{{.Key}}" aria-label="About: {{.Term}}">i</button>{{end}}
 {{define "def"}}
 <dl>
 <dt>What it means</dt><dd>{{.Meaning}}</dd>
@@ -29,11 +30,18 @@
 <a class="skip" href="#main">Skip to the content</a>
 <header class="top">
 <h1>{{.Title}}</h1>
-<p class="meta" data-meta>Generated {{.Generated}} · {{.Folder}} · {{.ConfigNote}} · PathKit {{.Version}}</p>
+<p class="meta" data-meta>Generated {{.Generated}} · {{.Folder}} · {{.ConfigNote}} · PathKit {{.Version}}{{if .Hero}} · {{.RunCount}} test run{{if ne .RunCount 1}}s{{end}}{{end}}</p>
 </header>
 <div class="bar">
 <div class="barin">
 <nav aria-label="Sections">
+{{- if .Hero}}
+<a href="#overview">Branch coverage</a>
+<a href="#next">What to test next</a>
+<a href="#workflow-list">Workflows</a>
+<a href="#more-detail">More detail</a>
+<a href="#glossary">Glossary</a>
+{{- else}}
 <a href="#summary">Summary</a>
 <a href="#workflows">Workflows</a>
 <a href="#unread">Could not read ({{len .Unread}})</a>
@@ -60,6 +68,7 @@
 <a href="#definitions">Glossary</a>
 <a href="#audit">Detector audit ({{len .Glossary.Audit}})</a>
 {{- end}}
+{{- end}}
 </nav>
 <div class="search" hidden>
 <label class="sr" for="q">Search paths by id or text</label>
@@ -70,6 +79,104 @@
 <main id="main">
 {{- with .CapHeadline}}
 <div class="cap-warning" role="alert"><strong>{{.}}</strong>{{range $.CapAdvice}}<br>{{.}}{{end}}</div>
+{{- end}}
+
+{{- if .Hero}}
+<section id="overview" class="hero" aria-labelledby="h-overview">
+<h2 id="h-overview" class="sr">Branch coverage</h2>
+<div class="maincard">
+<p class="label">Branch coverage {{template "tip" (tipFor "branch-coverage")}}</p>
+{{- if .Hero.NoDecisions}}
+<p class="big">No decisions to test</p>
+{{- else}}
+<p class="big">{{.Hero.Percent}}</p>
+{{- end}}
+<p class="gradeline"><span class="badge g-{{.Hero.GradeKey}}"><span aria-hidden="true">{{.Hero.GradeIcon}}</span> {{.Hero.Grade}}</span> {{template "tip" (tipFor "grade")}}
+{{- if not .Hero.NoDecisions}} <span class="of">{{.Hero.Covered}} of {{.Hero.Possible}} decision outcomes that can happen {{template "tip" (tipFor "outcome")}}</span>{{end}}</p>
+{{- if not .Hero.NoDecisions}}
+<div class="meter" role="img" aria-label="{{.Hero.Percent}} of decision outcomes tested"><span class="fill g-{{.Hero.GradeKey}}" style="width:{{.Hero.Bar}}%"></span></div>
+{{- end}}
+<p class="sentence">{{.Hero.Sentence}}</p>
+{{- if .Hero.Impossible}}
+<p class="note">{{.Hero.Impossible}} outcome{{if ne .Hero.Impossible 1}}s{{end}} can't happen and {{if eq .Hero.Impossible 1}}is{{else}}are{{end}} left out of the percentage {{template "tip" (tipFor "cant-happen")}}.</p>
+{{- end}}
+</div>
+<ul class="smallcards">
+{{- range .SmallCards}}
+<li class="scard"><p class="label">{{.Title}} {{template "tip" (tipFor .Tip)}}</p><p class="val">{{.Value}}</p>{{if .Detail}}<p class="detail">{{.Detail}}</p>{{end}}</li>
+{{- end}}
+</ul>
+{{- if .Bugs}}
+<div class="bugs"><h3>Possible bugs found {{template "tip" (tipFor "possible-bugs-card")}}</h3>
+<ul>{{range .Bugs}}<li><code>{{.Where}}</code> <span class="wf">{{.Workflow}}</span>: {{.Hint}}</li>{{end}}</ul></div>
+{{- end}}
+{{- if .Survivors}}
+<div class="bugs"><h3>Decisions no test noticed {{template "tip" (tipFor "notice")}}</h3>
+<ul>{{range .Survivors}}<li><code>{{.Where}}</code> <span class="wf">{{.Workflow}}</span>: {{.Hint}}</li>{{end}}</ul></div>
+{{- end}}
+</section>
+
+<section id="next" aria-labelledby="h-next">
+<h2 id="h-next">What to test next {{template "tip" (tipFor "next")}}</h2>
+{{- if .Next}}
+<div class="tablewrap"><table class="nextt">
+<thead><tr><th scope="col">Risk {{template "tip" (tipFor "risk")}}</th><th scope="col">Where</th><th scope="col">What never happened</th><th scope="col">Suggested test name</th><th scope="col"><span class="sr">Copy</span></th></tr></thead>
+<tbody>
+{{- range .Next}}
+<tr><td data-label="Risk"><span class="risk"><span aria-hidden="true">{{.RiskIcon}}</span> {{.Risk}}</span></td><td data-label="Where"><code>{{.Where}}</code></td><td data-label="What never happened">{{.Sentence}}{{if .Why}}<br><span class="detail">A test of it would cover {{.Why}}.</span>{{end}}</td><td data-label="Test name"><code>{{.Name}}</code></td><td><button type="button" class="copy" data-copy="{{.Name}}">Copy name</button></td></tr>
+{{- end}}
+</tbody></table></div>
+{{- if .NextMore}}<p class="note">{{.NextMore}} more in <code>pathkit next --top 0</code> and in the checklists below.</p>{{end}}
+{{- else}}
+<p class="note">Nothing: every decision outcome that can happen has a test.</p>
+{{- end}}
+</section>
+
+<section id="workflow-list" aria-labelledby="h-wfl">
+<h2 id="h-wfl">Workflows, worst first {{template "tip" (tipFor "workflow")}}</h2>
+<p class="note">{{.AtTarget}}.</p>
+<div class="tablewrap"><table class="wfl">
+<thead><tr><th scope="col">Workflow</th><th scope="col">Outcomes tested {{template "tip" (tipFor "outcomes-tested")}}</th><th scope="col">Grade {{template "tip" (tipFor "grade")}}</th><th scope="col">Missed {{template "tip" (tipFor "missed")}}</th><th scope="col">Two-step combinations {{template "tip" (tipFor "two-step")}}</th></tr></thead>
+<tbody>
+{{- range .WfRows}}
+<tr><th scope="row" data-label="Workflow"><a href="#{{.Anchor}}" data-open="{{.Anchor}}">{{.Name}}</a></th>
+<td data-label="Outcomes tested">{{.Tested}} {{.Percent}}{{if not .NoDecisions}}<span class="meter small"><span class="fill g-{{.GradeKey}}" style="width:{{.Bar}}%"></span></span>{{end}}</td>
+<td data-label="Grade"><span class="badge g-{{.GradeKey}}"><span aria-hidden="true">{{.GradeIcon}}</span> {{.Grade}}</span></td>
+<td data-label="Missed">{{.Missed}}</td><td data-label="Two-step combinations">{{.Pairs}}</td></tr>
+{{- end}}
+</tbody></table></div>
+</section>
+
+<section id="checklists" aria-labelledby="h-chk">
+<h2 id="h-chk">Decision checklist {{template "tip" (tipFor "checklist")}}</h2>
+<p class="note">Each decision in plain words. <span class="ok">✔ Tested</span> means a test took that outcome. <span class="bad">✘ Missed</span> means none did. <span class="na">∅ Can't happen</span> and <span class="warn">⚠ Blocked by a known bug</span> are explained next to them.</p>
+{{- range .WfSections}}
+<details class="wfs" id="{{.Anchor}}"{{if .Open}} open{{end}}>
+<summary><span class="wname">{{.Name}}</span> <span class="sum">{{.Summary}}{{if .Missed}}, {{.Missed}} missed{{end}}</span></summary>
+<div class="chk" data-chk>
+{{- if .Decisions}}
+<p class="tools"><label><input type="checkbox" data-only-missed> Only missed</label></p>
+<ol class="decs">
+{{- range .Decisions}}
+<li class="dec{{if .Missed}} hasmissed{{end}}{{if .Cleanup}} cleanup{{end}}">{{if .FirstCleanup}}<p class="cleanhead">Cleanup after a cancel: the decisions below run under a disconnected context, so they still run when the workflow was cancelled.</p>{{end}}<p class="dtext">{{.Text}} <code class="where">{{.Where}}</code></p>
+<ul class="outs">
+{{- range .Outcomes}}
+<li class="out s-{{.Status}}"><span class="mark"><span aria-hidden="true">{{.Icon}}</span> {{.Word}}</span> {{.Label}}{{if .Why}} <span class="why">Why: {{.Why}}</span>{{end}}</li>
+{{- end}}
+</ul></li>
+{{- end}}
+</ol>
+<p class="pager" hidden><button type="button" data-more>Show more decisions</button> <span class="showing" aria-live="polite"></span></p>
+{{- else}}
+<p class="note">This workflow has no decisions to test.</p>
+{{- end}}
+</div>
+</details>
+{{- end}}
+</section>
+
+<details id="more-detail" class="more">
+<summary><span class="h2like">More detail</span> <span class="sum">paths, scenarios, sections of the workflow, left-out groups, code PathKit couldn't read, what PathKit assumes, loop rounds, call outcomes, handlers</span></summary>
 {{- end}}
 
 <section id="summary" aria-labelledby="h-summary">
@@ -537,6 +644,19 @@
 {{- if .AuditOther}}
 <p class="note">{{.AuditOther}} more {{if eq .AuditOther 1}}path was{{else}}paths were{{end}} sent by a detector to needs-review or needs-special-test (not counted above).</p>
 {{- end}}
+</section>
+{{- end}}
+{{- if .Hero}}
+</details>
+
+<section id="glossary" class="plainglossary" aria-labelledby="h-glossary">
+<h2 id="h-glossary">Glossary</h2>
+<p class="note">Every "i" on this page explains one of these. The technical name is what the JSON and the older text report call it.</p>
+<dl>
+{{- range .Terms}}
+<div id="g-{{.Key}}" class="term"><dt>{{.Term}}</dt><dd>{{.Text}}{{if .Tech}} <span class="tech">Technical name: {{.Tech}}.</span>{{end}}</dd></div>
+{{- end}}
+</dl>
 </section>
 {{- end}}
 </main>

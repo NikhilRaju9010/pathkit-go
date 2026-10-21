@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/advice"
 	"github.com/NikhilRaju9010/pathkit-go/internal/coverage"
+	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 	"github.com/NikhilRaju9010/pathkit-go/internal/scope"
 )
 
@@ -309,5 +311,89 @@ func TestTrendMarksScopeChange(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
 		}
+	}
+}
+
+// The page made for people who test: the branch coverage card, what to test
+// next, the workflows worst first, a checklist, "More detail" closed, and a
+// glossary entry for every "i" marker (the page would not render otherwise).
+func TestPageForPeople(t *testing.T) {
+	page := mustReport(t, sample("p.W", "p/w.go", "why"))
+	for _, want := range []string{`id="overview"`, `Branch coverage`, `id="next"`, `What to test next`, `id="workflow-list"`, `Decision checklist`,
+		`<details id="more-detail" class="more">`, `id="glossary"`, `data-tip="branch-coverage"`, `aria-describedby="g-branch-coverage"`, `id="g-branch-coverage"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %q", want)
+		}
+	}
+	if strings.Contains(page, `<details id="more-detail" class="more" open`) {
+		t.Error("More detail is closed by default")
+	}
+	// every marker points at a glossary entry on the page
+	for _, m := range regexp.MustCompile(`data-tip="([^"]+)"`).FindAllStringSubmatch(page, -1) {
+		if !strings.Contains(page, `id="g-`+m[1]+`"`) {
+			t.Errorf("the marker %q has no glossary entry", m[1])
+		}
+	}
+	// status is an icon and a word, never colour alone
+	for _, w := range []string{"Tested", "Missed"} {
+		if !strings.Contains(page, ">"+w+"</span>") && !strings.Contains(page, "</span> "+w+"</span>") && !strings.Contains(page, w) {
+			t.Errorf("no %q status word", w)
+		}
+	}
+	// near miss: the page of analyze has no tests to measure, so no coverage card
+	a, err := Analysis(AnalysisInput{Header: Header{Generated: time.Now()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(a), `id="overview"`) {
+		t.Error("the analyze page has no branch coverage card")
+	}
+}
+
+func TestEveryTermIsDefinedOnce(t *testing.T) {
+	seen := map[string]bool{}
+	for _, tm := range terms {
+		if tm.Key == "" || tm.Term == "" || tm.Text == "" || seen[tm.Key] {
+			t.Errorf("bad or repeated term %+v", tm)
+		}
+		seen[tm.Key] = true
+	}
+	if _, err := tipFor("no-such-term"); err == nil {
+		t.Error("an unknown term must be an error, not an empty tooltip")
+	}
+}
+
+// The decisions that run under a disconnected context are a block of their own
+// in the checklist, after the others, with a heading that says what it is.
+func TestChecklistShowsCleanupAfterACancel(t *testing.T) {
+	in := sample("p.W", "p/w.go", "why")
+	in.Result.Workflows[0].Outcomes = []coverage.OutcomeResult{
+		{ID: "b:1", File: "p/w.go", Line: 30, Func: "W", Decision: "Cleanup (activity)", Outcome: "failure", Kind: model.ErrCheck, Status: coverage.OutcomeMissed, Cleanup: true, Sites: 1},
+		{ID: "b:2", File: "p/w.go", Line: 20, Func: "W", Decision: "Work (activity)", Outcome: "failure", Kind: model.ErrCheck, Status: coverage.OutcomeCovered, Sites: 1},
+	}
+	page := mustReport(t, in)
+	work, head := strings.Index(page, "When Work finishes"), strings.Index(page, "Cleanup after a cancel: the decisions below")
+	clean := strings.Index(page, "When Cleanup finishes")
+	if work < 0 || head < 0 || clean < 0 || !(work < head && head < clean) {
+		t.Errorf("the cleanup block should come after the work, with its heading (work %d, heading %d, cleanup %d)", work, head, clean)
+	}
+}
+
+func TestNextListShowsNoZeroCounts(t *testing.T) {
+	in := sample("p.W", "p/w.go", "why")
+	in.Outcomes = []advice.OutcomeItem{
+		// an outcome of a helper: no listed path goes through it
+		{Rank: 1, Workflow: "p.W", File: "p/w.go", Line: 30, Risk: advice.TagFailure, Sentence: "Work never failed here", TestName: "TestW_WorkFails"},
+		{Rank: 2, Workflow: "p.W", File: "p/w.go", Line: 40, Risk: advice.TagLogic, Sentence: "`x` was never true", TestName: "TestW_XTrue", Paths: 3, Scenarios: 2},
+	}
+	page := mustReport(t, in)
+	if strings.Contains(page, "would cover 0 path(s)") {
+		t.Error("a count of zero is shown")
+	}
+	if !strings.Contains(page, "would cover 3 path(s), 2 scenario(s)") {
+		t.Error("the count of an outcome with paths is missing")
+	}
+	if strings.Count(page, "A test of it would cover") != 1 {
+		t.Error("only the outcome with paths gets a count")
 	}
 }
