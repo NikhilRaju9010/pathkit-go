@@ -457,6 +457,51 @@ func (g *Graph) stepsOfRoad(fromStart bool, steps []Step) ([]string, bool) {
 	return out, unk
 }
 
+// A Span is a run of steps of a fingerprint: Steps[From:To].
+type Span struct{ From, To int }
+
+// FingerprintSpans is Fingerprint with the places where a loop's body is. For
+// every loop the path enters ("loop ...: 1+ rounds"), a span says which steps
+// belong to the body of its last round, the one the path shows; the rounds
+// before it are not on the path. A span runs to the loop's own end (its retry
+// step), or to the end of the path when the path leaves the loop another way
+// (a return or a break). Spans of loops inside a body lie inside its span.
+// The end label is not inside any span.
+func (g *Graph) FingerprintSpans(p Path) ([]string, []Span) {
+	out, _ := g.roadSteps(g.Start)
+	var spans []Span
+	var open []int // indexes in spans of the loops being read, innermost last
+	iterated := map[*Junction]bool{}
+	openOf := map[*Junction]int{}
+	for _, s := range p.Steps {
+		if s.Junction.Kind == Loop && s.Exit.Label == "retry" {
+			if i, ok := openOf[s.Junction]; ok {
+				spans[i].To = len(out)
+				delete(openOf, s.Junction)
+				for k := len(open) - 1; k >= 0; k-- {
+					if open[k] == i {
+						open = append(open[:k], open[k+1:]...)
+						break
+					}
+				}
+			}
+		}
+		out = append(out, g.stepLabel(s.Junction, s.Exit, iterated[s.Junction])...)
+		if s.Junction.Kind == Loop && s.Exit.Label == "iterate" {
+			iterated[s.Junction] = true
+			spans = append(spans, Span{From: len(out), To: -1})
+			openOf[s.Junction] = len(spans) - 1
+			open = append(open, len(spans)-1)
+		}
+		more, _ := g.roadSteps(s.Exit.To)
+		out = append(out, more...)
+	}
+	for _, i := range open {
+		spans[i].To = len(out)
+	}
+	return append(out, endLabel(p.End)), spans
+}
+
 // StageFragmentID names what a stage path does outside the workflow, for
 // counting how many different things a stage can do. Two stage paths with the
 // same ID make the same external steps.

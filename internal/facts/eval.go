@@ -109,6 +109,10 @@ type cmpForm struct {
 	isLen bool
 	coll  bool           // isLen of a slice or map (not a string)
 	elem  *ast.IndexExpr // a nil check of coll[i]; k is the collection
+	// ifaceConst: an interface value compared with a constant; ctype is the
+	// constant's type (what the interface would have to hold to be equal).
+	ifaceConst bool
+	ctype      types.Type
 }
 
 // formOf reads a comparison expression into a cmpForm.
@@ -159,6 +163,9 @@ func (s *state) formOf(x *ast.BinaryExpr) (cmpForm, bool) {
 	k, ok := s.operand(l)
 	if !ok {
 		return cmpForm{}, false
+	}
+	if !isNil && (op == token.EQL || op == token.NEQ) && isInterface(s.a.info.TypeOf(l)) {
+		return cmpForm{k: k, op: op, val: val, ifaceConst: true, ctype: s.constType(r)}, true
 	}
 	switch kindOf(s.a.info.TypeOf(l)) {
 	case tkBool, tkString, tkNumber:
@@ -259,6 +266,9 @@ func (s *state) evalForm(f cmpForm, shadow bool) (tri, []*datum) {
 			return t, used
 		}
 		return unknown, nil
+	}
+	if f.ifaceConst {
+		return s.ifaceConstEval(f, shadow)
 	}
 	ds := s.datums(f.k, shadow)
 	if f.isNil {

@@ -50,7 +50,8 @@ type File struct {
 	RunID        string   `json:"runId"`
 	// Recorder says which recorder wrote the trace: 0 for the ones before
 	// handlers, summarized helpers and direct returns were recorded (the field
-	// is absent there), 3 for this one. A step kind the recorder did not know
+	// is absent there), 3 for the ones before condition parts were recorded,
+	// 4 for this one. A step kind the recorder did not know
 	// is "not recorded by this trace", never a missing or an unmatched step.
 	Recorder   int    `json:"recorder,omitempty"`
 	RecordedAt string `json:"recordedAt"`
@@ -58,6 +59,10 @@ type File struct {
 	// before it was recorded, and when the recorder could not tell which of
 	// several parallel tests it was).
 	TestName string `json:"testName,omitempty"`
+	// Conditions are the parts of && / || conditions the run evaluated, each as
+	// "c:<id>:t" (seen true) or "c:<id>:f" (seen false). Recorder 4 writes it;
+	// an older trace has none, and its parts are "not recorded", never missed.
+	Conditions []string `json:"conditions,omitempty"`
 
 	Path string `json:"-"` // where it was read from
 }

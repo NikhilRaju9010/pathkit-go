@@ -122,6 +122,11 @@ type CISettings struct {
 	// MainFloor is classification.ci.main_floor: the lowest percent any
 	// workflow's main number may have; nil means no floor.
 	MainFloor *float64
+	// BranchFloor is classification.ci.branch_floor: the lowest percent of branch
+	// coverage the project and every workflow with decisions may have; nil means
+	// none is set (a baseline that holds branch coverage then brings the
+	// commendable band as the floor).
+	BranchFloor *float64
 	// Baseline is the baseline file as written in the config ("" none);
 	// relative to the config file's folder (Config.Abs).
 	Baseline string
@@ -270,6 +275,7 @@ type ciEntry struct {
 	CappedBasis       *string  `json:"capped_basis"`
 	Tolerance         *float64 `json:"tolerance"`
 	MainFloor         *float64 `json:"main_floor"`
+	BranchFloor       *float64 `json:"branch_floor"`
 }
 
 type explainedEntry struct {
@@ -705,6 +711,12 @@ func readClassification(p *classificationPart, fail func(string, ...any) error) 
 				return c, fail(`classification.ci.main_floor must be a number from 0 to 100, got %v`, *v)
 			}
 			c.CI.MainFloor = v
+		}
+		if v := e.BranchFloor; v != nil {
+			if *v < 0 || *v > 100 {
+				return c, fail(`classification.ci.branch_floor must be a number from 0 to 100, got %v`, *v)
+			}
+			c.CI.BranchFloor = v
 		}
 		if v := e.Tolerance; v != nil {
 			if *v < 0 || *v > 100 {

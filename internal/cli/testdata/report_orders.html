@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -170,25 +171,118 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 .trend-chart .dot.main { fill: var(--ok); }
 .trend-chart .dot.branch { fill: var(--accent); }
 
+ 
+.hero { margin-top: 20px; overflow-wrap: anywhere; }
+.maincard { border: 1px solid var(--line); border-radius: 10px; padding: 20px 22px; background: var(--bg); box-shadow: 0 1px 2px rgba(31, 35, 40, .06); }
+.maincard .label, .scard .label { margin: 0; color: var(--muted); font-weight: 600; font-size: .9rem; }
+.maincard .big { margin: 2px 0 6px; font-size: 3.2rem; line-height: 1.1; font-weight: 700; color: var(--accent); overflow-wrap: anywhere; }
+.gradeline { margin: 0 0 10px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.of { color: var(--muted); }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 14px; font-weight: 700; border: 1px solid currentColor; background: var(--bg); }
+.badge.g-exemplary { color: #0b6b2c; background: #e7f6ec; }
+.badge.g-commendable { color: #0b5cad; background: #e6f1fb; }
+.badge.g-acceptable { color: #7a4f00; background: #fff4d6; }
+.badge.g-needswork { color: #a31d12; background: #fdecea; }
+.badge.g-nodecisions { color: #444c56; background: var(--soft); }
+.meter { display: block; height: 12px; border-radius: 6px; background: var(--soft); border: 1px solid var(--line); overflow: hidden; margin: 6px 0 12px; }
+.meter.small { height: 8px; width: 120px; max-width: 100%; margin: 4px 0 0; }
+.meter .fill { display: block; height: 100%; background: var(--accent); }
+.meter .fill.g-exemplary { background: #1a7f37; }
+.meter .fill.g-acceptable { background: #9a6700; }
+.meter .fill.g-needswork { background: #b42318; }
+.sentence { margin: 0; font-size: 1.05rem; max-width: 75ch; }
+.maincard .note { margin: 8px 0 0; }
+.smallcards { list-style: none; padding: 0; margin: 14px 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.scard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; background: var(--soft); }
+.scard .val { margin: 2px 0 0; font-size: 1.35rem; font-weight: 700; overflow-wrap: anywhere; }
+.scard .detail, .detail { margin: 0; color: var(--muted); font-size: .85rem; }
+.bugs { margin-top: 14px; border: 1px solid #d4a72c; background: #fff8c5; border-radius: 8px; padding: 10px 14px; }
+.bugs h3 { margin: 0 0 6px; }
+.bugs ul { margin: 0; padding-left: 20px; }
+.bugs .wf { color: var(--muted); }
+
+.tip { display: inline-block; width: 18px; height: 18px; padding: 0; margin-left: 4px; border: 1px solid var(--accent); border-radius: 50%; background: var(--bg); color: var(--accent); font: italic 700 .75rem Georgia, serif; line-height: 16px; text-align: center; cursor: help; vertical-align: 1px; }
+.tip:hover, .tip[aria-expanded="true"] { background: var(--accent); color: #fff; }
+.tipbox { position: absolute; z-index: 30; max-width: calc(100vw - 24px); background: #1f2328; color: #fff; border-radius: 8px; padding: 10px 12px; font-size: .85rem; line-height: 1.45; box-shadow: 0 4px 14px rgba(0, 0, 0, .3); }
+.tipbox[hidden] { display: none; }
+
+.tablewrap { max-width: 100%; overflow-x: auto; }
+.nextt td, .wfl td, .wfl th[scope=row] { vertical-align: top; }
+.risk { font-weight: 600; white-space: nowrap; }
+button.copy, button[data-more] { font: inherit; padding: 4px 10px; border: 1px solid var(--accent); background: var(--bg); color: var(--accent); border-radius: 6px; cursor: pointer; }
+button.copy:hover, button[data-more]:hover { background: var(--accent-bg); }
+.wfl td { white-space: nowrap; }
+.wfl td .meter.small { display: block; }
+
+details.wfs { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 0 14px; }
+details.wfs > summary { cursor: pointer; padding: 10px 0; font-weight: 600; }
+.wname { overflow-wrap: anywhere; }
+.sum { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.tools { margin: 0 0 8px; }
+.decs { list-style: none; padding: 0; margin: 0 0 10px; }
+.dec { border-top: 1px solid var(--line); padding: 8px 0; }
+.dec[hidden] { display: none; }
+.dtext { margin: 0 0 4px; font-weight: 600; overflow-wrap: anywhere; }
+.where { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.outs { list-style: none; margin: 0; padding: 0 0 0 14px; }
+.out { padding: 2px 0; overflow-wrap: anywhere; }
+.mark { display: inline-block; min-width: 9.5em; font-weight: 700; }
+.s-covered .mark, .ok { color: #0b6b2c; }
+.s-missed .mark, .bad { color: #a31d12; }
+.s-impossible .mark, .na { color: #444c56; }
+.s-blocked .mark, .warn { color: #7a4f00; }
+.why { color: var(--muted); font-size: .85rem; }
+.pager { margin: 6px 0 12px; }
+.pager[hidden], .pager button[hidden] { display: none; }
+
+details.more { margin: 36px 0 8px; border-top: 2px solid var(--line); padding-top: 8px; }
+details.more > summary { cursor: pointer; padding: 10px 0; }
+.h2like { font-size: 1.25rem; font-weight: 700; }
+.plainglossary dl { margin: 0; }
+.plainglossary .term { border-top: 1px solid var(--line); padding: 8px 0; }
+.plainglossary dt { font-weight: 700; }
+.plainglossary dd { margin: 2px 0 0; max-width: 75ch; }
+.tech { color: var(--muted); font-size: .85rem; }
+.note { color: var(--muted); }
+
+@media (max-width: 640px) {
+  .maincard { padding: 14px; }
+  .maincard .big { font-size: 2.4rem; }
+  .mark { display: block; min-width: 0; }
+  .nextt thead, .wfl thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .nextt tr, .wfl tr { display: block; border-bottom: 1px solid var(--line); padding: 8px 0; }
+  .nextt td, .nextt th, .wfl td, .wfl th { display: block; border: 0; padding: 2px 0; white-space: normal; }
+  .nextt td[data-label]::before, .wfl td[data-label]::before, .wfl th[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-weight: 600; }
+  .barin { display: block; }
+  .bar nav { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 6px; }
+  .bar nav a { padding: 3px 8px; font-size: .9rem; }
+  .search input { width: 100%; }
+}
+@media print {
+  .tip, .tipbox, .copy, .bar, .tools, .pager { display: none !important; }
+  .dec[hidden] { display: block !important; }
+  details.more > summary .sum { display: none; }
+}
+
+.cleanhead { margin: 0 0 6px; padding: 6px 10px; border-left: 4px solid var(--accent); background: var(--accent-bg); font-weight: 600; }
+.dec.cleanup .dtext::after { content: " (cleanup)"; color: var(--muted); font-weight: 400; }
+
 </style>
 </head>
 <body>
 <a class="skip" href="#main">Skip to the content</a>
 <header class="top">
 <h1>PathKit report</h1>
-<p class="meta" data-meta>Generated 2026-09-29 10:00 UTC · ./orders · no config file (no scope in use) · PathKit v0.0.0-test</p>
+<p class="meta" data-meta>Generated 2026-09-29 10:00 UTC · ./orders · no config file (no scope in use) · PathKit v0.0.0-test · 2 test runs</p>
 </header>
 <div class="bar">
 <div class="barin">
 <nav aria-label="Sections">
-<a href="#summary">Summary</a>
-<a href="#workflows">Workflows</a>
-<a href="#unread">Could not read (0)</a>
-<a href="#call-outcomes">Call outcomes (1)</a>
-<a href="#tests">Tests (1)</a>
-<a href="#write-first">Tests to write first (1)</a>
-<a href="#groups">Missed paths (1 groups)</a>
-<a href="#paths">Paths</a>
+<a href="#overview">Branch coverage</a>
+<a href="#next">What to test next</a>
+<a href="#workflow-list">Workflows</a>
+<a href="#more-detail">More detail</a>
+<a href="#glossary">Glossary</a>
 </nav>
 <div class="search" hidden>
 <label class="sr" for="q">Search paths by id or text</label>
@@ -197,6 +291,70 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 </div>
 </div>
 <main id="main">
+<section id="overview" class="hero" aria-labelledby="h-overview">
+<h2 id="h-overview" class="sr">Branch coverage</h2>
+<div class="maincard">
+<p class="label">Branch coverage <button type="button" class="tip" data-tip="branch-coverage" aria-describedby="g-branch-coverage" aria-label="About: Branch coverage">i</button></p>
+<p class="big">75.0%</p>
+<p class="gradeline"><span class="badge g-commendable"><span aria-hidden="true">✔</span> Commendable</span> <button type="button" class="tip" data-tip="grade" aria-describedby="g-grade" aria-label="About: Grade">i</button> <span class="of">3 of 4 decision outcomes that can happen <button type="button" class="tip" data-tip="outcome" aria-describedby="g-outcome" aria-label="About: Decision outcome">i</button></span></p>
+<div class="meter" role="img" aria-label="75.0% of decision outcomes tested"><span class="fill g-commendable" style="width:75%"></span></div>
+<p class="sentence">Tests cover 3 of 4 decision outcomes that can happen (75.0%, commendable). 1 is never tested; the riskiest is a plain decision at orders/orders.go:42.</p>
+</div>
+<ul class="smallcards">
+<li class="scard"><p class="label">Two-step combinations <button type="button" class="tip" data-tip="two-step" aria-describedby="g-two-step" aria-label="About: Two-step combinations">i</button></p><p class="val">1/2 (50.0%)</p></li>
+<li class="scard"><p class="label">Each part of a condition <button type="button" class="tip" data-tip="condition-part" aria-describedby="g-condition-part" aria-label="About: Each part of a condition">i</button></p><p class="val">none</p></li>
+<li class="scard"><p class="label">Blocked by known bugs <button type="button" class="tip" data-tip="known-bug" aria-describedby="g-known-bug" aria-label="About: Blocked by a known bug">i</button></p><p class="val">0</p><p class="detail">still counted in the percentage</p></li>
+</ul>
+</section>
+
+<section id="next" aria-labelledby="h-next">
+<h2 id="h-next">What to test next <button type="button" class="tip" data-tip="next" aria-describedby="g-next" aria-label="About: What to test next">i</button></h2>
+<div class="tablewrap"><table class="nextt">
+<thead><tr><th scope="col">Risk <button type="button" class="tip" data-tip="risk" aria-describedby="g-risk" aria-label="About: Risk">i</button></th><th scope="col">Where</th><th scope="col">What never happened</th><th scope="col">Suggested test name</th><th scope="col"><span class="sr">Copy</span></th></tr></thead>
+<tbody>
+<tr><td data-label="Risk"><span class="risk"><span aria-hidden="true">◇</span> Plain logic</span></td><td data-label="Where"><code>orders/orders.go:42</code></td><td data-label="What never happened">ChargeCard never succeeded here<br><span class="detail">A test of it would cover 1 path(s), 1 scenario(s).</span></td><td data-label="Test name"><code>TestOrder_ChargeCardSucceeds</code></td><td><button type="button" class="copy" data-copy="TestOrder_ChargeCardSucceeds">Copy name</button></td></tr>
+</tbody></table></div>
+</section>
+
+<section id="workflow-list" aria-labelledby="h-wfl">
+<h2 id="h-wfl">Workflows, worst first <button type="button" class="tip" data-tip="workflow" aria-describedby="g-workflow" aria-label="About: Workflow">i</button></h2>
+<p class="note">1 of 1 workflows at commendable or better.</p>
+<div class="tablewrap"><table class="wfl">
+<thead><tr><th scope="col">Workflow</th><th scope="col">Outcomes tested <button type="button" class="tip" data-tip="outcomes-tested" aria-describedby="g-outcomes-tested" aria-label="About: Outcomes tested">i</button></th><th scope="col">Grade <button type="button" class="tip" data-tip="grade" aria-describedby="g-grade" aria-label="About: Grade">i</button></th><th scope="col">Missed <button type="button" class="tip" data-tip="missed" aria-describedby="g-missed" aria-label="About: Missed">i</button></th><th scope="col">Two-step combinations <button type="button" class="tip" data-tip="two-step" aria-describedby="g-two-step" aria-label="About: Two-step combinations">i</button></th></tr></thead>
+<tbody>
+<tr><th scope="row" data-label="Workflow"><a href="#wfs-0" data-open="wfs-0">orders.OrderWorkflow</a></th>
+<td data-label="Outcomes tested">3 / 4 75.0%<span class="meter small"><span class="fill g-commendable" style="width:75%"></span></span></td>
+<td data-label="Grade"><span class="badge g-commendable"><span aria-hidden="true">✔</span> Commendable</span></td>
+<td data-label="Missed">1</td><td data-label="Two-step combinations">1 / 2</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="checklists" aria-labelledby="h-chk">
+<h2 id="h-chk">Decision checklist <button type="button" class="tip" data-tip="checklist" aria-describedby="g-checklist" aria-label="About: Decision checklist">i</button></h2>
+<p class="note">Each decision in plain words. <span class="ok">✔ Tested</span> means a test took that outcome. <span class="bad">✘ Missed</span> means none did. <span class="na">∅ Can't happen</span> and <span class="warn">⚠ Blocked by a known bug</span> are explained next to them.</p>
+<details class="wfs" id="wfs-0" open>
+<summary><span class="wname">orders.OrderWorkflow</span> <span class="sum">3 of 4 outcomes tested, 1 missed</span></summary>
+<div class="chk" data-chk>
+<p class="tools"><label><input type="checkbox" data-only-missed> Only missed</label></p>
+<ol class="decs">
+<li class="dec"><p class="dtext">If `in.AmountCents &lt;= 0` <code class="where">orders/orders.go:28</code></p>
+<ul class="outs">
+<li class="out s-covered"><span class="mark"><span aria-hidden="true">✔</span> Tested</span> yes (true)</li>
+<li class="out s-covered"><span class="mark"><span aria-hidden="true">✔</span> Tested</span> no (false)</li>
+</ul></li>
+<li class="dec hasmissed"><p class="dtext">When ChargeCard finishes <code class="where">orders/orders.go:42</code></p>
+<ul class="outs">
+<li class="out s-covered"><span class="mark"><span aria-hidden="true">✔</span> Tested</span> it fails</li>
+<li class="out s-missed"><span class="mark"><span aria-hidden="true">✘</span> Missed</span> it succeeds</li>
+</ul></li>
+</ol>
+<p class="pager" hidden><button type="button" data-more>Show more decisions</button> <span class="showing" aria-live="polite"></span></p>
+</div>
+</details>
+</section>
+
+<details id="more-detail" class="more">
+<summary><span class="h2like">More detail</span> <span class="sum">paths, scenarios, sections of the workflow, left-out groups, code PathKit couldn't read, what PathKit assumes, loop rounds, call outcomes, handlers</span></summary>
 
 <section id="summary" aria-labelledby="h-summary">
 <h2 id="h-summary">Summary</h2>
@@ -369,6 +527,42 @@ details.unused > summary { cursor: pointer; font-weight: 600; margin: 12px 0; }
 <li data-trend-covered="2" data-trend-paths="3">2026-09-29 10:00 UTC · 2/3 · 66.7% <meter min="0" max="100" value="66.7">66.7%</meter></li>
 </ol>
 </div>
+</section>
+</details>
+
+<section id="glossary" class="plainglossary" aria-labelledby="h-glossary">
+<h2 id="h-glossary">Glossary</h2>
+<p class="note">Every "i" on this page explains one of these. The technical name is what the JSON and the older text report call it.</p>
+<dl>
+<div id="g-branch-coverage" class="term"><dt>Branch coverage</dt><dd>The share of decision outcomes that can happen and that your tests took. It is the main number of this page. <span class="tech">Technical name: branch coverage.</span></dd></div>
+<div id="g-outcome" class="term"><dt>Decision outcome</dt><dd>One way a decision can go: an if being true or false, an activity succeeding or failing, one case of a switch, a wait ending by signal or by timeout. <span class="tech">Technical name: branch, exit.</span></dd></div>
+<div id="g-grade" class="term"><dt>Grade</dt><dd>A word for the percentage: needs work below 60%, acceptable from 60%, commendable from 75%, exemplary from 90%. Your team can change the limits. <span class="tech">Technical name: branches.grades.</span></dd></div>
+<div id="g-can-be-tested" class="term"><dt>Can be tested</dt><dd>A test can make the workflow take this route. <span class="tech">Technical name: testable.</span></dd></div>
+<div id="g-cant-happen" class="term"><dt>Can&#39;t happen</dt><dd>PathKit proved that nothing can make this happen, for example because an earlier value settles the decision. These outcomes are left out of the percentage and listed with the proof. <span class="tech">Technical name: cannot-be-tested.</span></dd></div>
+<div id="g-special-test" class="term"><dt>Needs a special test</dt><dd>It can happen in production but an ordinary test cannot reach it, for example the old side of a version check, which needs a replay of an old history. <span class="tech">Technical name: needs-special-test.</span></dd></div>
+<div id="g-needs-check" class="term"><dt>Needs a person to check</dt><dd>PathKit is not sure. It stays in the numbers until a person decides. <span class="tech">Technical name: needs-review.</span></dd></div>
+<div id="g-known-bug" class="term"><dt>Blocked by a known bug</dt><dd>A person marked this route as blocked by a bug that is known. It stays in the percentage, on a line of its own, until the bug is fixed. <span class="tech">Technical name: known-defect.</span></dd></div>
+<div id="g-possible-bug" class="term"><dt>Possible bug</dt><dd>The code tests for a plain value (a string, say) where the value is really a pointer to one, so the test can never be true. It is probably a mistake in the code, not a route that cannot happen. <span class="tech">Technical name: likely-defect.</span></dd></div>
+<div id="g-two-step" class="term"><dt>Two-step combinations</dt><dd>An outcome of one decision followed by an outcome of the next. A finer measure than branch coverage. <span class="tech">Technical name: decision pairs.</span></dd></div>
+<div id="g-condition-part" class="term"><dt>Each part of a condition</dt><dd>In a condition like a &amp;&amp; b, each part (a, b) should be seen true and false when it is checked. <span class="tech">Technical name: condition coverage.</span></dd></div>
+<div id="g-notice" class="term"><dt>Tests notice wrong decisions</dt><dd>PathKit changed a decision to go the other way and ran the tests that cover it. This is how often a test failed. <span class="tech">Technical name: decision check.</span></dd></div>
+<div id="g-next" class="term"><dt>What to test next</dt><dd>The decision outcomes that can happen and that no test took, riskiest first. <span class="tech">Technical name: tests to write first.</span></dd></div>
+<div id="g-risk" class="term"><dt>Risk</dt><dd>The riskiest thing a test of this outcome must do: cancel, undo (compensation), activity failure, continue as new, timer or timeout, signal or update, plain logic, or an old version. <span class="tech">Technical name: tag.</span></dd></div>
+<div id="g-outcomes-tested" class="term"><dt>Outcomes tested</dt><dd>How many of the outcomes that can happen your tests took, out of all of them. <span class="tech">Technical name: branches covered / possible.</span></dd></div>
+<div id="g-missed" class="term"><dt>Missed</dt><dd>Outcomes that can happen and that no test took.</dd></div>
+<div id="g-test-run" class="term"><dt>Test run</dt><dd>One run of a workflow recorded while your tests ran. <span class="tech">Technical name: trace.</span></dd></div>
+<div id="g-unplaced-run" class="term"><dt>Test run PathKit couldn&#39;t place</dt><dd>A recorded run that does not fit any route PathKit drew. The drawing may be incomplete there, so PathKit trusts its &#34;can&#39;t happen&#34; proofs less around it. <span class="tech">Technical name: unmatched trace.</span></dd></div>
+<div id="g-section" class="term"><dt>Section of the workflow</dt><dd>A long workflow is cut into parts that are counted one at a time. <span class="tech">Technical name: stage.</span></dd></div>
+<div id="g-scenario" class="term"><dt>Scenario</dt><dd>A distinct list of things a workflow does outside itself (calls, timers, signals). Different routes that do the same things are one scenario. <span class="tech">Technical name: scenario.</span></dd></div>
+<div id="g-path-id" class="term"><dt>Path ID</dt><dd>A short code that names one route through a workflow and stays the same when unrelated code changes. <span class="tech">Technical name: stableId.</span></dd></div>
+<div id="g-left-out" class="term"><dt>Left out (can&#39;t happen)</dt><dd>Parts of a very large workflow that PathKit proved impossible and did not list one by one. They are counted exactly. <span class="tech">Technical name: pruned groups.</span></dd></div>
+<div id="g-unread" class="term"><dt>Code PathKit couldn&#39;t read</dt><dd>Places PathKit did not follow, such as a call through an interface. A route through them has a scenario of its own and is never merged with another. <span class="tech">Technical name: unread panel.</span></dd></div>
+<div id="g-assumptions" class="term"><dt>What PathKit assumes</dt><dd>Things PathKit takes for granted when it proves something can&#39;t happen, for example that Temporal&#39;s default JSON converter is used. Each can be turned off. <span class="tech">Technical name: assumptions.</span></dd></div>
+<div id="g-path" class="term"><dt>Path</dt><dd>One complete route through a workflow, from the start to an end. <span class="tech">Technical name: path.</span></dd></div>
+<div id="g-workflow" class="term"><dt>Workflow</dt><dd>One Temporal workflow function PathKit found.</dd></div>
+<div id="g-checklist" class="term"><dt>Decision checklist</dt><dd>Every decision of a workflow in plain words, with each outcome ticked when a test took it, crossed when none did, or marked when it can&#39;t happen.</dd></div>
+<div id="g-possible-bugs-card" class="term"><dt>Possible bugs found</dt><dd>The places where the code looks like it tests a pointer as if it were the plain value. <span class="tech">Technical name: likely-defect.</span></dd></div>
+</dl>
 </section>
 </main>
 <script id="pk-data" type="application/json">{"v":1,"m":true,"c":false,"s":["Start -\u003e if in.AmountCents \u003c= 0 --true","End (completed)","Start -\u003e if in.AmountCents \u003c= 0 --false","ChargeCard (activity) --failure","End (failed)","ChargeCard (activity) --success"],"w":[{"n":"orders.OrderWorkflow","f":"orders/orders.go","c":2,"t":3,"p":"Medium","r":[[1,"s1:743d711a77b4",1,-1,-1,-1,-1,[0,1]],[2,"s1:050e8acab1b0",1,-1,-1,-1,-1,[2,3,4]],[3,"s1:5179b1c99bbb",0,-1,-1,-1,-1,[2,5,1]]]}]}</script>

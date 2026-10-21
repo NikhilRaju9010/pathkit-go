@@ -53,7 +53,7 @@ var (
 	//go:embed app.js
 	script string
 
-	page = template.Must(template.New("page").Parse(strings.Replace(strings.Replace(pageTemplate, "/*STYLE*/", style, 1), "/*SCRIPT*/", script, 1)))
+	page = template.Must(template.New("page").Funcs(template.FuncMap{"tipFor": tipFor}).Parse(strings.Replace(strings.Replace(pageTemplate, "/*STYLE*/", style, 1), "/*SCRIPT*/", script, 1)))
 )
 
 // Header is what the top of the page says about the run.
@@ -85,6 +85,8 @@ type ReportInput struct {
 	Panel []classify.AssumptionStatus
 	// TopTests are the tests to write first (advice.TestsToWriteFirst).
 	TopTests []advice.Item
+	// Outcomes are the missed decision outcomes, riskiest first (advice.MissedOutcomes).
+	Outcomes []advice.OutcomeItem
 }
 
 // overallThreshold is the threshold for the overall figures: none when
@@ -169,6 +171,19 @@ type (
 		GroupsTotal, GroupsMore int
 		Data                    *pageData
 		ScriptHash              string
+		// The part made for people who test (see qa.go). Hero is nil on the page
+		// of "analyze", which has no tests to measure.
+		Hero       *heroView
+		SmallCards []smallCardView
+		Bugs       []bugView
+		Survivors  []bugView
+		Next       []nextRowView
+		NextMore   int
+		WfRows     []wfRowView
+		WfSections []wfSection
+		AtTarget   string
+		RunCount   int
+		Terms      []term
 	}
 	cardView struct {
 		Key, Title, Value, Sub string
@@ -277,6 +292,7 @@ func Report(in ReportInput) ([]byte, error) {
 		Traces:       &res.Counts,
 	}
 	v.setHeader(in.Header)
+	v.buildPeople(res, in.Outcomes)
 	v.MainHeadline = render.MainHeadlineLines(res)
 	for _, t := range res.Tests {
 		v.Tests = append(v.Tests, testRowView{Name: t.Name, Workflows: strings.Join(t.Workflows, ", "), Traces: t.Traces, Scenarios: t.Scenarios, UniqueScenarios: t.UniqueScenarios, Branches: t.Branches, UniqueBranches: t.UniqueBranches, AddsNothing: t.AddsNothing})

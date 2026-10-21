@@ -24,7 +24,6 @@ CONFIG = {
     "workflows": {"exclude": [
         {"name": "splitmerge_selector.SampleSplitMergeSelectorWorkflow", "reason": "PathKit does not map this selector shape"},
         {"name": "timer.SampleTimerWorkflow", "reason": "PathKit does not map this selector shape"},
-        {"name": "updatabletimer.UpdatableTimer.SleepUntil", "reason": "PathKit does not map this selector shape"},
     ]},
     "classification": {"enabled": True},
 }

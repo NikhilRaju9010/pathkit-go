@@ -23,7 +23,7 @@ func (a *Analyzer) Analyze(p model.Path) Result {
 	w := a.NewWalk()
 	for _, st := range p.Steps {
 		if c := w.Step(st); c != nil {
-			return Result{Claim: c, Suspect: w.s.suspect, Unknown: w.s.unknown}
+			return Result{Claim: c, Suspect: w.s.suspect, Unknown: w.s.unknown, Defect: w.s.defect}
 		}
 	}
 	return w.Result()
@@ -106,7 +106,7 @@ func (s *state) nonEmpty(e ast.Expr) ([]*datum, bool) {
 // of the elements of coll.
 func (s *state) rangeValueFacts(rs *ast.RangeStmt) []spec {
 	ck, ok := s.operand(rs.X)
-	if !ok || s.a.escapes[ck.v] != "" || !isInterface(s.a.info.TypeOf(rs.Value)) {
+	if !ok || s.escaped(ck.v) || !isInterface(s.a.info.TypeOf(rs.Value)) {
 		return nil
 	}
 	for v := range s.a.assignedVars(rs) { // the loop changes the collection itself
@@ -209,6 +209,17 @@ func (s *state) switchStep(step int, j *model.Junction, exit *model.Exit) *Claim
 		return nil
 	}
 	holds := s.a.holdsText(set)
+	if !isDefault {
+		for _, te := range cc.List {
+			if h := s.pointerHint(set, s.a.info.TypeOf(te)); h != "" {
+				s.noteDefect(claimSpec{step: step, pos: ts.Pos(), used: used, extraWhys: set.whys(), kind: ImpossibleType,
+					decision:    fmt.Sprintf("%s takes `%s`.", where, exit.Label),
+					closing:     fmt.Sprintf("`%s` can hold %s, none of which takes `%s`.", exprText(x), strings.TrimPrefix(holds, "only "), exit.Label),
+					explanation: fmt.Sprintf("%s takes `%s`, but %%s", where, exit.Label)}, h)
+				return nil
+			}
+		}
+	}
 	closing := fmt.Sprintf("`%s` can hold %s, none of which takes `%s`, so that case cannot be taken.", exprText(x), strings.TrimPrefix(holds, "only "), exit.Label)
 	if isDefault {
 		closing = fmt.Sprintf("`%s` can hold %s, and every one of them takes an earlier case, so default cannot be taken.", exprText(x), strings.TrimPrefix(holds, "only "))
@@ -237,7 +248,18 @@ func (s *state) ifStep(step int, j *model.Junction, exit *model.Exit) *Claim {
 		if t == isFalse {
 			answer = "false"
 		}
-		return s.buildClaim(claimSpec{step: step, pos: ifs.Pos(), used: used, nilCompare: isNilCompare(ifs.Cond),
+		if h := s.ptrCompareHint(ifs.Cond, used); h != "" {
+			s.noteDefect(claimSpec{step: step, pos: ifs.Pos(), used: used, kind: ImpossibleType,
+				decision:    fmt.Sprintf("%s takes the %s side.", si.where, si.side),
+				closing:     fmt.Sprintf("`%s` is always %s at that point.", exprText(ifs.Cond), answer),
+				explanation: fmt.Sprintf("%s takes the %s side, but there `%s` is always %s: %%s", si.where, si.side, exprText(ifs.Cond), answer)}, h)
+			return nil
+		}
+		kind := Kind("")
+		if s.hasIfaceConst(ifs.Cond) && usesTypeSet(used) {
+			kind = ImpossibleType // the interface holds no value of the constant's type
+		}
+		return s.buildClaim(claimSpec{step: step, pos: ifs.Pos(), used: used, kind: kind, nilCompare: isNilCompare(ifs.Cond),
 			decision:    fmt.Sprintf("%s takes the %s side.", si.where, si.side),
 			closing:     fmt.Sprintf("Nothing on the path changes this in between, so `%s` is always %s at that point and the %s side cannot be taken.", exprText(ifs.Cond), answer, si.side),
 			explanation: fmt.Sprintf("%s takes the %s side, but there `%s` is always %s: %%s", si.where, si.side, exprText(ifs.Cond), answer)})
@@ -292,6 +314,9 @@ type claimSpec struct {
 // buildClaim writes the claim and its proof: the facts the answer rests on,
 // in order, then the decision that cannot happen, then what it adds up to.
 func (s *state) buildClaim(c claimSpec) *Claim {
+	if s.tainted {
+		return nil // a likely defect came earlier on this path: no later claim is trusted
+	}
 	whys := collect(c.used, c.extraWhys...)
 	kind := c.kind
 	if kind == "" {

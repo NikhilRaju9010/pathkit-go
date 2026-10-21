@@ -247,6 +247,124 @@
         "percent": 75,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 4,
+        "possible": 6,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 66.7,
+        "grade": "acceptable"
+      },
+      "outcomes": [
+        {
+          "id": "b:2ecbfa98939a",
+          "file": "approval/approval.go",
+          "line": 34,
+          "function": "ApprovalWorkflow",
+          "decision": "AwaitWithTimeout (wait)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.failure"
+          ]
+        },
+        {
+          "id": "b:fd0761da39ac",
+          "file": "approval/approval.go",
+          "line": 34,
+          "function": "ApprovalWorkflow",
+          "decision": "AwaitWithTimeout (wait)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.success"
+          ]
+        },
+        {
+          "id": "b:b8f7a59f5100",
+          "file": "approval/approval.go",
+          "line": 37,
+          "function": "ApprovalWorkflow",
+          "decision": "if !ok (AwaitWithTimeout)",
+          "outcome": "signaled",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.signaled"
+          ]
+        },
+        {
+          "id": "b:c4b4c3b07641",
+          "file": "approval/approval.go",
+          "line": 37,
+          "function": "ApprovalWorkflow",
+          "decision": "if !ok (AwaitWithTimeout)",
+          "outcome": "timeout",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.timeout"
+          ]
+        },
+        {
+          "id": "b:6d72bccac633",
+          "file": "approval/approval.go",
+          "line": 43,
+          "function": "ApprovalWorkflow",
+          "decision": "if decision == \"approved\"",
+          "outcome": "true",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J3.true"
+          ]
+        },
+        {
+          "id": "b:d96323ab9706",
+          "file": "approval/approval.go",
+          "line": 43,
+          "function": "ApprovalWorkflow",
+          "decision": "if decision == \"approved\"",
+          "outcome": "false",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J3.false"
+          ]
+        }
+      ],
       "file": "approval/approval.go",
       "priority": "Medium"
     },
@@ -450,6 +568,88 @@
         "percent": 100,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 4,
+        "possible": 4,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 100,
+        "grade": "exemplary"
+      },
+      "outcomes": [
+        {
+          "id": "b:2f55ccf801e7",
+          "file": "billing/subscription.go",
+          "line": 20,
+          "function": "SubscriptionWorkflow",
+          "decision": "for i < s.CyclesPerRun",
+          "outcome": "iterate",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J1.iterate"
+          ]
+        },
+        {
+          "id": "b:1aad85a28872",
+          "file": "billing/subscription.go",
+          "line": 20,
+          "function": "SubscriptionWorkflow",
+          "decision": "for i < s.CyclesPerRun",
+          "outcome": "exit",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.exit"
+          ]
+        },
+        {
+          "id": "b:0565a98107f5",
+          "file": "billing/subscription.go",
+          "line": 22,
+          "function": "SubscriptionWorkflow",
+          "decision": "ChargeMonthly (activity)",
+          "outcome": "failure",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.failure"
+          ]
+        },
+        {
+          "id": "b:a4d7d1c10f3d",
+          "file": "billing/subscription.go",
+          "line": 22,
+          "function": "SubscriptionWorkflow",
+          "decision": "ChargeMonthly (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.success"
+          ]
+        }
+      ],
       "file": "billing/subscription.go",
       "priority": "Medium"
     },
@@ -691,6 +891,124 @@
         "percent": 75,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 4,
+        "possible": 6,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 66.7,
+        "grade": "acceptable"
+      },
+      "outcomes": [
+        {
+          "id": "b:2f41bf32a3ac",
+          "file": "fulfillment/fulfillment.go",
+          "line": 24,
+          "function": "OrderFulfillmentWorkflow",
+          "decision": "ReserveInventory (activity)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.failure"
+          ]
+        },
+        {
+          "id": "b:104e1b9235a9",
+          "file": "fulfillment/fulfillment.go",
+          "line": 24,
+          "function": "OrderFulfillmentWorkflow",
+          "decision": "ReserveInventory (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.success"
+          ]
+        },
+        {
+          "id": "b:8621016d8f07",
+          "file": "fulfillment/fulfillment.go",
+          "line": 36,
+          "function": "OrderFulfillmentWorkflow",
+          "decision": "PaymentWorkflow (child workflow)",
+          "outcome": "failure",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.failure"
+          ]
+        },
+        {
+          "id": "b:c52b949cccea",
+          "file": "fulfillment/fulfillment.go",
+          "line": 36,
+          "function": "OrderFulfillmentWorkflow",
+          "decision": "PaymentWorkflow (child workflow)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.success"
+          ]
+        },
+        {
+          "id": "b:15374c1b5b31",
+          "file": "fulfillment/fulfillment.go",
+          "line": 41,
+          "function": "OrderFulfillmentWorkflow",
+          "decision": "ShipOrder (activity)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J3.failure"
+          ]
+        },
+        {
+          "id": "b:acaefb7f9b36",
+          "file": "fulfillment/fulfillment.go",
+          "line": 41,
+          "function": "OrderFulfillmentWorkflow",
+          "decision": "ShipOrder (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J3.success"
+          ]
+        }
+      ],
       "file": "fulfillment/fulfillment.go",
       "priority": "Medium"
     },
@@ -929,6 +1247,124 @@
         "percent": 75,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 4,
+        "possible": 6,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 66.7,
+        "grade": "acceptable"
+      },
+      "outcomes": [
+        {
+          "id": "b:136172d59b5e",
+          "file": "fulfillment/payment.go",
+          "line": 16,
+          "function": "PaymentWorkflow",
+          "decision": "AuthorizeCard (activity)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.failure"
+          ]
+        },
+        {
+          "id": "b:fc350dbaf626",
+          "file": "fulfillment/payment.go",
+          "line": 16,
+          "function": "PaymentWorkflow",
+          "decision": "AuthorizeCard (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.success"
+          ]
+        },
+        {
+          "id": "b:f0d3ae784825",
+          "file": "fulfillment/payment.go",
+          "line": 20,
+          "function": "PaymentWorkflow",
+          "decision": "if o.AmountCents > 100_000",
+          "outcome": "true",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.true"
+          ]
+        },
+        {
+          "id": "b:f6a458e25ab1",
+          "file": "fulfillment/payment.go",
+          "line": 20,
+          "function": "PaymentWorkflow",
+          "decision": "if o.AmountCents > 100_000",
+          "outcome": "false",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.false"
+          ]
+        },
+        {
+          "id": "b:43693b09d08e",
+          "file": "fulfillment/payment.go",
+          "line": 22,
+          "function": "PaymentWorkflow",
+          "decision": "FraudReview (activity)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J3.failure"
+          ]
+        },
+        {
+          "id": "b:e5f2109b24d7",
+          "file": "fulfillment/payment.go",
+          "line": 22,
+          "function": "PaymentWorkflow",
+          "decision": "FraudReview (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J3.success"
+          ]
+        }
+      ],
       "file": "fulfillment/payment.go",
       "priority": "Medium"
     },
@@ -1124,6 +1560,88 @@
         "percent": 100,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 4,
+        "possible": 4,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 100,
+        "grade": "exemplary"
+      },
+      "outcomes": [
+        {
+          "id": "b:8c9ef03309f3",
+          "file": "orders/orders.go",
+          "line": 28,
+          "function": "OrderWorkflow",
+          "decision": "if in.AmountCents <= 0",
+          "outcome": "true",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J1.true"
+          ]
+        },
+        {
+          "id": "b:f67e38f09ade",
+          "file": "orders/orders.go",
+          "line": 28,
+          "function": "OrderWorkflow",
+          "decision": "if in.AmountCents <= 0",
+          "outcome": "false",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J1.false"
+          ]
+        },
+        {
+          "id": "b:2ea769b9e239",
+          "file": "orders/orders.go",
+          "line": 42,
+          "function": "OrderWorkflow",
+          "decision": "ChargeCard (activity)",
+          "outcome": "failure",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.failure"
+          ]
+        },
+        {
+          "id": "b:9623beae1ff3",
+          "file": "orders/orders.go",
+          "line": 42,
+          "function": "OrderWorkflow",
+          "decision": "ChargeCard (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.success"
+          ]
+        }
+      ],
       "file": "orders/orders.go",
       "priority": "Low"
     },
@@ -1392,6 +1910,142 @@
         "percent": 83.3,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 6,
+        "possible": 7,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 85.7,
+        "grade": "commendable"
+      },
+      "outcomes": [
+        {
+          "id": "b:35797006247f",
+          "file": "polling/polling.go",
+          "line": 21,
+          "function": "ReportPollingWorkflow",
+          "decision": "for attempt <= in.MaxPolls",
+          "outcome": "iterate",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.iterate"
+          ]
+        },
+        {
+          "id": "b:438d9d47ca1c",
+          "file": "polling/polling.go",
+          "line": 21,
+          "function": "ReportPollingWorkflow",
+          "decision": "for attempt <= in.MaxPolls",
+          "outcome": "exit",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.exit"
+          ]
+        },
+        {
+          "id": "b:92f9fd653e2f",
+          "file": "polling/polling.go",
+          "line": 24,
+          "function": "ReportPollingWorkflow",
+          "decision": "CheckStatus (activity)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.failure"
+          ]
+        },
+        {
+          "id": "b:8cf8ff36feee",
+          "file": "polling/polling.go",
+          "line": 24,
+          "function": "ReportPollingWorkflow",
+          "decision": "CheckStatus (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J2.success"
+          ]
+        },
+        {
+          "id": "b:666234f0a792",
+          "file": "polling/polling.go",
+          "line": 28,
+          "function": "ReportPollingWorkflow",
+          "decision": "switch status",
+          "outcome": "case \"complete\"",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J3.case \"complete\""
+          ]
+        },
+        {
+          "id": "b:0f53a898aec9",
+          "file": "polling/polling.go",
+          "line": 28,
+          "function": "ReportPollingWorkflow",
+          "decision": "switch status",
+          "outcome": "case \"failed\"",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J3.case \"failed\""
+          ]
+        },
+        {
+          "id": "b:5e579c86dad0",
+          "file": "polling/polling.go",
+          "line": 28,
+          "function": "ReportPollingWorkflow",
+          "decision": "switch status",
+          "outcome": "default",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J3.default"
+          ]
+        }
+      ],
       "file": "polling/polling.go",
       "priority": "Medium"
     },
@@ -1670,6 +2324,124 @@
         "percent": 66.7,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 5,
+        "possible": 6,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 83.3,
+        "grade": "commendable"
+      },
+      "outcomes": [
+        {
+          "id": "b:0e2d5c674bec",
+          "file": "reports/dailyreport.go",
+          "line": 22,
+          "function": "DailyReportWorkflow",
+          "decision": "if workflow.HasLastCompletionResult(ctx)",
+          "outcome": "true",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 2,
+          "missedScenarios": 2,
+          "exits": [
+            "J1.true"
+          ]
+        },
+        {
+          "id": "b:e832c6968802",
+          "file": "reports/dailyreport.go",
+          "line": 22,
+          "function": "DailyReportWorkflow",
+          "decision": "if workflow.HasLastCompletionResult(ctx)",
+          "outcome": "false",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J1.false"
+          ]
+        },
+        {
+          "id": "b:754db97885c0",
+          "file": "reports/dailyreport.go",
+          "line": 33,
+          "function": "DailyReportWorkflow",
+          "decision": "BuildReport (activity)",
+          "outcome": "failure",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.failure"
+          ]
+        },
+        {
+          "id": "b:a88502deb027",
+          "file": "reports/dailyreport.go",
+          "line": 33,
+          "function": "DailyReportWorkflow",
+          "decision": "BuildReport (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 2,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.success"
+          ]
+        },
+        {
+          "id": "b:35fa2c454fe2",
+          "file": "reports/dailyreport.go",
+          "line": 37,
+          "function": "DailyReportWorkflow",
+          "decision": "EmailReport (activity)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 2,
+          "missedScenarios": 1,
+          "exits": [
+            "J3.failure"
+          ]
+        },
+        {
+          "id": "b:b2c5276f63d5",
+          "file": "reports/dailyreport.go",
+          "line": 37,
+          "function": "DailyReportWorkflow",
+          "decision": "EmailReport (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J3.success"
+          ]
+        }
+      ],
       "file": "reports/dailyreport.go",
       "priority": "Medium"
     },
@@ -2076,6 +2848,178 @@
         "percent": 38.5,
         "exact": true
       },
+      "branchCoverage": {
+        "covered": 6,
+        "possible": 9,
+        "impossible": 0,
+        "blockedByKnownBugs": 0,
+        "percent": 66.7,
+        "grade": "acceptable"
+      },
+      "outcomes": [
+        {
+          "id": "b:320c186b53d2",
+          "file": "shipment/shipment.go",
+          "line": 28,
+          "function": "ShipmentWorkflow",
+          "decision": "CreateLabel (activity)",
+          "outcome": "failure",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 0,
+          "missedScenarios": 0,
+          "exits": [
+            "J1.failure"
+          ]
+        },
+        {
+          "id": "b:f98330e41a47",
+          "file": "shipment/shipment.go",
+          "line": 28,
+          "function": "ShipmentWorkflow",
+          "decision": "CreateLabel (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 6,
+          "missedScenarios": 3,
+          "exits": [
+            "J1.success"
+          ]
+        },
+        {
+          "id": "b:e2f1660bc821",
+          "file": "shipment/shipment.go",
+          "line": 53,
+          "function": "ShipmentWorkflow",
+          "decision": "select (Selector)",
+          "outcome": "signal \"delivery-update\"",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 5,
+          "missedScenarios": 2,
+          "exits": [
+            "J2.signal \"delivery-update\""
+          ]
+        },
+        {
+          "id": "b:4c4e03ccd570",
+          "file": "shipment/shipment.go",
+          "line": 53,
+          "function": "ShipmentWorkflow",
+          "decision": "select (Selector)",
+          "outcome": "timeout",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J2.timeout"
+          ]
+        },
+        {
+          "id": "b:8b2e6bb30996",
+          "file": "shipment/shipment.go",
+          "line": 41,
+          "function": "ShipmentWorkflow",
+          "decision": "switch u.Status",
+          "outcome": "case \"delivered\"",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 1,
+          "missedScenarios": 1,
+          "exits": [
+            "J3.case \"delivered\""
+          ]
+        },
+        {
+          "id": "b:d565a7699bd4",
+          "file": "shipment/shipment.go",
+          "line": 41,
+          "function": "ShipmentWorkflow",
+          "decision": "switch u.Status",
+          "outcome": "case \"returned\"",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 2,
+          "missedScenarios": 2,
+          "exits": [
+            "J3.case \"returned\""
+          ]
+        },
+        {
+          "id": "b:13441dbc0db3",
+          "file": "shipment/shipment.go",
+          "line": 41,
+          "function": "ShipmentWorkflow",
+          "decision": "switch u.Status",
+          "outcome": "default",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 2,
+          "missedScenarios": 2,
+          "exits": [
+            "J3.default"
+          ]
+        },
+        {
+          "id": "b:677d7963f280",
+          "file": "shipment/shipment.go",
+          "line": 56,
+          "function": "ShipmentWorkflow",
+          "decision": "NotifyCustomer (activity)",
+          "outcome": "failure",
+          "status": "missed",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 0,
+          "missedPaths": 4,
+          "missedScenarios": 2,
+          "exits": [
+            "J4.failure"
+          ]
+        },
+        {
+          "id": "b:d4c7db7a7619",
+          "file": "shipment/shipment.go",
+          "line": 56,
+          "function": "ShipmentWorkflow",
+          "decision": "NotifyCustomer (activity)",
+          "outcome": "success",
+          "status": "covered",
+          "label": null,
+          "why": null,
+          "sites": 1,
+          "sitesTaken": 1,
+          "missedPaths": 2,
+          "missedScenarios": 1,
+          "exits": [
+            "J4.success"
+          ]
+        }
+      ],
       "file": "shipment/shipment.go",
       "priority": "High"
     }
@@ -2870,5 +3814,13 @@
         }
       ]
     }
-  ]
+  ],
+  "branchCoverage": {
+    "covered": 37,
+    "possible": 48,
+    "impossible": 0,
+    "blockedByKnownBugs": 0,
+    "percent": 77.1,
+    "grade": "commendable"
+  }
 }

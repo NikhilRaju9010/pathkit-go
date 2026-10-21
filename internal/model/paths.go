@@ -174,7 +174,11 @@ func (g *Graph) PathsPruned(max int, root func() any, clone func(any) any, step 
 // junction order, and the same for loops' retry edges. (An exit the map draws
 // but no path can take, because the road in already decided the decision, is
 // not one of them.)
-func (g *Graph) ReachableExits() []*Exit {
+func (g *Graph) ReachableExits() []*Exit { return g.ReachableFrom(g.Start) }
+
+// ReachableFrom is ReachableExits for the part of the map below a target: the
+// exits some path through that place takes after it.
+func (g *Graph) ReachableFrom(from Target) []*Exit {
 	seenT := map[countKey]bool{}
 	seenE := map[*Exit]bool{}
 	var walk func(t Target)
@@ -208,7 +212,7 @@ func (g *Graph) ReachableExits() []*Exit {
 			walk(e.To)
 		}
 	}
-	walk(g.Start)
+	walk(from)
 	var out []*Exit
 	for _, j := range g.Junctions {
 		for _, e := range j.Exits {

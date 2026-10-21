@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NikhilRaju9010/pathkit-go/internal/discover"
+	"github.com/NikhilRaju9010/pathkit-go/internal/load"
 	"github.com/NikhilRaju9010/pathkit-go/internal/model"
 )
 
@@ -124,5 +126,49 @@ func TestNoDuplicateIDs(t *testing.T) {
 	}
 	if seenWorkflows < 100 {
 		t.Fatalf("only %d workflows looked at", seenWorkflows)
+	}
+}
+
+// FingerprintSpans marks the steps of a loop's last round, nested loops inside
+// their parent, and gives the same steps as Fingerprint.
+func TestFingerprintSpansMarkLoopBodies(t *testing.T) {
+	res, err := load.Load("../../testdata/fixtures/loops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, wf := range discover.Find(res.Packages) {
+		g, err := model.Build(wf)
+		if err != nil {
+			continue
+		}
+		for _, p := range g.Paths(model.DefaultMaxPaths).List {
+			fp := g.Fingerprint(p)
+			steps, spans := g.FingerprintSpans(p)
+			if len(fp) > 0 && strings.HasPrefix(fp[len(fp)-1], "unknown ") {
+				continue
+			}
+			if strings.Join(steps, "|") != strings.Join(fp, "|") {
+				t.Errorf("%s %s: spans' steps differ from the fingerprint:\n%v\n%v", wf.Name, p.Key(), steps, fp)
+			}
+			rounds := 0
+			for _, s := range steps {
+				if strings.HasSuffix(s, ": 1+ rounds") {
+					rounds++
+				}
+			}
+			if rounds != len(spans) {
+				t.Errorf("%s %s: %d loops entered, %d spans", wf.Name, p.Key(), rounds, len(spans))
+			}
+			for _, sp := range spans {
+				if sp.From < 1 || sp.To < sp.From || sp.To > len(steps)-1 {
+					t.Errorf("%s %s: bad span %+v of %d steps", wf.Name, p.Key(), sp, len(steps))
+				}
+			}
+			checked++
+		}
+	}
+	if checked < 5 {
+		t.Errorf("only %d paths checked", checked)
 	}
 }

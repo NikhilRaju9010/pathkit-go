@@ -90,7 +90,12 @@ func (e *Engine) stageClass(r facts.StageResult, rep *facts.StageReport) Classif
 		c.Source, c.Detector = SourceAuto, "value-flow"
 		c.Explanation = fmt.Sprintf("A decision on this stage path cannot be taken in any of the %d different states the stage was examined in, but the stage can start in more states than classification.engine.max_contexts follows, so a state that allows it may exist.", r.Contexts)
 	default:
-		if r.Suspect != nil && e.detectorOn("possible-correlation") {
+		if r.Defect != nil && e.detectorOn("likely-defect") {
+			c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = NeedsReview, "likely-defect", Likely, true
+			c.Source, c.Detector = SourceAuto, "likely-defect"
+			c.Explanation = r.Defect.Explanation
+			c.Proof = convertProof(r.Defect.Proof)
+		} else if r.Suspect != nil && e.detectorOn("possible-correlation") {
 			c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = NeedsReview, "possible-correlation", Likely, true
 			c.Source, c.Detector = SourceAuto, "possible-correlation"
 			c.Explanation = r.Suspect.Explanation

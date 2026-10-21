@@ -37,6 +37,9 @@ type File struct {
 	// rule entry ("if more #2 --false") pointed when the file was written,
 	// so a later run can warn when "#2" may point at another decision.
 	RuleAnchors []RuleAnchor `json:"ruleAnchors,omitempty"`
+	// Branches is the project's branch coverage when the file was written (older
+	// files have none; then it is not compared and brings no floor).
+	Branches *Branch `json:"branchCoverage,omitempty"`
 }
 
 // RuleAnchor is one numbered rule entry and the decisions the map said
@@ -103,6 +106,15 @@ type Workflow struct {
 	// Main is the workflow's main number when the file was written (older
 	// files have none; then it is not compared).
 	Main *Main `json:"mainNumber,omitempty"`
+	// Branch is the workflow's branch coverage when the file was written.
+	Branch *Branch `json:"branchCoverage,omitempty"`
+}
+
+// Branch is branch coverage: the outcomes tested out of those that can happen.
+type Branch struct {
+	Covered  int     `json:"covered"`
+	Possible int     `json:"possible"`
+	Percent  float64 `json:"percent"`
 }
 
 // Main is a workflow's main number: its kind ("path", "scenario", "branch" or
@@ -130,6 +142,9 @@ func From(res coverage.Result) File {
 		if w.Main.Measured {
 			bw.Main = &Main{Kind: w.Main.Kind, Covered: w.Main.Covered, Total: w.Main.Total, Percent: w.Main.Percent}
 		}
+		if w.BranchCov.Possible > 0 {
+			bw.Branch = &Branch{Covered: w.BranchCov.Covered, Possible: w.BranchCov.Possible, Percent: w.BranchCov.Percent()}
+		}
 		for _, p := range w.Paths {
 			bw.Paths = append(bw.Paths, Path{StableID: p.StableID, Bucket: p.Class.Bucket, Covered: p.Covered})
 		}
@@ -137,6 +152,9 @@ func From(res coverage.Result) File {
 		f.Workflows = append(f.Workflows, bw)
 	}
 	sort.Slice(f.Workflows, func(i, j int) bool { return f.Workflows[i].Name < f.Workflows[j].Name })
+	if res.BranchCov.Possible > 0 {
+		f.Branches = &Branch{Covered: res.BranchCov.Covered, Possible: res.BranchCov.Possible, Percent: res.BranchCov.Percent()}
+	}
 	return f
 }
 
@@ -276,4 +294,37 @@ func CheckMain(b File, res coverage.Result, tolerance float64) (drops []MainDrop
 		}
 	}
 	return drops, changed
+}
+
+// BranchDrop is the project or a workflow whose branch coverage is lower than the
+// baseline's by more than the tolerance.
+type BranchDrop struct {
+	Workflow string // "" for the whole project
+	Was, Now Branch
+}
+
+// CheckBranches compares branch coverage with the baseline's: the project, then
+// each workflow that has branch coverage in both. tolerance is in percent
+// points. A baseline with no branch data is not compared.
+func CheckBranches(b File, res coverage.Result, tolerance float64) []BranchDrop {
+	var drops []BranchDrop
+	if b.Branches != nil && res.BranchCov.Possible > 0 && res.BranchCov.Percent() < b.Branches.Percent-tolerance {
+		drops = append(drops, BranchDrop{Was: *b.Branches, Now: Branch{Covered: res.BranchCov.Covered, Possible: res.BranchCov.Possible, Percent: res.BranchCov.Percent()}})
+	}
+	was := map[string]Branch{}
+	for _, w := range b.Workflows {
+		if w.Branch != nil {
+			was[w.Name] = *w.Branch
+		}
+	}
+	for _, w := range res.Workflows {
+		old, ok := was[w.Name]
+		if !ok || w.BranchCov.Possible == 0 {
+			continue
+		}
+		if w.BranchCov.Percent() < old.Percent-tolerance {
+			drops = append(drops, BranchDrop{Workflow: w.Name, Was: old, Now: Branch{Covered: w.BranchCov.Covered, Possible: w.BranchCov.Possible, Percent: w.BranchCov.Percent()}})
+		}
+	}
+	return drops
 }

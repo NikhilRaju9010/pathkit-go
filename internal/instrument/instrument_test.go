@@ -81,6 +81,7 @@ func TestInstrumentedCopiesCompile(t *testing.T) {
 		{fixtures, fixtures + "/helperrun"},
 		{fixtures, fixtures + "/loopfirstnamed"},
 		{fixtures, fixtures + "/namedboolloop"},
+		{fixtures, fixtures + "/conditions"},
 		{pilot, pilot + "/..."},
 	}
 	for _, c := range cases {

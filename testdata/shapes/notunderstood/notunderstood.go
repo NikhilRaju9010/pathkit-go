@@ -53,4 +53,9 @@ func ActivityResult(ctx workflow.Context) error {
 	return nil
 }
 
-func activityLike(ctx workflow.Context) (string, error) { return "", nil }
+// activityLike stands for a call whose result PathKit cannot know (an activity).
+// It goes through a function value on purpose: a plain function with a visible
+// body is read and summarized, and this one must stay unknown.
+var activityLikeFn = func(ctx workflow.Context) (string, error) { return "", nil }
+
+func activityLike(ctx workflow.Context) (string, error) { return activityLikeFn(ctx) }

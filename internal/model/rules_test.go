@@ -270,7 +270,7 @@ func TestUnsupported(t *testing.T) {
 		{"SelectorPassedToHelper", "workflow.Selector", "is not supported: the selector sel is also used here (passed on, stored or captured); PathKit can't see what is added to it there"},
 		{"SelectorAddAfterSelect", "workflow.Selector", "is not supported: AddDefault comes after the Select call"},
 		{"SelectorNoAdds", "workflow.Selector", "is not supported: the selector sel has no Add… calls"},
-		{"SelectorNotInVariable", "workflow.Selector", "is not supported: the selector must be kept in a variable created with workflow.NewSelector in this function"},
+		// (a selector built and used in one chained expression is supported since M11: see TestChainedSelector)
 	}
 	for _, tt := range tests {
 		_, err := buildRule(t, tt.workflow)
@@ -307,5 +307,41 @@ func TestPathCap(t *testing.T) {
 	full := g.Paths(10000)
 	if len(full.List) != 4096 || full.Truncated {
 		t.Errorf("uncapped: got %d paths, truncated=%v; want 4096, false", len(full.List), full.Truncated)
+	}
+}
+
+// A selector built and used in one chained expression is mapped like one kept in
+// a variable: one decision with an exit for every Add… call, in source order.
+// Near miss: a chain that does not start at NewSelector, or has a callback that
+// is not written inline, is still refused.
+func TestChainedSelector(t *testing.T) {
+	g, err := buildRule(t, "SelectorChained")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Junctions) != 1 || g.Junctions[0].Kind != model.Selector {
+		t.Fatalf("want one selector decision, got %d junctions", len(g.Junctions))
+	}
+	var labels []string
+	for _, e := range g.Junctions[0].Exits {
+		labels = append(labels, e.Label)
+	}
+	if got := strings.Join(labels, " | "); got != `signal "go" | timeout` {
+		t.Errorf("exits = %q", got)
+	}
+	if n := len(g.Paths(model.DefaultMaxPaths).List); n != 2 {
+		t.Errorf("%d paths, want 2", n)
+	}
+	// the older single-add chain from the unsupported list now maps too
+	g2, err := buildRule(t, "SelectorChainedOne")
+	if err != nil || len(g2.Junctions) != 1 {
+		t.Errorf("SelectorChainedOne: %v", err)
+	}
+	// a selector that comes from a helper call is still refused (the frozen
+	// map keeps SelectorNotInVariable refused at selectors_unsupported.go:99)
+	for _, name := range []string{"SelectorChainedNotInline", "SelectorNotInVariable"} {
+		if _, err := buildRule(t, name); err == nil {
+			t.Errorf("%s should still be refused", name)
+		}
 	}
 }

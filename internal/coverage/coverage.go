@@ -85,6 +85,9 @@ type Input struct {
 	// Display shortens a file name for the report (the caller's
 	// load.DisplayPath); nil leaves names as they are.
 	Display func(string) string
+	// BranchSettings are the grade bands and target grade of branch coverage;
+	// the zero value means the defaults.
+	BranchSettings scope.Branches
 }
 
 // Unexplained is a group of trace files of one workflow that fit no path
@@ -132,6 +135,8 @@ type PathResult struct {
 
 // WorkflowResult is one workflow's coverage.
 type WorkflowResult struct {
+	// Package is the import path of the workflow's package ("" when unknown).
+	Package       string
 	Name          string
 	File          string
 	AddedByConfig bool
@@ -192,6 +197,13 @@ type WorkflowResult struct {
 	// is its handler coverage.
 	Main     MainNumber
 	Handlers HandlerStats
+	// Outcomes are the workflow's decision outcomes and what the tests did with
+	// each; BranchCov counts them (see outcomes).
+	Outcomes []OutcomeResult
+	// HelperRegions are the helpers whose decisions the paths repeat, biggest first.
+	HelperRegions []HelperRegion
+	BranchCov     BranchSummary
+	Conditions    ConditionSummary
 }
 
 // PrunedResult is a part of the map left out of the path list.
@@ -271,7 +283,14 @@ type Result struct {
 	Covered       int
 	Branches      int
 	BranchesTaken int
-	Warnings      []Warning
+	// BranchSettings are the grade bands and the target grade.
+	BranchSettings scope.Branches
+	// DecisionCheck is the last decision check, or nil (set by the caller).
+	DecisionCheck *DecisionCheck
+	// BranchCov counts the decision outcomes of all workflows (see outcomes).
+	BranchCov  BranchSummary
+	Conditions ConditionSummary
+	Warnings   []Warning
 	// Unread are the places PathKit did not (fully) read, in workflow order
 	// (the "could not fully read" panel; see UnreadEntry).
 	Unread []UnreadEntry
@@ -444,21 +463,26 @@ func Compute(in Input) Result {
 		unexp    map[string]*Unexplained
 		unexpIDs []string
 
-		listing  *classify.Listing
-		plan     *classify.StagePlan
-		capped   bool                                // the workflow has more paths than the list holds
-		allExits map[string]*model.Exit              // every exit some path takes
-		seen     map[string]bool                     // every exit ID some counted trace recorded
-		hits     []map[string]int                    // per stage: traces per stage path key
-		unpruned map[int]bool                        // pruned groups some trace ran through
-		unitHit  map[string]bool                     // exit IDs of summarized helpers some counted trace took
-		counted  int                                 // traces counted for this workflow
-		oldRec   int                                 // of those, recorded by a recorder before handlers were recorded
-		rounds   map[*model.Junction]map[string]bool // loop -> round buckets some counted trace ran
-		beyond   int                                 // traces that fit the map but not the list
-		ran      map[string]bool                     // every prefix of every path a counted trace ran (a path beyond the list too)
-		scenRan  map[string]int                      // scenario ID -> counted traces that ran it
-		pairsRan map[string]bool                     // decision pairs some counted trace ran
+		listing     *classify.Listing
+		plan        *classify.StagePlan
+		capped      bool                                // the workflow has more paths than the list holds
+		allExits    map[string]*model.Exit              // every exit some path takes
+		seen        map[string]bool                     // every exit ID some counted trace recorded
+		hits        []map[string]int                    // per stage: traces per stage path key
+		unpruned    map[int]bool                        // pruned groups some trace ran through
+		unitHit     map[string]bool                     // exit IDs of summarized helpers some counted trace took
+		counted     int                                 // traces counted for this workflow
+		oldRec      int                                 // of those, recorded by a recorder before handlers were recorded
+		rounds      map[*model.Junction]map[string]bool // loop -> round buckets some counted trace ran
+		beyond      int                                 // traces that fit the map but not the list
+		ran         map[string]bool                     // every prefix of every path a counted trace ran (a path beyond the list too)
+		scenRan     map[string]int                      // scenario ID -> counted traces that ran it
+		pairsRan    map[string]bool                     // decision pairs some counted trace ran
+		condSeen    map[string]bool                     // "c:id:t" / "c:id:f" some counted trace recorded
+		exitTests   map[string]map[string]bool          // exit ID -> names of the Go tests whose counted traces took it
+		exitUnnamed map[string]bool                     // exit IDs some counted trace took without saying which test
+		touched     map[string]bool                     // exits some trace that did not count (unfinished, or fitting no path) recorded: a test ran them
+		condRec     bool                                // some counted trace was written by a recorder that records condition parts
 	}
 	states := map[string]*state{}
 	var order []*state
@@ -472,7 +496,7 @@ func Compute(in Input) Result {
 			plan = in.Plan(w.Name, w.Graph)
 		}
 		st := &state{wf: w, paths: lst.PathList, listing: lst, plan: plan, byKey: map[string]int{}, branches: map[string]bool{}, unexp: map[string]*Unexplained{},
-			seen: map[string]bool{}, unitHit: map[string]bool{}, rounds: map[*model.Junction]map[string]bool{}, ran: map[string]bool{}, scenRan: map[string]int{}, pairsRan: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
+			seen: map[string]bool{}, unitHit: map[string]bool{}, rounds: map[*model.Junction]map[string]bool{}, ran: map[string]bool{}, scenRan: map[string]int{}, pairsRan: map[string]bool{}, condSeen: map[string]bool{}, touched: map[string]bool{}, exitTests: map[string]map[string]bool{}, exitUnnamed: map[string]bool{}, unpruned: map[int]bool{}, hits: make([]map[string]int, len(plan.Stages))}
 		for k := range st.hits {
 			st.hits[k] = map[string]int{}
 		}
@@ -517,6 +541,10 @@ func Compute(in Input) Result {
 	var res Result
 	res.Excluded = in.Excluded
 	res.Targets = in.MainNumbers.Targets
+	res.BranchSettings = in.BranchSettings
+	if res.BranchSettings.Grades == (scope.Grades{}) || res.BranchSettings.TargetGrade == "" {
+		res.BranchSettings = scope.DefaultBranches()
+	}
 	res.Breakdown.Policy = policy
 	warn := func(tf TraceFile, kind trace.Kind, format string, args ...any) {
 		res.Warnings = append(res.Warnings, Warning{File: filepath.Base(tf.Path), Workflow: tf.File.Workflow, Kind: kind, Message: fmt.Sprintf(format, args...)})
@@ -581,10 +609,16 @@ func Compute(in Input) Result {
 		}
 		switch out.Kind {
 		case trace.Incomplete:
+			for _, id := range f.Steps {
+				st.touched[id] = true
+			}
 			res.Counts.Incomplete++
 			warn(tf, trace.Incomplete, "trace %s (%s): the run never finished (panic, timeout, or stopped); fix the test that stops it, then run \"pathkit test\" again", name, f.Workflow)
 			continue
 		case trace.Unmatched:
+			for _, id := range f.Steps {
+				st.touched[id] = true
+			}
 			res.Counts.Unmatched++
 			how := ""
 			if stale {
@@ -605,6 +639,22 @@ func Compute(in Input) Result {
 			res.Counts.Unknown++
 			warn(tf, out.Kind, "trace %s (%s): %s", name, f.Workflow, out.Reason)
 			continue
+		}
+		if f.Recorder >= 4 {
+			st.condRec = true
+			for _, c := range f.Conditions {
+				st.condSeen[c] = true
+			}
+		}
+		for _, id := range out.Steps {
+			if f.TestName == "" {
+				st.exitUnnamed[id] = true
+				continue
+			}
+			if st.exitTests[id] == nil {
+				st.exitTests[id] = map[string]bool{}
+			}
+			st.exitTests[id][f.TestName] = true
 		}
 		for _, h := range st.wf.Graph.UnitHits(out.Steps) {
 			st.unitHit[h] = true
@@ -700,7 +750,7 @@ func Compute(in Input) Result {
 			}
 			why = fmt.Sprintf("this workflow has %s that fit%s no path (%s)", plural(n, "trace"), map[bool]string{true: "s", false: ""}[n == 1], strings.Join(ids, ", "))
 		}
-		wr := WorkflowResult{Name: st.wf.Name, File: st.wf.File, AddedByConfig: st.wf.AddedByConfig, Truncated: st.paths.Truncated, Branches: len(st.branches)}
+		wr := WorkflowResult{Package: st.wf.Package, Name: st.wf.Name, File: st.wf.File, AddedByConfig: st.wf.AddedByConfig, Truncated: st.paths.Truncated, Branches: len(st.branches)}
 		wr.Breakdown.Policy = policy
 		wr.Exact, wr.Capped, wr.BeyondCap = st.listing.Exact, st.capped, st.beyond
 		wr.TracesCounted, wr.OldRecorderTraces = st.counted, st.oldRec
@@ -815,6 +865,11 @@ func Compute(in Input) Result {
 			}
 			wr.Pruned = append(wr.Pruned, pr)
 		}
+		wr.HelperRegions = helperRegions(st.wf.Graph, wr.Units, in.Display)
+		wr.Conditions = conditionResults(st.wf.Graph, st.condSeen, st.condRec, in.Display)
+		res.Conditions = res.Conditions.add(wr.Conditions)
+		wr.Outcomes, wr.BranchCov = outcomes(st.wf.Graph, &wr, st.listing.Pruned, st.capped, st.seen, st.unitHit, st.touched, st.exitTests, st.exitUnnamed, in.Display)
+		res.BranchCov = res.BranchCov.Add(wr.BranchCov)
 		res.Workflows = append(res.Workflows, wr)
 		res.Breakdown.merge(wr.Breakdown)
 		res.Paths += len(wr.Paths)

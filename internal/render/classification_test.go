@@ -41,3 +41,19 @@ Coverage basis used:   testable (for --fail-under)`
 		t.Errorf("with threshold: %q", got)
 	}
 }
+
+// Helper regions are offered as candidates next to the biggest section, only
+// for a workflow whose main number is not path coverage, and only when the
+// helper holds decisions that are repeated.
+func TestSplitCandidatesOfferHelpers(t *testing.T) {
+	w := coverage.WorkflowResult{Name: "p.W", Main: coverage.MainNumber{Kind: coverage.MainBranch},
+		HelperRegions: []coverage.HelperRegion{{Name: "charge", File: "p/h.go", Line: 7, Decisions: 3, Sites: 4}, {Name: "tiny", File: "p/h.go", Line: 40, Decisions: 1, Sites: 1}}}
+	got := SplitCandidates(w, nil)
+	if len(got) != 1 || !strings.Contains(got[0], "charge (p/h.go:7) holds 3 decisions and is called from 4 places") {
+		t.Errorf("candidates: %v", got)
+	}
+	w.Main.Kind = coverage.MainPath
+	if got := SplitCandidates(w, nil); len(got) != 0 {
+		t.Errorf("a workflow measured by path coverage needs no split advice: %v", got)
+	}
+}

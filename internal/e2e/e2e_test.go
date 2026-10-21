@@ -45,9 +45,29 @@ func abs(t *testing.T, rel string) string {
 // pathkit runs the CLI in-process and returns its output and exit code.
 func pathkit(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
+	return pathkitDefault(t, technicalText(args)...)
+}
+
+// pathkitDefault runs a command with exactly the arguments given; pathkit adds
+// --technical to the text of report and coverage, so the older expectations
+// keep proving that text did not change.
+func pathkitDefault(t *testing.T, args ...string) (string, string, int) {
+	t.Helper()
 	var out, errOut bytes.Buffer
 	code := cli.Run(args, &out, &errOut)
 	return out.String(), errOut.String(), code
+}
+
+func technicalText(args []string) []string {
+	if len(args) == 0 || (args[0] != "report" && args[0] != "coverage") {
+		return args
+	}
+	for _, a := range args {
+		if a == "--technical" {
+			return args
+		}
+	}
+	return append(append([]string{}, args...), "--technical")
 }
 
 // hashTree fingerprints every file under dir, to prove nothing changed.
@@ -716,9 +736,9 @@ func TestCoverageMatchesKey(t *testing.T) {
 		// 8 fields as before, plus the 3 added with path classification
 		// (classification, coverageBasis, classificationShown), unread, and the
 		// handler, call outcome and loop round tables, mainHeadline (M9), and tests and
-		// testsToWriteFirst (M10).
-		if len(c) != 18 || len(c["workflows"].([]any)) != len(wantPriority) {
-			t.Errorf("compared %d top-level fields and %d workflows; want 18 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
+		// testsToWriteFirst (M10), and branchCoverage (M11).
+		if len(c) != 19 || len(c["workflows"].([]any)) != len(wantPriority) {
+			t.Errorf("compared %d top-level fields and %d workflows; want 19 and %d", len(c), len(c["workflows"].([]any)), len(wantPriority))
 		}
 		if !maps.Equal(gotPriority, wantPriority) {
 			t.Errorf("priorities %v, want %v", gotPriority, wantPriority)
@@ -1112,13 +1132,15 @@ func stripClassification(v any) {
 			delete(x, k)
 		}
 		if _, ok := x["pathList"]; ok {
-			for _, k := range []string{"scenarioId", "sameBehaviourAs", "mainNumber", "scenarios", "handlerCoverage", "decisionPairs"} { // scenarios and main numbers (M9)
+			for _, k := range []string{"scenarioId", "sameBehaviourAs", "mainNumber", "scenarios", "handlerCoverage", "decisionPairs", "branchCoverage", "outcomes", "conditionCoverage", "conditions"} { // scenarios and main numbers (M9), branch-first coverage (M11)
 				delete(x, k)
 			}
 			delete(x, "classification")
 		}
 		if _, ok := x["workflows"]; ok {
 			delete(x, "classification")
+			delete(x, "branchCoverage") // M11
+			delete(x, "conditionCoverage")
 			delete(x, "coverageBasis")
 			delete(x, "classificationShown")
 			delete(x, "tests")                                                     // what each Go test covered (M10.7)

@@ -96,6 +96,9 @@ func SelectorNoAdds(ctx workflow.Context) (string, error) {
 }
 
 func SelectorNotInVariable(ctx workflow.Context) (string, error) {
-	workflow.NewSelector(ctx).AddFuture(workflow.NewTimer(ctx, time.Hour), func(f workflow.Future) {}).Select(ctx)
+	selectorFromHelper(ctx).Select(ctx)
 	return "ok", nil
 }
+
+// (a selector made by a helper is not followed)
+func selectorFromHelper(ctx workflow.Context) workflow.Selector { return workflow.NewSelector(ctx) }

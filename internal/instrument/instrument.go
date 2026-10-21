@@ -317,6 +317,61 @@ func workflowEdits(t Target) (map[string][]Edit, error) {
 // junctionEdits records the exits of one decision, in the workflow function
 // or in a helper (sc).
 func junctionEdits(sc scope, g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.LabeledStmt, fset *token.FileSet) ([]Edit, error) {
+	edits, err := decisionEdits(sc, g, j, labels, fset)
+	if err != nil {
+		return nil, err
+	}
+	off := func(n ast.Node) int { return fset.Position(n.Pos()).Offset }
+	end := func(n ast.Node) int { return fset.Position(n.End()).Offset }
+	edits = append(edits, conditionEdits(sc, g, j, off, end)...)
+	return append(edits, flipEdits(g, j, off, end)...), nil
+}
+
+// flipEdits lets the decision check force a decision (PATHKIT_FLIP=<branch id>):
+// the condition goes through pathkitFlip, which gives it back untouched unless
+// the variable names one of the decision's outcomes. Without the variable it
+// costs one comparison of a string with "". A decision that cannot be forced
+// (g.FlipOf says why) is left alone.
+func flipEdits(g *model.Graph, j *model.Junction, off, end func(ast.Node) int) []Edit {
+	f, _ := g.FlipOf(j)
+	if f == nil {
+		return nil
+	}
+	switch f.Kind {
+	case model.FlipIf:
+		open, shut := fmt.Sprintf("pathkitFlip(%q, %q, ", f.IDTrue, f.IDFalse), ")"
+		if !plainBool(g.TypesInfo(), f.Cond) {
+			open, shut = open+"bool(", "))"
+		}
+		return []Edit{{Offset: off(f.Cond), Order: 0, Text: open}, {Offset: end(f.Cond), Order: 2, Text: shut}}
+	case model.FlipError:
+		text := fmt.Sprintf("pathkitFlipErr(&%s, %q, %q)", f.Err.Name, f.IDFail, f.IDOK)
+		if !f.NotNil {
+			text = "!" + text
+		}
+		return []Edit{{Offset: off(f.Cond), Delete: end(f.Cond) - off(f.Cond), Text: text}}
+	}
+	return nil
+}
+
+// conditionEdits wraps each part of an && / || condition so the recorder notes
+// whether it was true or false when it was evaluated (the parts after the one
+// that settles the answer are never evaluated, so never noted). The wrap
+// evaluates the part once, in its place, and gives back its value. A condition
+// that a loop wraps as a whole is wrapped inside that: the loop's own edits
+// have the lower Order at the start and the higher one at the end.
+func conditionEdits(sc scope, g *model.Graph, j *model.Junction, off, end func(ast.Node) int) []Edit {
+	var edits []Edit
+	for _, c := range g.ConditionsOf(j) {
+		edits = append(edits,
+			Edit{Offset: off(c.Expr), Order: 1, Text: fmt.Sprintf("pathkitCond(%s, %q, ", sc.recv, c.ID)},
+			Edit{Offset: end(c.Expr), Order: 1, Text: ")"})
+	}
+	return edits
+}
+
+// decisionEdits records the exits of one decision (see junctionEdits).
+func decisionEdits(sc scope, g *model.Graph, j *model.Junction, labels map[ast.Stmt]*ast.LabeledStmt, fset *token.FileSet) ([]Edit, error) {
 	off := func(n ast.Node) int { return fset.Position(n.Pos()).Offset }
 	end := func(n ast.Node) int { return fset.Position(n.End()).Offset }
 	if j.Kind == model.Loop {
@@ -700,9 +755,11 @@ import (
 	pathkitos "os"
 	pathkitfilepath "path/filepath"
 	pathkitruntime "runtime"
+	pathkitsort "sort"
 	pathkitstrings "strings"
 	pathkittime "time"
 
+	pathkittemporal "go.temporal.io/sdk/temporal"
 	pathkitworkflow "go.temporal.io/sdk/workflow"
 )
 
@@ -722,6 +779,7 @@ type pathkitTrace struct {
 	Recorder      int      ` + "`json:\"recorder,omitempty\"`" + `
 	RecordedAt    string   ` + "`json:\"recordedAt\"`" + `
 	TestName      string   ` + "`json:\"testName,omitempty\"`" + `
+	Conditions    []string ` + "`json:\"conditions,omitempty\"`" + `
 }
 
 // pathkitRecorder belongs to one call of one workflow function.
@@ -731,6 +789,7 @@ type pathkitRecorder struct {
 	done        bool
 	fellThrough bool                    // a switch case just ended with fallthrough
 	loops       map[string]*pathkitLoop // by junction ID, e.g. "J1"
+	conds       map[string]uint8        // condition part ID -> 1 seen true, 2 seen false
 }
 
 // pathkitLoop is one loop's state in this run (the loop rule, docs/DESIGN.md D3).
@@ -748,7 +807,7 @@ var pathkitTables = map[string]map[string]string{
 {{end}}}
 
 func pathkitStart(ctx pathkitworkflow.Context, workflow, hash, pkg string) *pathkitRecorder {
-	r := &pathkitRecorder{table: pathkitTables[workflow], trace: pathkitTrace{SchemaVersion: 2, Recorder: 3, Tool: "pathkit-go", Workflow: workflow, Package: pkg, FunctionHash: hash, Steps: []string{}}}
+	r := &pathkitRecorder{table: pathkitTables[workflow], trace: pathkitTrace{SchemaVersion: 2, Recorder: 4, Tool: "pathkit-go", Workflow: workflow, Package: pkg, FunctionHash: hash, Steps: []string{}}}
 	if info := pathkitworkflow.GetInfo(ctx); info != nil {
 		r.trace.WorkflowID, r.trace.RunID = info.WorkflowExecution.ID, info.WorkflowExecution.RunID
 	}
@@ -757,6 +816,68 @@ func pathkitStart(ctx pathkitworkflow.Context, workflow, hash, pkg string) *path
 
 // hit records one junction exit, at the moment the decision is made.
 func (r *pathkitRecorder) hit(id string) { r.trace.Steps = append(r.trace.Steps, id) }
+
+// cond records that one part of a condition was evaluated, and what it was.
+func (r *pathkitRecorder) cond(id string, v bool) {
+	if r == nil {
+		return
+	}
+	if r.conds == nil {
+		r.conds = map[string]uint8{}
+	}
+	if v {
+		r.conds[id] |= 1
+	} else {
+		r.conds[id] |= 2
+	}
+}
+
+// pathkitConder is the recorder or a helper's frame, whichever the condition is in.
+type pathkitConder interface{ cond(id string, v bool) }
+
+// pathkitCond wraps one part of an && / || condition: it notes the value and
+// gives it back unchanged (the part is evaluated once, in its place).
+func pathkitCond[T ~bool](c pathkitConder, id string, v T) bool {
+	b := bool(v)
+	c.cond(id, b)
+	return b
+}
+
+// pathkitFlipID is the outcome the decision check forces (PATHKIT_FLIP=<branch id>);
+// empty in every ordinary run.
+var pathkitFlipID = pathkitos.Getenv("PATHKIT_FLIP")
+
+// pathkitFlip gives a condition back, unless the decision check names one of the
+// outcomes of its decision: then that outcome is taken.
+func pathkitFlip(idTrue, idFalse string, v bool) bool {
+	if pathkitFlipID == "" {
+		return v
+	}
+	switch pathkitFlipID {
+	case idTrue:
+		return true
+	case idFalse:
+		return false
+	}
+	return v
+}
+
+// pathkitFlipErr is (*e != nil) for an error check, after forcing: the failure
+// outcome makes a nil error a failure the code can handle, the success outcome
+// makes it nil.
+func pathkitFlipErr(e *error, idFail, idOK string) bool {
+	if pathkitFlipID != "" {
+		switch pathkitFlipID {
+		case idFail:
+			if *e == nil {
+				*e = pathkittemporal.NewNonRetryableApplicationError("pathkit decision check: forced failure", "PathKitForcedFailure", nil)
+			}
+		case idOK:
+			*e = nil
+		}
+	}
+	return *e != nil
+}
 
 // errExit records the decision of a "return <call>": the call's error is the
 // failure exit when it is not nil, the success exit when it is. It hands the
@@ -920,6 +1041,12 @@ func (f *pathkitFrame) hitUnlessFell(local string) {
 	}
 }
 
+func (f *pathkitFrame) cond(id string, v bool) {
+	if f != nil {
+		f.r.cond(id, v)
+	}
+}
+
 func (f *pathkitFrame) fell() {
 	if f != nil {
 		f.r.fell()
@@ -1021,12 +1148,24 @@ func pathkitTestName() string {
 // panic or runtime.Goexit; those runs never called returned() and are
 // saved as incomplete. There is no recover(): panics are left untouched.
 func (r *pathkitRecorder) flush() {
+	if pathkitos.Getenv("PATHKIT_TRACES") == "off" {
+		return // the decision check runs tests that must not leave traces
+	}
 	r.trace.Status = "incomplete"
 	if r.done {
 		r.trace.Status = "complete"
 	}
 	r.trace.RecordedAt = pathkittime.Now().UTC().Format(pathkittime.RFC3339)
 	r.trace.TestName = pathkitTestName()
+	for id, bits := range r.conds {
+		if bits&1 != 0 {
+			r.trace.Conditions = append(r.trace.Conditions, id+":t")
+		}
+		if bits&2 != 0 {
+			r.trace.Conditions = append(r.trace.Conditions, id+":f")
+		}
+	}
+	pathkitsort.Strings(r.trace.Conditions)
 	data, err := pathkitjson.MarshalIndent(r.trace, "", "  ")
 	if err != nil {
 		return

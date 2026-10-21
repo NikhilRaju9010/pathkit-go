@@ -24,7 +24,7 @@ func stripAdditive(v any) {
 			delete(x, k)
 		}
 		if _, ok := x["pathList"]; ok {
-			for _, k := range []string{"scenarioId", "sameBehaviourAs", "mainNumber", "scenarios", "handlerCoverage", "decisionPairs"} { // scenarios and main numbers (M9)
+			for _, k := range []string{"scenarioId", "sameBehaviourAs", "mainNumber", "scenarios", "handlerCoverage", "decisionPairs", "branchCoverage", "outcomes", "conditionCoverage", "conditions"} { // scenarios and main numbers (M9), branch-first coverage (M11)
 				delete(x, k)
 			}
 			delete(x, "classification") // the per-workflow count
@@ -33,8 +33,10 @@ func stripAdditive(v any) {
 			delete(x, "classification") // the top-level count
 			delete(x, "coverageBasis")
 			delete(x, "classificationShown")
-			delete(x, "tests")                                                     // what each Go test covered (M10.7)
-			delete(x, "testsToWriteFirst")                                         // the advice (M10.1)
+			delete(x, "tests")             // what each Go test covered (M10.7)
+			delete(x, "testsToWriteFirst") // the advice (M10.1)
+			delete(x, "branchCoverage")    // branch-first coverage (M11)
+			delete(x, "conditionCoverage")
 			delete(x, "mainHeadline")                                              // workflows meeting their target (M9.7)
 			delete(x, "unread")                                                    // the "could not fully read" panel (M7.8)
 			for _, k := range []string{"callOutcomes", "handlers", "loopRounds"} { // the outcome, handler and loop tables (M8)

@@ -119,6 +119,26 @@ func touch(p *string, in string) {
 	return b.String()
 }
 
+// retrySource is the one rule for a program that fails in the generated driver:
+// only Temporal's deadlock alarm ("Potential deadlock detected", error code
+// TMPRL1101: a workflow goroutine did not yield for too long, which a stalled
+// machine can cause) earns one more attempt from scratch, and the attempt is
+// recorded; any other error, or a second alarm, is a failure. It is plain Go so
+// a test can compile and run exactly this text.
+const retrySource = `
+// runWithRetry runs attempt, and once more when it ended with the deadlock alarm
+// (note records that); it returns what went wrong in the last attempt, "" if
+// nothing did.
+func runWithRetry(attempt func() string, note func()) string {
+	msg := attempt()
+	if msg != "" && strings.Contains(msg, "Potential deadlock detected") {
+		note()
+		msg = attempt()
+	}
+	return msg
+}
+`
+
 // DriverTest returns a _test.go file that runs every program once for each
 // of its inputs in the Temporal test environment.
 func DriverTest(programs []Program) string {
@@ -136,6 +156,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/converter"
 	"go.temporal.io/sdk/testsuite"
+	"go.temporal.io/sdk/worker"
 )
 
 // traceFiles lists the trace files in dir (PK_TRACES), to find the one a run
@@ -151,11 +172,17 @@ func traceFiles(dir string) map[string]bool {
 	return out
 }
 
+` + retrySource + `
 func TestRunAll(t *testing.T) {
 	var suite testsuite.WorkflowTestSuite
 	dir := os.Getenv("PK_TRACES")
-	run := func(name string, fn interface{}, args ...interface{}) {
+	// attempt runs one program once, from scratch, and says what went wrong ("" when
+	// nothing did). A failed attempt leaves no trace file behind.
+	attempt := func(fn interface{}, args ...interface{}) string {
 		env := suite.NewTestWorkflowEnvironment()
+		// generated programs only: the default alarm (1 second without yielding)
+		// can fire when the machine stalls
+		env.SetWorkerOptions(worker.Options{DeadlockDetectionTimeout: 5 * time.Second})
 		env.RegisterActivity(ActEcho)
 		// what the run does outside the workflow, in order: activities, local
 		// activities and timers; written next to the run's trace file
@@ -169,16 +196,34 @@ func TestRunAll(t *testing.T) {
 		env.SetOnTimerScheduledListener(func(string, time.Duration) { events = append(events, "T") })
 		before := traceFiles(dir)
 		env.ExecuteWorkflow(fn, args...)
+		msg := ""
 		if !env.IsWorkflowCompleted() {
-			t.Fatalf("%s %v: not completed", name, args)
-		}
-		if err := env.GetWorkflowError(); err != nil {
-			t.Fatalf("%s %v: %v", name, args, err)
+			msg = "not completed"
+		} else if err := env.GetWorkflowError(); err != nil {
+			msg = err.Error()
 		}
 		for f := range traceFiles(dir) {
-			if !before[f] {
-				_ = os.WriteFile(filepath.Join(dir, f+".events"), []byte(strings.Join(events, "\n")), 0o644)
+			if before[f] {
+				continue
 			}
+			if msg != "" {
+				_ = os.Remove(filepath.Join(dir, f))
+				continue
+			}
+			_ = os.WriteFile(filepath.Join(dir, f+".events"), []byte(strings.Join(events, "\n")), 0o644)
+		}
+		return msg
+	}
+	run := func(name string, fn interface{}, args ...interface{}) {
+		msg := runWithRetry(func() string { return attempt(fn, args...) }, func() {
+			f, err := os.OpenFile(filepath.Join(dir, "deadlock-reruns.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+			if err == nil {
+				_, _ = f.WriteString(name + "\n")
+				_ = f.Close()
+			}
+		})
+		if msg != "" {
+			t.Fatalf("%s %v: %s", name, args, msg)
 		}
 	}
 `)

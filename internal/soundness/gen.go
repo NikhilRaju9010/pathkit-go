@@ -147,6 +147,11 @@ func Generate(seed int64, number int) Program {
 		g.line(0, "}")
 	}
 	body := g.b.String()
+	if handoffBlocks(number) { // after everything else: the other probes' random draws are untouched
+		hh, hb := handoffProbe(seed, number)
+		g.helpers = append(g.helpers, hh...)
+		body += hb
+	}
 	var used strings.Builder
 	for _, l := range g.locals {
 		if l.kind == kImap || l.kind == kIslice {
@@ -243,6 +248,11 @@ func (g *gen) simpleCond(wrap bool) string {
 		}
 		return "!" + name
 	default: // pointer, interface
+		if v.kind == kIface && g.r.Intn(3) == 0 {
+			// an interface compared with a constant: equal only when it holds a
+			// value of the constant's own type (a *string is not a string)
+			return fmt.Sprintf("%s %s %s", v.name, []string{"==", "!="}[g.r.Intn(2)], []string{`"a"`, `""`, `1`, `true`}[g.r.Intn(4)])
+		}
 		return fmt.Sprintf("%s %s nil", v.name, []string{"==", "!="}[g.r.Intn(2)])
 	}
 }
@@ -282,6 +292,10 @@ func (g *gen) action(depth int) {
 		case kPtr:
 			g.line(depth, "%s = nil", v.name)
 		default:
+			if p, ok := g.pick(kPtr); ok && v.kind == kIface && g.r.Intn(2) == 0 {
+				g.line(depth, "%s = %s", v.name, p.name) // the interface now holds a *string (maybe a nil one)
+				break
+			}
 			g.line(depth, "%s = %s", v.name, []string{"nil", `"a"`, "1"}[g.r.Intn(3)])
 		}
 	case 2: // a copy
@@ -326,7 +340,11 @@ func (g *gen) action(depth int) {
 
 // topDecl declares something new at the top level of the function.
 func (g *gen) topDecl() {
-	switch g.r.Intn(20) {
+	switch g.r.Intn(25) {
+	case 22, 23, 24: // a plain function the engine reads (M11, E2, E3)
+		g.plainProbe()
+	case 20, 21: // a typed variable filled through &x (M11, E1)
+		g.addrProbe()
 	case 18, 19: // a timer, a wait, or the kind of an error
 		g.temporalProbe()
 	case 16, 17: // a value encoding/json decodes here
