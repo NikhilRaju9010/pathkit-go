@@ -1,0 +1,33 @@
+{
+  "construct": "selector_chained",
+  "status": "handled",
+  "note": "A selector built and used in one chained expression (workflow.NewSelector(ctx).AddReceive(...).AddFuture(...).Select(ctx)) is mapped like one kept in a variable: one exit for every Add… call written in the chain, in source order.",
+  "config": {
+    "activityWrappers": [],
+    "directReturns": ""
+  },
+  "workflows": [
+    {
+      "name": "selector_chained.Run",
+      "paths": [
+        {
+          "text": "Start -> select (Selector) --signal \"go\"--> if !got --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --signal \"go\"--> if !got --false--> End (completed)",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --timeout--> if !got --true--> End",
+          "bucket": "testable"
+        },
+        {
+          "text": "Start -> select (Selector) --timeout--> if !got --false--> End (completed)",
+          "bucket": "testable"
+        }
+      ]
+    }
+  ],
+  "unread": null
+}

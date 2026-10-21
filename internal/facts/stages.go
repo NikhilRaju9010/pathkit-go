@@ -35,6 +35,9 @@ type StageResult struct {
 	// a type switch case on a value it cannot follow (unknown-input-type).
 	Suspect *Suspect
 	Unknown *Suspect
+	// Defect is set when the path is possible and takes a case or comparison
+	// that only a dereferenced pointer could satisfy (likely-defect).
+	Defect *Suspect
 }
 
 // StageReport is the engine's answer for one stage.
@@ -86,6 +89,7 @@ func (a *Analyzer) AnalyzeStages(g *model.Graph, stages []model.Stage, maxContex
 			allowed bool
 			suspect *Suspect
 			unknown *Suspect
+			defect  *Suspect
 		}
 		res := make([]outcome, len(paths))
 		next := map[string]*Walk{}
@@ -108,6 +112,9 @@ func (a *Analyzer) AnalyzeStages(g *model.Graph, stages []model.Stage, maxContex
 				if rr := w.Result(); r.unknown == nil && rr.Unknown != nil {
 					r.unknown = rr.Unknown
 				}
+				if rr := w.Result(); r.defect == nil && rr.Defect != nil {
+					r.defect = rr.Defect
+				}
 				if paths[i].Continue {
 					sig := w.Signature()
 					if _, seen := next[sig]; !seen {
@@ -119,7 +126,7 @@ func (a *Analyzer) AnalyzeStages(g *model.Graph, stages []model.Stage, maxContex
 		}
 		for i, p := range paths {
 			r := res[i]
-			sr := StageResult{Path: p, Contexts: len(contexts), Claim: r.first, Suspect: r.suspect, Unknown: r.unknown}
+			sr := StageResult{Path: p, Contexts: len(contexts), Claim: r.first, Suspect: r.suspect, Unknown: r.unknown, Defect: r.defect}
 			switch {
 			case r.allowed:
 				sr.Verdict = Possible

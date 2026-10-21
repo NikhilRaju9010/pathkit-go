@@ -41,6 +41,16 @@ func (unknownInputType) Name() string                             { return "unkn
 func (unknownInputType) Labels() []string                         { return []string{"unknown-input-type"} }
 func (unknownInputType) Detect(model.Path) (Classification, bool) { return Classification{}, false }
 
+// likelyDefect sends a path to needs-review when a type switch case or a
+// comparison is impossible only because the value is a pointer and the code
+// tests the pointed-to type or value (case string for a *string): that is
+// most likely a bug in the code, not a path that can't happen.
+type likelyDefect struct{}
+
+func (likelyDefect) Name() string                             { return "likely-defect" }
+func (likelyDefect) Labels() []string                         { return []string{"likely-defect"} }
+func (likelyDefect) Detect(model.Path) (Classification, bool) { return Classification{}, false }
+
 // engineClaim runs the fact engine on one path. It is only asked when no
 // override, comment, rule or other detector said anything: those keep
 // their label and wording.
@@ -58,6 +68,14 @@ func (e *Engine) engineClaim(workflow string, p model.Path) (Classification, boo
 		c.Proof = convertProof(res.Claim.Proof)
 		c.Assumptions = res.Claim.Assumptions
 		c.UsesStep = res.Claim.Uses
+		return c, true
+	}
+	if res.Defect != nil && e.detectorOn("likely-defect") {
+		c := DefaultTestable()
+		c.Bucket, c.Label, c.Confidence, c.PossibleInProduction = NeedsReview, "likely-defect", Likely, true
+		c.Source, c.Detector = SourceAuto, "likely-defect"
+		c.Explanation = res.Defect.Explanation
+		c.Proof = convertProof(res.Defect.Proof)
 		return c, true
 	}
 	if res.Suspect != nil && e.detectorOn("possible-correlation") {

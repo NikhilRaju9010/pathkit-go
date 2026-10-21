@@ -17,6 +17,12 @@ var wantClaims = map[string]map[string]Kind{
 		"J1.true J2.true J3.true J4.false J5.true|completed":    Contradictory,
 		"J1.true J2.true J3.true J4.true|completed":             Contradictory,
 	},
+	"ImpossibleLengthBeforePlainWriter": {
+		"J1.true|completed": ValueFlow,
+	},
+	"ImpossibleSliceElementBeforeWriter": {
+		"J1.case int|completed": ImpossibleType,
+	},
 	"ImpossibleMapPassedToActivity": {
 		"J1.case int|completed": ImpossibleType,
 	},
@@ -35,6 +41,24 @@ var wantClaims = map[string]map[string]Kind{
 	"ImpossibleKnownAcrossHelper": {
 		"J1.true J3.false J2.success J4.true|": Contradictory,
 		"J1.true J3.true J2.success J4.true|":  Contradictory,
+	},
+	"ImpossibleBeforeMapPassedOn": {
+		"J1.case int|completed": ImpossibleType,
+	},
+	"ImpossibleBeforeAddressTaken": {
+		"J1.false|completed": ConstantCondition,
+	},
+	"ImpossibleGetThenAssigned": {
+		"J1.true|completed": ConstantCondition,
+	},
+	"ImpossibleUnmarshalThenAssigned": {
+		"J1.true|completed": ConstantCondition,
+	},
+	"LikelyDefectOtherCasesStayImpossible": {
+		"J1.case int|completed": ImpossibleType,
+	},
+	"ImpossiblePointerToOtherType": {
+		"J1.true|completed": ImpossibleType,
 	},
 	"ImpossibleStdDecoder": {
 		"J1.true|": ImpossibleType,
@@ -240,29 +264,45 @@ var wantSuspects = map[string][]string{
 }
 
 // wantUnknown are the paths that take a type switch case on a value whose origin PathKit cannot follow.
+// wantDefects is every path the engine calls a likely defect (E3): the case or
+// comparison is impossible only because the value is a pointer. The paths are
+// not impossible, so they are not in wantClaims.
+var wantDefects = map[string][]string{
+	"LikelyDefectCaseString":               {"J1.case string|completed"},
+	"LikelyDefectComparesToEmpty":          {"J1.true|completed"},
+	"LikelyDefectOtherCasesStayImpossible": {"J1.case string|completed"},
+}
+
 var wantUnknown = map[string][]string{
-	"PossibleAppendSpread":                 {"J1.case int|completed", "J1.default|completed"},
-	"PossibleContainerAliasPassedOn":       {"J1.case int|completed", "J1.default|completed"},
-	"PossibleContainerChangedViaInterface": {"J1.case int|completed", "J1.default|completed"},
-	"PossibleJSONGetIntoPointer":           {"J1.case *string|completed", "J1.case int|completed", "J1.default|completed"},
-	"PossibleJSONMapWritten":               {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapAddressTaken":              {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapAliasWrites":               {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapInsideKeptInput":           {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapPassedToActivityAndCall":   {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapPassedToLocalActivity":     {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapPassedToCall":              {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapReassigned":                {"J1.case int|completed", "J1.default|completed"},
-	"PossibleMapWrittenInClosure":          {"J1.case int|completed", "J1.default|completed"},
-	"PossibleOwnChannelReceive":            {"J1.case int|completed", "J1.default|completed"},
-	"PossibleRangeIntoElement":             {"J1.iterate J1.retry J1.exit J2.case int|completed", "J1.iterate J1.retry J1.exit J2.default|completed", "J1.exit J2.case int|completed", "J1.exit J2.default|completed"},
-	"PossibleSettableFuture":               {"J1.case int|completed", "J1.default|completed"},
-	"PossibleSliceAliasWrites":             {"J1.case int|completed", "J1.default|completed"},
-	"PossibleSparseSliceLiteral":           {"J1.true J2.case string|completed", "J1.true J2.default|completed", "J1.false J2.case string|completed", "J1.false J2.default|completed"},
-	"PossibleStoreInAssumedBranch":         {"J1.case int|completed", "J1.default|completed"},
-	"PossibleStoreInLoop":                  {"J1.iterate J1.retry J1.exit J2.case int|completed", "J1.iterate J1.retry J1.exit J2.default|completed", "J1.exit J2.case int|completed", "J1.exit J2.default|completed"},
-	"PossibleStoreOfUnknownType":           {"J1.case int|completed", "J1.default|completed"},
-	"PossibleTupleStoreIntoElement":        {"J1.case string|completed", "J1.case int|completed", "J1.default|completed"},
+	"PossibleSliceElementAfterWriter":       {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapInPointerStructAfterWriter": {"J1.case int|completed", "J1.default|completed"},
+	"PossibleChannelHandedToGo":             {"J1.case int|completed", "J1.default|completed"},
+	"PossibleAfterMapPassedOn":              {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapAliasedBeforeTheCheck":      {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapGivenToGo":                  {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapPassedOnInALoop":            {"J1.iterate J2.case int J1.retry J1.exit|completed", "J1.iterate J2.default J1.retry J1.exit|completed"},
+	"PossibleAppendSpread":                  {"J1.case int|completed", "J1.default|completed"},
+	"PossibleContainerAliasPassedOn":        {"J1.case int|completed", "J1.default|completed"},
+	"PossibleContainerChangedViaInterface":  {"J1.case int|completed", "J1.default|completed"},
+	"PossibleJSONGetIntoPointer":            {"J1.case *string|completed", "J1.case int|completed", "J1.default|completed"},
+	"PossibleJSONMapWritten":                {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapAddressTaken":               {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapAliasWrites":                {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapInsideKeptInput":            {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapPassedToActivityAndCall":    {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapPassedToLocalActivity":      {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapPassedToCall":               {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapReassigned":                 {"J1.case int|completed", "J1.default|completed"},
+	"PossibleMapWrittenInClosure":           {"J1.case int|completed", "J1.default|completed"},
+	"PossibleOwnChannelReceive":             {"J1.case int|completed", "J1.default|completed"},
+	"PossibleRangeIntoElement":              {"J1.iterate J1.retry J1.exit J2.case int|completed", "J1.iterate J1.retry J1.exit J2.default|completed", "J1.exit J2.case int|completed", "J1.exit J2.default|completed"},
+	"PossibleSettableFuture":                {"J1.case int|completed", "J1.default|completed"},
+	"PossibleSliceAliasWrites":              {"J1.case int|completed", "J1.default|completed"},
+	"PossibleSparseSliceLiteral":            {"J1.true J2.case string|completed", "J1.true J2.default|completed", "J1.false J2.case string|completed", "J1.false J2.default|completed"},
+	"PossibleStoreInAssumedBranch":          {"J1.case int|completed", "J1.default|completed"},
+	"PossibleStoreInLoop":                   {"J1.iterate J1.retry J1.exit J2.case int|completed", "J1.iterate J1.retry J1.exit J2.default|completed", "J1.exit J2.case int|completed", "J1.exit J2.default|completed"},
+	"PossibleStoreOfUnknownType":            {"J1.case int|completed", "J1.default|completed"},
+	"PossibleTupleStoreIntoElement":         {"J1.case string|completed", "J1.case int|completed", "J1.default|completed"},
 }
 
 // wantOff are the workflows the engine switches itself off for, and why.

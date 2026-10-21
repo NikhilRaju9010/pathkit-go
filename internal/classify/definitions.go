@@ -151,6 +151,10 @@ var definitions = []Definition{
 		"PathKit does not know where the value comes from, so it does not know which types it can hold. The case may be one the input never has, or one nobody has tried.", "A type switch on a value passed in by a helper, with case int, when no test ever sent an int.", "yes",
 		"Check what the input can hold. If the case can happen, write a test that sends it; if it cannot, mark the path untestable in the config with that reason."),
 
+	label("likely-defect", NeedsReview, "likely", "A type switch case or a comparison that can only be taken by dereferencing a pointer the code did not dereference (case string when the value is a *string, == \"\" on an interface that holds a *string).",
+		"The value is a pointer, and the code tests the type or the value it points to. As written the case can never be taken, so most likely the code means to dereference the pointer. It is not called impossible: it is a bug to look at.", "A map that stores &name (a *string), then a type switch on it with case string.", "yes",
+		"Look at the code. If it should dereference the pointer, fix it (then the case can be reached, and a test can take it). If the case really is never meant to run, mark the path untestable in the config with that reason."),
+
 	// B. loops.
 	label("same-list-loops", CannotBeTested, "certain", "Two loops over the same collection must run the same number of times.",
 		"One loop running zero times while the other runs once can't happen.", "Two range loops over the same slice.", "no", "Nothing."),

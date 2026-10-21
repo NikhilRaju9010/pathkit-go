@@ -50,3 +50,51 @@ func (g *gen) jsonProbe() {
 	}
 	g.sinks = append(g.sinks, out)
 }
+
+// addrProbe is the shape E1 relies on (milestone M11): a typed variable filled
+// through `&x` by json.Unmarshal, with decisions on it before the call, after
+// it, and after a plain assignment that follows it. The variable is a plain
+// string or int, so it is the value written by the call that decides the
+// answer, not a type. Half the time the address is kept in a variable first,
+// which must keep every note about the variable off.
+func (g *gen) addrProbe() {
+	if g.budget < 3 {
+		g.line(0, "noop()")
+		return
+	}
+	g.budget -= 3
+	typ, zero := "string", `""`
+	src, ok := g.pick(kString)
+	consts := []string{`"a"`, `""`, `"b"`}
+	if p, ok2 := g.pick(kInt); ok2 && (!ok || g.r.Intn(2) == 0) {
+		typ, zero, src, ok = "int", "0", p, true
+		consts = []string{"0", "1", "2"}
+	}
+	if !ok {
+		g.line(0, "noop()")
+		return
+	}
+	raw, x := g.fresh("ab"), g.fresh("av")
+	g.line(0, "%s, _ := json.Marshal(%s)", raw, src.name)
+	g.line(0, "var %s %s", x, typ)
+	if g.r.Intn(2) == 0 { // before the call: still the zero value
+		g.line(0, "if %s == %s {", x, zero)
+		g.line(1, "noop()")
+		g.line(0, "}")
+	}
+	call := "&" + x
+	if g.r.Intn(2) == 0 { // the address is kept: nothing may be assumed about x
+		p := g.fresh("ap")
+		g.line(0, "%s := &%s", p, x)
+		g.sinks = append(g.sinks, p)
+		call = p
+	}
+	g.line(0, "_ = json.Unmarshal(%s, %s)", raw, call)
+	if g.r.Intn(2) == 0 { // a plain assignment gives it a known value again
+		g.line(0, "%s = %s", x, consts[g.r.Intn(len(consts))])
+	}
+	g.line(0, "if %s == %s {", x, consts[g.r.Intn(len(consts))])
+	g.line(1, "noop()")
+	g.line(0, "}")
+	g.sinks = append(g.sinks, x)
+}

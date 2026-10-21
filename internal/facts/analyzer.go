@@ -53,6 +53,19 @@ type Analyzer struct {
 	// decodeStd marks the calls in decode that encoding/json makes (json.Unmarshal,
 	// Decode on a decoder this function made and never switched to UseNumber).
 	decodeStd map[*ast.CallExpr]bool
+	// writes maps a call that writes through a direct `&x` argument (Get,
+	// Receive, json.Unmarshal, ...) to x, whatever x's type is: x is forgotten at
+	// that call and nowhere else. Any other use of `&x` keeps x untracked.
+	writes map[*ast.CallExpr]*types.Var
+	// sums caches the summaries of plain functions (summary.go); a nil entry is
+	// a function that is unknown, or being worked out.
+	sums map[*types.Func]*fnSummary
+	// lateEscape is, for a slice or map the workflow function hands to a call as a
+	// plain argument (and does nothing else with that PathKit cannot follow), the
+	// start of the statement that does: before it nothing else can reach the
+	// contents, so facts about them hold there (state.escaped). Any other use that
+	// lets something reach the contents is an escape from the start (escapes).
+	lateEscape map[*types.Var]token.Pos
 	// relaxed are slices and maps used as an argument that is encoded at the
 	// call (see Options.ArgsCopied); relaxable says some variable could be.
 	relaxed   map[*types.Var]bool
@@ -83,7 +96,7 @@ type Analyzer struct {
 // New prepares the engine for one workflow's graph.
 func New(g *model.Graph, opts ...Options) *Analyzer {
 	a := &Analyzer{g: g, info: g.TypesInfo(), fset: g.FileSet(), untracked: map[*types.Var]string{}, assignedIn: map[ast.Node]map[*types.Var]bool{}, calls: map[ast.Node]bool{},
-		escapes: map[*types.Var]string{}, ifaceEscapes: map[*types.Var]string{}, assertDerived: map[*types.Var]bool{}, inits: map[*types.Var][]ast.Expr{}, decode: map[*ast.CallExpr]*types.Var{}, decodeStd: map[*ast.CallExpr]bool{}, relaxed: map[*types.Var]bool{}, useNumber: map[*types.Var]bool{}, addrTaken: map[*types.Var]int{}}
+		escapes: map[*types.Var]string{}, lateEscape: map[*types.Var]token.Pos{}, ifaceEscapes: map[*types.Var]string{}, assertDerived: map[*types.Var]bool{}, inits: map[*types.Var][]ast.Expr{}, decode: map[*ast.CallExpr]*types.Var{}, writes: map[*ast.CallExpr]*types.Var{}, decodeStd: map[*ast.CallExpr]bool{}, relaxed: map[*types.Var]bool{}, useNumber: map[*types.Var]bool{}, addrTaken: map[*types.Var]int{}}
 	if len(opts) > 0 {
 		a.opts = opts[0]
 	}
@@ -330,14 +343,16 @@ func (a *Analyzer) scan(fns []*ast.FuncDecl) {
 	for _, fn := range fns {
 		ast.Inspect(fn.Body, visit)
 	}
-	// The calls that fill a variable through its address with a value
-	// Temporal decoded: now that every assignment is known, check that the
-	// future or channel really comes from Temporal's payloads.
-	decoded := map[*types.Var]int{}
+	// The calls that fill a variable through its address: Temporal's Get and
+	// Receive calls and encoding/json. For these, `&x` is a direct argument of a
+	// call known to write through it during the call and not keep it, so x is
+	// forgotten at that call only (writes), and tracked normally before and
+	// after. When x is an interface{} or a JSON container and the call decodes
+	// Temporal's payloads (or encoding/json), the engine also knows what the
+	// call wrote into it (decode, decodeStd).
+	written := map[*types.Var]int{}
 	for _, call := range cands {
-		if !a.isDecodeCall(call) {
-			continue
-		}
+		decodes := a.isDecodeCall(call)
 		for _, arg := range call.Args {
 			u, ok := ast.Unparen(arg).(*ast.UnaryExpr)
 			if !ok || u.Op != token.AND {
@@ -347,19 +362,21 @@ func (a *Analyzer) scan(fns []*ast.FuncDecl) {
 			if !ok {
 				continue
 			}
-			if v, ok := a.info.ObjectOf(id).(*types.Var); ok && decodable(v.Type()) {
+			v, ok := a.info.ObjectOf(id).(*types.Var)
+			if !ok {
+				continue
+			}
+			if _, dup := a.writes[call]; !dup {
+				a.writes[call] = v
+				written[v]++
+			}
+			if decodes && decodable(v.Type()) {
 				a.decode[call] = v
-				decoded[v]++
 			}
 		}
 	}
-	// The same for encoding/json in this function: json.Unmarshal, and Decode
-	// on a decoder made here by json.NewDecoder that nothing hands on and
-	// nothing switches to UseNumber.
 	for _, call := range stdCands {
-		if !a.isStdDecodeCall(call) {
-			continue
-		}
+		decodes := a.isStdDecodeCall(call)
 		for _, arg := range call.Args {
 			u, ok := ast.Unparen(arg).(*ast.UnaryExpr)
 			if !ok || u.Op != token.AND {
@@ -369,16 +386,23 @@ func (a *Analyzer) scan(fns []*ast.FuncDecl) {
 			if !ok {
 				continue
 			}
-			if v, ok := a.info.ObjectOf(id).(*types.Var); ok && decodable(v.Type()) {
+			v, ok := a.info.ObjectOf(id).(*types.Var)
+			if !ok {
+				continue
+			}
+			if _, dup := a.writes[call]; !dup {
+				a.writes[call] = v
+				written[v]++
+			}
+			if decodes && decodable(v.Type()) {
 				a.decode[call] = v
 				a.decodeStd[call] = true
-				decoded[v]++
 			}
 		}
 	}
 	// An address is an escape unless every one of them is a decode call.
 	for v, n := range a.addrTaken {
-		if n > decoded[v] {
+		if n > written[v] {
 			if _, seen := a.untracked[v]; !seen {
 				a.untracked[v] = "its address is taken (&)"
 			}
@@ -417,7 +441,7 @@ func (a *Analyzer) assignedVars(stmt ast.Node) map[*types.Var]bool {
 	ast.Inspect(stmt, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.CallExpr:
-			if v, ok := a.decode[x]; ok {
+			if v, ok := a.writes[x]; ok {
 				m[v] = true // Get(ctx, &v) writes v
 			}
 		case *ast.AssignStmt:
@@ -630,6 +654,12 @@ func (a *Analyzer) escapeUse(id *ast.Ident, v *types.Var, stack []ast.Node) stri
 					}
 				}
 			}
+		}
+		if pos, ok := a.lateEscapeAt(v, stack); ok {
+			if old, seen := a.lateEscape[v]; !seen || pos < old {
+				a.lateEscape[v] = pos
+			}
+			return ""
 		}
 		return other
 	case *ast.IndexExpr:
@@ -897,3 +927,36 @@ func (a *Analyzer) encodedCall(call *ast.CallExpr) (int, string) {
 // to a call that encodes its arguments: only then does the assumption
 // no-custom-interceptor matter to it.
 func (a *Analyzer) InterceptorRelevant() bool { return a.relaxable }
+
+// lateEscapeAt: the use is a plain argument of a call, in a statement of the
+// workflow function itself that no loop encloses (and not of a go statement):
+// the escape then happens at that statement, in the order the code runs, and
+// not before it. It returns where the statement starts.
+func (a *Analyzer) lateEscapeAt(v *types.Var, stack []ast.Node) (token.Pos, bool) {
+	fn := a.g.Func()
+	if fn == nil || fn.Body == nil || v.Pos() < fn.Pos() || v.Pos() >= fn.End() || a.assertDerived[v] {
+		return token.NoPos, false
+	}
+	stmtAt := -1
+	for i := len(stack) - 1; i >= 0; i-- {
+		switch stack[i].(type) {
+		case *ast.ForStmt, *ast.RangeStmt, *ast.GoStmt:
+			return token.NoPos, false
+		}
+	}
+	for i := len(stack) - 1; i >= 0; i-- {
+		switch stack[i].(type) {
+		case *ast.BlockStmt, *ast.CaseClause, *ast.CommClause:
+			if i+1 < len(stack) {
+				stmtAt = i + 1
+			}
+		}
+		if stmtAt >= 0 {
+			break
+		}
+	}
+	if stmtAt < 0 {
+		return token.NoPos, false
+	}
+	return stack[stmtAt].Pos(), true
+}

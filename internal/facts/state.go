@@ -68,11 +68,15 @@ const (
 
 // datum is one thing known about one value.
 type datum struct {
-	op   dop
-	val  constant.Value
-	ts   *typeSet         // dTypes, dElem
-	keys []constant.Value // dKeys
-	why  *why
+	op  dop
+	val constant.Value
+	ts  *typeSet // dTypes, dElem
+	// perKey, on a dElem of a map built by a summarized function, is what is
+	// stored under each constant string key (complete: a key not in it is not in
+	// the map). It is never changed in place; a store replaces the datum.
+	perKey map[string]*typeSet
+	keys   []constant.Value // dKeys
+	why    *why
 	// soft is "" while the fact is trusted. When PathKit has to forget the
 	// value (a loop may change it, its address is taken, ...) the fact
 	// stays here with the reason, only for the possible-correlation check;
@@ -98,9 +102,19 @@ type state struct {
 	stepsDone int
 	// stage counts the stages the walk has been handed on through (Rebase);
 	// a fact from an earlier stage has no step number to show.
-	stage    int
-	suspect  *Suspect
-	unknown  *Suspect
+	stage int
+	// cur is the start of the statement or decision being walked, to tell whether a
+	// slice or map has been handed away yet (see escaped).
+	cur     token.Pos
+	suspect *Suspect
+	unknown *Suspect
+	// defect is a likely defect found on the path: a case or comparison that
+	// is impossible only because the value is a pointer and the code tests the
+	// pointed-to type or value. tainted stays set after it (it survives a new
+	// stage): the notebook then holds a premise the code itself contradicts, so
+	// no later claim on the path is trusted.
+	defect   *Suspect
+	tainted  bool
 	seenLoop map[*model.Junction]bool
 	// taken records the decisions already walked, for proofs that mention
 	// code a decision skipped.
@@ -188,8 +202,8 @@ func underPath(p, q string) bool { return p == q || strings.HasPrefix(p, q+".") 
 func (s *state) add(k key, d *datum) {
 	switch d.op {
 	case dElem, dLenZero, dLenNonZero, dKeys:
-		if s.a.escapes[k.v] != "" {
-			return // something else can reach its contents
+		if s.escaped(k.v) || k.path != "" {
+			return // something else can reach its contents (a map in a struct field is shared with every copy of the struct)
 		}
 	}
 	if !s.a.trackable(k.v) {
@@ -238,7 +252,20 @@ func (s *state) add(k key, d *datum) {
 // datums returns what is known about k; with shadow, soft facts count too.
 func (s *state) datums(k key, shadow bool) []*datum {
 	var out []*datum
+	// what was learned about a slice or map before it was handed to a call (or
+	// otherwise reached by other code) is not known any more from that place on
+	reached := k.v != nil && isMapOrSlice(k.v.Type()) && s.escaped(k.v)
+	// the map or slice held in a field of a struct: whoever gets the struct (or a
+	// copy of it) shares that map or slice, and PathKit does not follow where a
+	// struct goes, so nothing about its contents is kept
+	inField := k.path != ""
 	for _, d := range s.d[k] {
+		if reached || inField {
+			switch d.op {
+			case dElem, dLenZero, dLenNonZero, dKeys:
+				continue
+			}
+		}
 		if d.soft == "" || shadow {
 			out = append(out, d)
 		}
@@ -322,3 +349,22 @@ func zeroConst(t types.Type) constant.Value {
 }
 
 func exprText(e ast.Expr) string { return types.ExprString(e) }
+
+// escaped says whether something else can reach the contents of the slice or map
+// v at the place being walked: from the start when a use lets it, or from the
+// statement that hands it to a call (Analyzer.lateEscape) onwards. Code PathKit
+// walks that is not in the workflow function itself is always after it.
+func (s *state) escaped(v *types.Var) bool {
+	if s.a.escapes[v] != "" {
+		return true
+	}
+	pos, late := s.a.lateEscape[v]
+	if !late {
+		return false
+	}
+	fn := s.a.g.Func()
+	if s.cur == token.NoPos || fn == nil || s.cur < fn.Pos() || s.cur >= fn.End() {
+		return true
+	}
+	return s.cur >= pos
+}

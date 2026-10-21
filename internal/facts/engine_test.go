@@ -19,6 +19,7 @@ type found struct {
 	claims   map[string]Kind // path text -> kind
 	suspects []string
 	unknown  []string
+	defects  []string // paths that take a case only a dereferenced pointer could take
 	paths    []string
 	proofs   map[string][]ProofStep
 	off      string
@@ -57,6 +58,9 @@ func analyzeFixtureWith(t *testing.T, dir string, opts Options) map[string]found
 			}
 			if r.Unknown != nil {
 				f.unknown = append(f.unknown, text)
+			}
+			if r.Defect != nil {
+				f.defects = append(f.defects, text)
 			}
 		}
 		out[strings.TrimPrefix(wf.Name, "factsengine.")] = f
@@ -132,6 +136,9 @@ func TestEngineClaimsOnFixtures(t *testing.T) {
 			}
 			if fmt.Sprint(f.unknown) != fmt.Sprint(wantUnknown[name]) && !(len(f.unknown) == 0 && len(wantUnknown[name]) == 0) {
 				t.Errorf("unknown-input candidates %v, want %v", f.unknown, wantUnknown[name])
+			}
+			if fmt.Sprint(f.defects) != fmt.Sprint(wantDefects[name]) && !(len(f.defects) == 0 && len(wantDefects[name]) == 0) {
+				t.Errorf("likely defects %v, want %v", f.defects, wantDefects[name])
 			}
 			if f.off != wantOff[name] {
 				t.Errorf("engine off = %q, want %q", f.off, wantOff[name])

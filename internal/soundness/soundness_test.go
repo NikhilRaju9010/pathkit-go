@@ -66,8 +66,13 @@ type observed struct {
 	// runs really did outside the workflow (the Skeptic property); stepRuns
 	// counts the runs checked.
 	scenarioErrs []string
+	// loopRuns counts the runs checked that went through a loop (M11, L1).
+	loopRuns     int
 	scenarioSeen map[string]string
 	stepRuns     int
+	// deadlockReruns names the programs that were run again after Temporal's
+	// deadlock alarm and then passed every check.
+	deadlockReruns []string
 }
 
 // runBatch writes the programs into a throw-away module, records the paths
@@ -174,6 +179,12 @@ func runBatch(t *testing.T, programs []Program) *observed {
 		t.Fatalf("running the generated programs failed: %v\n%s", err, firstLines(string(out), 60))
 	}
 
+	if data, err := os.ReadFile(filepath.Join(traces, "deadlock-reruns.log")); err == nil {
+		for _, l := range strings.Fields(string(data)) {
+			obs.deadlockReruns = append(obs.deadlockReruns, l)
+			t.Logf("re-run after deadlock alarm: %s (it passed the second time)", l)
+		}
+	}
 	files, err := trace.List(traces)
 	if err != nil {
 		t.Fatal(err)
@@ -313,6 +324,19 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		}
 		seeds = []int64{s}
 	}
+	// PATHKIT_SOUNDNESS_SEEDS=1,2,3 runs exactly these seeds (the nightly job uses
+	// it to run the fixed seeds alone, and PATHKIT_SOUNDNESS_SEED for tonight's).
+	if v := os.Getenv("PATHKIT_SOUNDNESS_SEEDS"); v != "" {
+		seeds = nil
+		for _, f := range strings.Split(v, ",") {
+			s, err := strconv.ParseInt(strings.TrimSpace(f), 10, 64)
+			if err != nil {
+				t.Fatalf("PATHKIT_SOUNDNESS_SEEDS=%q is not a list of numbers", v)
+			}
+			seeds = append(seeds, s)
+		}
+	}
+	t.Logf("SEEDS USED: %v", seeds)
 
 	var all []Program
 	per := (n + len(seeds) - 1) / len(seeds)
@@ -322,7 +346,7 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		}
 	}
 
-	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups, unitRuns, scenarioErrors, stepRuns int
+	var totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, stageClaims, prunedGroups, unitRuns, scenarioErrors, stepRuns, loopRuns, deadlockReruns int
 	for start := 0; start < len(all); start += batchSize {
 		end := min(start+batchSize, len(all))
 		obs := runBatch(t, all[start:end])
@@ -338,6 +362,7 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 			t.Error(e)
 		}
 		stepRuns += obs.stepRuns
+		loopRuns += obs.loopRuns
 		sf, sc, pg := obs.stageFalseClaims()
 		for _, f := range sf {
 			falseCount++
@@ -346,9 +371,11 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 		stageClaims, prunedGroups = stageClaims+sc, prunedGroups+pg
 		helperPaths += obs.helperPaths
 		unitRuns += obs.unitRuns
+		deadlockReruns += len(obs.deadlockReruns)
 		p, ps, r, c := obs.stats()
 		totalPrograms, totalPaths, totalReached, totalClaimed = totalPrograms+p, totalPaths+ps, totalReached+r, totalClaimed+c
 	}
+	t.Logf("DEADLOCK ALARM RE-RUNS: %d program(s) were run again after Temporal's deadlock alarm and passed every check the second time (a second alarm would have failed the run)", deadlockReruns)
 	t.Logf("SOUNDNESS: %d programs run, %d paths listed, %d paths really taken, %d paths claimed cannot-be-tested, %d false claims (%d runs went through helper code, %d through summarized helpers; %d stage paths and %d pruned groups were checked too)", totalPrograms, totalPaths, totalReached, totalClaimed, falseCount, helperPaths, unitRuns, stageClaims, prunedGroups)
 	if stageClaims == 0 || prunedGroups == 0 {
 		t.Errorf("the stage and pruning code was not exercised: %d stage claims, %d pruned groups", stageClaims, prunedGroups)
@@ -359,7 +386,10 @@ func TestNoFalseCannotBeTestedClaims(t *testing.T) {
 	if helperPaths == 0 {
 		t.Error("no run went through the code of a helper function: the helper probes were not exercised")
 	}
-	t.Logf("SCENARIOS: %d runs checked against their scenario's external steps, %d disagreements", stepRuns, scenarioErrors)
+	t.Logf("SCENARIOS: %d runs checked against their scenario's external steps (%d of them through a loop), %d disagreements", stepRuns, loopRuns, scenarioErrors)
+	if loopRuns == 0 && n >= 200 {
+		t.Error("no run through a loop was checked against its scenario: the loop-aware check looked at nothing")
+	}
 	if stepRuns == 0 && n >= 50 {
 		t.Error("no run was checked against its scenario: the scenario check looked at nothing")
 	}
@@ -419,6 +449,68 @@ func TestGroundTruthIsComplete(t *testing.T) {
 	}
 }
 
+// scenarioToken is what one step of a fingerprint makes in the run's event list:
+// "A:Name" for an activity, "L:Name" for a local activity, "T" for a timer, or
+// "" for a step that makes none.
+func scenarioToken(st string) string {
+	switch {
+	case strings.Contains(st, " (activity)"):
+		return "A:" + st[:strings.Index(st, " (activity)")]
+	case strings.Contains(st, " (local activity)"):
+		return "L:" + st[:strings.Index(st, " (local activity)")]
+	case strings.HasPrefix(st, "timer"), strings.Contains(st, "(timer)"), strings.HasPrefix(st, "AwaitWithTimeout (wait)"), strings.HasPrefix(st, "wait with timeout"):
+		return "T"
+	}
+	return ""
+}
+
+// scenarioPattern turns a path's fingerprint into the pattern a run's event list
+// must match: every external step of the path, in order, exactly; and, at the
+// place of each loop, any steps (the rounds before the last one, which are not on
+// the path). Nothing else may differ: an extra step before or after the loop, or
+// between two other steps, does not match. The end label is the last step.
+func scenarioPattern(steps []string, spans []model.Span) *regexp.Regexp {
+	token := scenarioToken
+	used := map[int]bool{} // spans already turned into a pattern (a span starts where its first step is)
+	var build func(lo, hi int) string
+	build = func(lo, hi int) string {
+		var b strings.Builder
+		i := lo
+		for i < hi {
+			// the outermost span that starts here
+			si := -1
+			for k, sp := range spans {
+				if !used[k] && sp.From == i && sp.To <= hi && sp.To >= sp.From && (si < 0 || sp.To > spans[si].To) {
+					si = k
+				}
+			}
+			if si >= 0 && spans[si].To >= spans[si].From {
+				// a loop whose last round makes no external call still had earlier
+				// rounds that may have made some: an empty span is a span too
+				used[si] = true
+				b.WriteString("(?:[^\\n]+\\n)*") // the earlier rounds: any steps
+				b.WriteString(build(spans[si].From, spans[si].To))
+				i = max(i, spans[si].To)
+				continue
+			}
+			if t := token(steps[i]); t != "" {
+				b.WriteString(regexp.QuoteMeta(t) + "\\n")
+			}
+			i++
+		}
+		// an empty loop span that starts where this range ends (the loop's last
+		// round is empty and nothing comes after it but the end)
+		for k, sp := range spans {
+			if !used[k] && sp.From == hi && sp.To == hi && lo < hi {
+				used[k] = true
+				b.WriteString("(?:[^\\n]+\\n)*")
+			}
+		}
+		return b.String()
+	}
+	return regexp.MustCompile("^" + build(0, len(steps)-1) + "$")
+}
+
 // checkScenario checks a run against its scenario (docs/DESIGN.md D25): the
 // external steps the path says (its fingerprint) must be the ones the run really
 // made (activities, local activities, timers, in order), and two runs of one
@@ -437,24 +529,32 @@ func (o *observed) checkScenario(g *model.Graph, tf trace.File, file string, p m
 	if strings.HasPrefix(fp[len(fp)-1], "unknown ") {
 		return // a place PathKit did not read: the path has a scenario of its own
 	}
-	var said []string
-	for _, st := range fp {
-		if strings.HasSuffix(st, ": 1+ rounds") {
-			return // a loop is read once per path: how many rounds a run made is the loop table's business
-		}
-		switch {
-		case strings.Contains(st, " (activity)"):
-			said = append(said, "A:"+st[:strings.Index(st, " (activity)")])
-		case strings.Contains(st, " (local activity)"):
-			said = append(said, "L:"+st[:strings.Index(st, " (local activity)")])
-		case strings.HasPrefix(st, "timer"), strings.Contains(st, "(timer)"), strings.HasPrefix(st, "AwaitWithTimeout (wait)"), strings.HasPrefix(st, "wait with timeout"):
-			said = append(said, "T")
-		}
+	// A loop is read once per path: the steps of its last round. The rounds before
+	// it are not on the path, so the run's steps are normalized the same way: what
+	// comes before the loop, any steps for the earlier rounds, the last round, what
+	// comes after (see FingerprintSpans).
+	steps, spans := g.FingerprintSpans(p)
+	pattern := scenarioPattern(steps, spans)
+	token := scenarioToken
+	loops := len(spans) > 0
+	run := actual
+	if run != "" {
+		run += "\n"
 	}
 	o.stepRuns++
-	if got := strings.Join(said, "\n"); got != actual {
-		o.scenarioErrs = append(o.scenarioErrs, fmt.Sprintf("%s: path %s says the run makes %q, the run made %q\n%s\n%s", tf.Workflow, p.Key(), got, actual, strings.Join(fp, " | "), firstLines(o.programs[tf.Workflow].Source, 70)))
+	if !pattern.MatchString(run) {
+		said := ""
+		for _, st := range steps {
+			if t := token(st); t != "" {
+				said += t + " "
+			}
+		}
+		o.scenarioErrs = append(o.scenarioErrs, fmt.Sprintf("%s: path %s says the run makes %q (loops: %v), the run made %q\n%s\n%s", tf.Workflow, p.Key(), said, loops, actual, strings.Join(fp, " | "), firstLines(o.programs[tf.Workflow].Source, 70)))
 		return
+	}
+	if loops {
+		o.loopRuns++
+		return // runs of one scenario may differ in how many rounds they made
 	}
 	if o.scenarioSeen == nil {
 		o.scenarioSeen = map[string]string{}
@@ -477,4 +577,222 @@ func aroundError(msg, src string) string {
 	lines := strings.Split(src, "\n")
 	lo, hi := max(0, n-6), min(len(lines), n+4)
 	return strings.Join(lines[lo:hi], "\n")
+}
+
+// A program the 10,000-program run found: a loop whose last round makes no
+// external call (a loop over two values whose body only decides), where an
+// earlier round called a helper that sleeps. The scenario check used to reject
+// the run because it only allowed earlier rounds before a non-empty last round.
+func TestLoopWithEmptyLastRound(t *testing.T) {
+	obs := runBatch(t, []Program{Generate(2, 823)})
+	if len(obs.unmatch) > 0 {
+		t.Errorf("runs fit no path: %s", obs.unmatch[0])
+	}
+	for _, f := range obs.falseClaims(obs.eng.Claim) {
+		t.Error(f)
+	}
+	for _, e := range obs.scenarioErrs {
+		t.Error(e)
+	}
+	if obs.stepRuns == 0 {
+		t.Error("no run was checked against its scenario")
+	}
+}
+
+// The relaxed check lets an empty loop span stand for earlier rounds of that
+// loop and nothing else: a step outside the loop must still be caught.
+func TestScenarioPatternAllowsExtraStepsOnlyAtTheLoop(t *testing.T) {
+	pre, post := "Pre (activity)", "Post (activity)"
+	const loop = "loop for i < 2: 1+ rounds"
+	// Pre, the loop (its last round makes nothing), Post
+	steps := []string{pre, loop, post, "end: completed"}
+	spans := []model.Span{{From: 2, To: 2}}
+	re := scenarioPattern(steps, spans)
+	for run, want := range map[string]bool{
+		"A:Pre\nA:Post\n":             true,  // the loop ran with no external step
+		"A:Pre\nT\nA:Post\n":          true,  // an earlier round slept: inside the loop
+		"A:Pre\nA:Other\nT\nA:Post\n": true,  // two steps of earlier rounds
+		"A:Extra\nA:Pre\nA:Post\n":    false, // an extra step before Pre
+		"A:Pre\nA:Post\nA:Extra\n":    false, // an extra step after Post
+		"A:Pre\nA:Post\nT\n":          false, // a timer after the loop
+		"A:Post\n":                    false, // a step is missing
+		"A:Pre\n":                     false, // a step is missing
+		"A:Post\nA:Pre\n":             false, // wrong order
+	} {
+		if got := re.MatchString(run); got != want {
+			t.Errorf("run %q: matches = %v, want %v", run, got, want)
+		}
+	}
+	// the loop is the last thing the path does before its end
+	steps = []string{pre, loop, "end: completed"}
+	re = scenarioPattern(steps, []model.Span{{From: 2, To: 2}})
+	for run, want := range map[string]bool{
+		"A:Pre\n":           true,
+		"A:Pre\nT\n":        true,  // an earlier round slept
+		"A:Extra\nA:Pre\n":  false, // before the first step
+		"T\nA:Pre\n":        false,
+		"A:Pre\nA:Pre\nT\n": true, // after Pre, at the loop: earlier rounds
+		"":                  false,
+	} {
+		if got := re.MatchString(run); got != want {
+			t.Errorf("loop last, run %q: matches = %v, want %v", run, got, want)
+		}
+	}
+	// near miss: without a loop span the same extra step is refused
+	if scenarioPattern([]string{pre, post, "end: completed"}, nil).MatchString("A:Pre\nT\nA:Post\n") {
+		t.Error("without a loop nothing may come between two steps")
+	}
+}
+
+// A program the 10,000-program run found (seed 5, program 1371): a map was made
+// empty, handed to a plain function that writes into it, and a later check of
+// its length was called impossible from the empty start.
+func TestLengthAfterAPlainWriter(t *testing.T) {
+	obs := runBatch(t, []Program{Generate(5, 1371)})
+	if len(obs.unmatch) > 0 {
+		t.Errorf("runs fit no path: %s", obs.unmatch[0])
+	}
+	if f := obs.falseClaims(obs.eng.Claim); len(f) > 0 {
+		t.Errorf("%d false claim(s); first: %s", len(f), f[0])
+	}
+	if sf, _, _ := obs.stageFalseClaims(); len(sf) > 0 {
+		t.Errorf("%d false stage claim(s); first: %s", len(sf), sf[0])
+	}
+	for _, e := range obs.scenarioErrs {
+		t.Error(e)
+	}
+}
+
+// Only Temporal's deadlock alarm earns a second attempt of a generated program;
+// a second alarm, and every other error, is a failure. The test compiles and
+// runs the very text the generated driver contains (retrySource).
+func TestRetryPolicyOnlyForTheDeadlockAlarm(t *testing.T) {
+	const alarm = "workflow execution error: [TMPRL1101] Potential deadlock detected: workflow goroutine \"root\" didn't yield for over 1s"
+	dir := t.TempDir()
+	main := "package main\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n" + retrySource + `
+func main() {
+	try := func(name string, results ...string) {
+		calls, notes := 0, 0
+		got := runWithRetry(func() string {
+			r := results[calls]
+			calls++
+			return r
+		}, func() { notes++ })
+		fmt.Printf("%s calls=%d notes=%d result=%q\n", name, calls, notes, got)
+	}
+	const alarm = ` + strconv.Quote(alarm) + `
+	try("clean", "", "unused")
+	try("alarm-then-pass", alarm, "")
+	try("alarm-twice", alarm, alarm)
+	try("other-error", "boom", "unused")
+	try("not-completed", "not completed", "unused")
+	try("alarm-then-other", alarm, "boom")
+	try("other-then-alarm", "boom", alarm)
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(main), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module retrytest\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	got := string(out)
+	for _, want := range []string{
+		`clean calls=1 notes=0 result=""`,
+		`alarm-then-pass calls=2 notes=1 result=""`,
+		`alarm-twice calls=2 notes=1 result=` + strconv.Quote(alarm), // still a failure
+		`other-error calls=1 notes=0 result="boom"`,                  // no second attempt
+		`not-completed calls=1 notes=0 result="not completed"`,
+		`alarm-then-other calls=2 notes=1 result="boom"`, // the second attempt's error counts
+		`other-then-alarm calls=1 notes=0 result="boom"`, // only the first error decides
+	} {
+		if !strings.Contains(got, want+"\n") {
+			t.Errorf("missing line %q in:\n%s", want, got)
+		}
+	}
+	// the generated driver contains exactly this rule and the longer alarm time
+	d := DriverTest([]Program{Generate(1, 1)})
+	if !strings.Contains(d, strings.TrimSpace(retrySource)) || !strings.Contains(d, "DeadlockDetectionTimeout: 5 * time.Second") {
+		t.Error("the generated driver does not hold the retry rule and the 5 second alarm time")
+	}
+}
+
+// Programs the 10,000-program runs have flagged once (the seed and program
+// number), kept so every CI run checks them again on a clean machine:
+//   - seed 2, program 823: a scenario check on a loop with an empty last round
+//     (fixed in the checker);
+//   - seed 5, program 1371: a false "can't happen" claim after a map was handed
+//     to a plain function that writes into it (fixed in the engine);
+//   - seed 1, program 49: a false "can't happen" claim after a struct that holds a
+//     map was handed to a function that fills the map (fixed in the engine);
+//   - seed 4, program 612: Temporal's deadlock alarm once in a run of 10,000,
+//     never again on its own (a stalled machine; see the retry rule).
+//
+// To check one of them on another machine: PATHKIT_SOUNDNESS_SEED=<seed>
+// PATHKIT_SOUNDNESS_N=<program number + 1> go test ./internal/soundness -run
+// TestNoFalseCannotBeTestedClaims -count=1
+func TestKnownPrograms(t *testing.T) {
+	known := []struct{ seed, program int }{{2, 823}, {5, 1371}, {4, 612}, {1, 49}}
+	var progs []Program
+	for _, k := range known {
+		progs = append(progs, Generate(int64(k.seed), k.program))
+	}
+	obs := runBatch(t, progs)
+	if len(obs.unmatch) > 0 {
+		t.Errorf("runs fit no path: %s", obs.unmatch[0])
+	}
+	for _, f := range obs.falseClaims(obs.eng.Claim) {
+		t.Error(f)
+	}
+	if sf, _, _ := obs.stageFalseClaims(); len(sf) > 0 {
+		t.Errorf("%d false stage claim(s); first: %s", len(sf), sf[0])
+	}
+	for _, e := range obs.scenarioErrs {
+		t.Error(e)
+	}
+	if obs.stepRuns == 0 {
+		t.Error("no run was checked against its scenario")
+	}
+}
+
+// Programs of different seeds with the same number are written into one package
+// in one batch: the names the hand-off blocks declare must not collide (found
+// when the default test, with 500 programs over six seeds, did not compile).
+func TestHandoffNamesDoNotCollideAcrossSeeds(t *testing.T) {
+	var progs []Program
+	for seed := int64(1); seed <= 3; seed++ {
+		for number := 7; number <= 70; number += 7 { // every seventh program has the blocks
+			progs = append(progs, Generate(seed, number))
+		}
+	}
+	names := map[string]bool{}
+	for _, p := range progs {
+		for _, decl := range []string{"type holder", "type pholder", "func growStrs", "func fillHolder", "func fillPHolder"} {
+			for _, line := range strings.Split(p.Source, "\n") {
+				if strings.HasPrefix(line, decl) {
+					name := strings.Fields(line)[1]
+					if i := strings.IndexAny(name, "("); i >= 0 {
+						name = name[:i]
+					}
+					if names[name] {
+						t.Fatalf("%s declared twice in one batch (program %s)", name, p.Name)
+					}
+					names[name] = true
+				}
+			}
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("no hand-off block found: the test checks nothing")
+	}
+	obs := runBatch(t, progs) // and the whole batch compiles and runs
+	if f := obs.falseClaims(obs.eng.Claim); len(f) > 0 {
+		t.Errorf("%d false claim(s); first: %s", len(f), f[0])
+	}
 }

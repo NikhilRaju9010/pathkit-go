@@ -10,8 +10,16 @@ import (
 
 type box struct{ n int }
 
-func unknownIface(s string) interface{}  { return s }
-func unknownMap() map[string]interface{} { return map[string]interface{}{"k": 1} }
+// unknownIface and unknownMap stand for code PathKit cannot see into. They go
+// through function values on purpose: a plain function with a visible body is
+// summarized (E2, summaries.go), and these must stay unknown.
+var (
+	unknownIfaceFn = func(s string) interface{} { return s }
+	unknownMapFn   = func() map[string]interface{} { return map[string]interface{}{"k": 1} }
+)
+
+func unknownIface(s string) interface{}  { return unknownIfaceFn(s) }
+func unknownMap() map[string]interface{} { return unknownMapFn() }
 func fill(m map[string]interface{})      { m["k"] = 5 }
 
 // ---- type sets of interface values ----
@@ -701,5 +709,153 @@ func ImpossibleJSONReceiveFromVariable(ctx workflow.Context) error {
 	case uint8:
 		_ = act(ctx)
 	}
+	return nil
+}
+
+// ---- E3: a pointer where the code tests the pointed-to type or value ----
+
+// The map stores &name, a *string. `case string` can never be taken as
+// written; the code most likely means to dereference. It is a likely defect,
+// not an impossible path.
+func LikelyDefectCaseString(ctx workflow.Context, name string) error {
+	m := map[string]interface{}{"name": &name}
+	switch m["name"].(type) {
+	case string:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// An interface that holds a *string compared with "".
+func LikelyDefectComparesToEmpty(ctx workflow.Context, name string) error {
+	var v interface{} = &name
+	if v == "" {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// Same switch: `case string` is the likely defect, `case int` stays impossible.
+func LikelyDefectOtherCasesStayImpossible(ctx workflow.Context, name string) error {
+	m := map[string]interface{}{"name": &name}
+	switch m["name"].(type) {
+	case string:
+		_ = act(ctx)
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// Near miss: the set holds the string itself as well as a pointer, so the
+// case is simply possible.
+func PossibleStringAndPointer(ctx workflow.Context, name string) error {
+	m := map[string]interface{}{"a": &name, "b": name, "c": 1.5}
+	switch m["a"].(type) {
+	case string:
+		_ = act(ctx)
+	case *string:
+		_ = act(ctx)
+	default:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// Near miss: a pointer to a different type than the one tested stays an
+// ordinary impossible case.
+func ImpossiblePointerToOtherType(ctx workflow.Context, n int) error {
+	var v interface{} = &n
+	if v == "" {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// ---- a map handed to a call: facts hold until the statement that hands it away ----
+
+// Before the call nothing else can reach the map: the case for int is impossible.
+func ImpossibleBeforeMapPassedOn(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	fill(m)
+	return nil
+}
+
+// After the call fill may have written anything into the map.
+func PossibleAfterMapPassedOn(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	fill(m)
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// In a loop the call of one round comes before the check of the next.
+func PossibleMapPassedOnInALoop(ctx workflow.Context, n int) error {
+	m := map[string]interface{}{"k": "x"}
+	for i := 0; i < n; i++ {
+		switch m["k"].(type) {
+		case int:
+			_ = act(ctx)
+		}
+		fill(m)
+	}
+	return nil
+}
+
+// A go statement runs beside the workflow: not followed from its start.
+func PossibleMapGivenToGo(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	go fill(m)
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// An alias is another way to reach the map: not followed.
+func PossibleMapAliasedBeforeTheCheck(ctx workflow.Context) error {
+	m := map[string]interface{}{"k": "x"}
+	alias := m
+	switch m["k"].(type) {
+	case int:
+		_ = act(ctx)
+	}
+	fill(alias)
+	return nil
+}
+
+func writeKey(m map[string]interface{}) {
+	if m != nil {
+		m["a"] = 1
+	}
+}
+
+// A plain function the workflow hands the map to writes into it: the length
+// the map had when it was created is not known after the call (found by the
+// soundness run: a value-flow claim "created empty" after the call).
+func PossibleLengthAfterPlainWriter(ctx workflow.Context) error {
+	m := map[string]interface{}{}
+	writeKey(m)
+	if len(m) == 0 {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// Near miss: before the call the length is still known.
+func ImpossibleLengthBeforePlainWriter(ctx workflow.Context) error {
+	m := map[string]interface{}{}
+	if len(m) != 0 {
+		_ = act(ctx)
+	}
+	writeKey(m)
 	return nil
 }

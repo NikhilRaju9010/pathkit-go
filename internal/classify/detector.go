@@ -43,6 +43,7 @@ var detectors = []Detector{
 	valueFlow{},
 	possibleCorrelation{},
 	unknownInputType{},
+	likelyDefect{},
 }
 
 // DetectorNames lists the names of all detectors.

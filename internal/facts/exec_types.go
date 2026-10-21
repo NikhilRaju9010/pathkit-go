@@ -77,7 +77,7 @@ func (s *state) valueTypes(e ast.Expr) (ts *typeSet, used []*datum, ok bool) {
 // variable that never escapes.
 func (s *state) elemTypes(ix *ast.IndexExpr) (*typeSet, []*datum, bool) {
 	ck, ok := s.operand(ix.X)
-	if !ok || s.a.escapes[ck.v] != "" {
+	if !ok || s.escaped(ck.v) {
 		return nil, nil, false
 	}
 	var elem, keys *datum
@@ -94,6 +94,16 @@ func (s *state) elemTypes(ix *ast.IndexExpr) (*typeSet, []*datum, bool) {
 	}
 	set := elem.ts.clone()
 	used := []*datum{elem}
+	if kv, _, isConst := s.constSide(ix.Index); isConst && kv != nil && elem.perKey != nil && isMap(s.a.info.TypeOf(ix.X)) && plainKeys(s.a.info.TypeOf(ix.X)) {
+		// a map built by a summarized function: what is stored under this key
+		if kv.Kind() == constant.String {
+			if ks, ok := elem.perKey[constant.StringVal(kv)]; ok {
+				set = ks.clone()
+			} else {
+				set = &typeSet{} // the key is never written: it is not in the map
+			}
+		}
+	}
 	if isMap(s.a.info.TypeOf(ix.X)) {
 		proven := false
 		// Only a map with plain keys (string, number, bool): a map[interface{}]
@@ -294,7 +304,7 @@ func (s *state) storeIndex(l ast.Expr, rhs ast.Expr, tok token.Token) {
 		return
 	}
 	ck, ok := s.operand(ix.X)
-	if !ok || s.a.escapes[ck.v] != "" || !s.a.trackable(ck.v) {
+	if !ok || s.escaped(ck.v) || !s.a.trackable(ck.v) {
 		return
 	}
 	collT := s.a.info.TypeOf(ix.X)
@@ -314,8 +324,24 @@ func (s *state) storeIndex(l ast.Expr, rhs ast.Expr, tok token.Token) {
 		parents = append(parents, datumWhys(elem)...)
 		if tok == token.ASSIGN && rhs != nil && s.addValueTypes(ts, rhs, l.Pos()) {
 			w := s.newWhy(oStore, l.Pos(), ck, func() string { return fmt.Sprintf("receives a value in `%s`", exprText(l)) }, parents...)
+			nd := &datum{op: dElem, ts: ts, why: w}
+			// A map built by a summarized function keeps what it holds under each
+			// key: a store under a constant key replaces that key's types (this walk
+			// follows one path, so the store happens), the others stay.
+			if elem.perKey != nil && !s.inSkip(l.Pos()) {
+				if kv, _, isConst := s.constSide(ix.Index); isConst && kv != nil && kv.Kind() == constant.String && plainKeys(collT) {
+					fresh := &typeSet{}
+					if s.addValueTypes(fresh, rhs, l.Pos()) {
+						nd.perKey = make(map[string]*typeSet, len(elem.perKey)+1)
+						for k, v := range elem.perKey {
+							nd.perKey[k] = v
+						}
+						nd.perKey[constant.StringVal(kv)] = fresh
+					}
+				}
+			}
 			s.d[ck] = withoutOp(s.d[ck], dElem)
-			s.d[ck] = append(s.d[ck], &datum{op: dElem, ts: ts, why: w})
+			s.d[ck] = append(s.d[ck], nd)
 		} else {
 			s.d[ck] = withoutOp(s.d[ck], dElem) // not understood: forget
 		}
@@ -379,7 +405,7 @@ func (s *state) appendSelf(x *ast.AssignStmt) bool {
 	if !ok1 || !ok2 || lk != ak {
 		return false
 	}
-	if s.a.escapes[lk.v] != "" || !s.a.trackable(lk.v) {
+	if s.escaped(lk.v) || !s.a.trackable(lk.v) {
 		return true // nothing is known about it; the statement changes nothing we track
 	}
 	var elem *datum
@@ -559,7 +585,7 @@ func (s *state) decoded(k key, t types.Type, pos token.Pos, std bool) {
 	case isEmptyInterface(t):
 		ts := s.jsonSetOf(pos, k, std)
 		s.add(k, &datum{op: dTypes, ts: ts, why: ts.ents[0].w})
-	case isJSONContainer(t) && !s.a.jsonWrite && s.a.escapes[k.v] == "":
+	case isJSONContainer(t) && !s.a.jsonWrite && !s.escaped(k.v):
 		ts := s.jsonSetOf(pos, k, std)
 		s.add(k, &datum{op: dElem, ts: ts, why: ts.ents[0].w})
 	}
@@ -567,7 +593,7 @@ func (s *state) decoded(k key, t types.Type, pos token.Pos, std bool) {
 
 // decodeEffects: a node that calls Get / Receive with &x writes x.
 func (s *state) decodeEffects(n ast.Node) {
-	if len(s.a.decode) == 0 {
+	if len(s.a.writes) == 0 {
 		return
 	}
 	ast.Inspect(n, func(c ast.Node) bool {
@@ -575,6 +601,9 @@ func (s *state) decodeEffects(n ast.Node) {
 		case *ast.FuncLit:
 			return false
 		case *ast.CallExpr:
+			if v, ok := s.a.writes[x]; ok && s.a.decode[x] == nil {
+				s.killKey(key{v: v}) // written by the call, and nothing is known about what
+			}
 			if v, ok := s.a.decode[x]; ok {
 				k := key{v: v}
 				// json.Unmarshal decodes into what an interface holds when it

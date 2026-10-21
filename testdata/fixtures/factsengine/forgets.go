@@ -19,13 +19,94 @@ func PossibleAddressTaken(ctx workflow.Context) error {
 	return nil
 }
 
-// &x after the check still means x is never tracked.
-func PossibleAddressTakenLater(ctx workflow.Context) error {
+// Before the only call that writes through &x, x is still "": the false side
+// of the check cannot happen (E1: x is forgotten at the call, not before it).
+func ImpossibleBeforeAddressTaken(ctx workflow.Context) error {
 	var x string
 	if x == "" {
 		_ = act(ctx)
 	}
 	_ = json.Unmarshal([]byte("{}"), &x)
+	return nil
+}
+
+// After the call that writes through &x nothing is known about x.
+func PossibleAddressTakenLater(ctx workflow.Context) error {
+	var x string
+	_ = json.Unmarshal([]byte("{}"), &x)
+	if x == "" {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// E1: Get fills r, then a plain assignment gives it a known value again.
+func ImpossibleGetThenAssigned(ctx workflow.Context) error {
+	var r string
+	_ = workflow.ExecuteActivity(ctx, "Audit").Get(ctx, &r)
+	r = "EXCEPTION"
+	if r == "AUDIT_PASSED" {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// E1 with encoding/json and a typed (not interface) variable.
+func ImpossibleUnmarshalThenAssigned(ctx workflow.Context, raw []byte) error {
+	var n int
+	_ = json.Unmarshal(raw, &n)
+	n = 5
+	if n == 6 {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// E1 near miss: the plain assignment comes BEFORE the call that fills r.
+func PossibleAssignedThenGet(ctx workflow.Context) error {
+	r := "EXCEPTION"
+	_ = workflow.ExecuteActivity(ctx, "Audit").Get(ctx, &r)
+	if r == "AUDIT_PASSED" {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// E1 near miss: the address is kept in a variable, so anything may write later.
+func PossibleAddressStored(ctx workflow.Context) error {
+	var r string
+	p := &r
+	_ = workflow.ExecuteActivity(ctx, "Audit").Get(ctx, p)
+	r = "EXCEPTION"
+	if r == "AUDIT_PASSED" {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+func setPassed(p *string) { *p = "AUDIT_PASSED" }
+
+// E1 near miss: the address goes to a function PathKit does not read.
+func PossibleAddressPassedOn(ctx workflow.Context) error {
+	var r string
+	_ = workflow.ExecuteActivity(ctx, "Audit").Get(ctx, &r)
+	setPassed(&r)
+	r = "EXCEPTION"
+	if r == "AUDIT_PASSED" {
+		_ = act(ctx)
+	}
+	return nil
+}
+
+// E1 near miss: a closure holds the address-taking call.
+func PossibleAddressInClosure(ctx workflow.Context) error {
+	var r string
+	get := func() { _ = workflow.ExecuteActivity(ctx, "Audit").Get(ctx, &r) }
+	r = "EXCEPTION"
+	get()
+	if r == "AUDIT_PASSED" {
+		_ = act(ctx)
+	}
 	return nil
 }
 

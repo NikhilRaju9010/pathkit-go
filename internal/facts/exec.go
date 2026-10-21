@@ -24,6 +24,7 @@ func (s *state) run(nodes []ast.Node) {
 		if s.inSkip(n.Pos()) {
 			continue // inside an if or loop PathKit did not decide
 		}
+		s.cur = n.Pos()
 		s.exec(n)
 	}
 }
@@ -164,6 +165,13 @@ func (s *state) derive(rhs ast.Expr, lt types.Type) []spec {
 	info := s.a.info
 	lk := kindOf(lt)
 	tv := info.Types[rhs]
+	if call, ok := ast.Unparen(rhs).(*ast.CallExpr); ok && lt != nil {
+		if _, tuple := info.TypeOf(call).(*types.Tuple); !tuple { // a single-valued call
+			if out := s.summarySpecs(call, 0, lt); len(out) > 0 {
+				return out
+			}
+		}
+	}
 	if !tv.IsNil() && (isInterface(lt) || isMapOrSlice(lt)) {
 		if out := s.deriveTypes(rhs, lt); len(out) > 0 {
 			return append(out, s.deriveNilness(rhs, lt)...)
@@ -223,7 +231,7 @@ func (s *state) derive(rhs ast.Expr, lt types.Type) []spec {
 			sub := kk.path[len(rk.path):]
 			for _, d := range ds {
 				w := s.newWhy(oCopy, rhs.Pos(), key{}, func() string { return fmt.Sprintf("is a copy of `%s`", exprText(rhs)) }, d.why)
-				cp := datum{op: d.op, val: d.val, keys: d.keys, why: w, soft: d.soft}
+				cp := datum{op: d.op, val: d.val, keys: d.keys, why: w, soft: d.soft, perKey: d.perKey}
 				if d.ts != nil {
 					cp.ts = d.ts.clone()
 				}
@@ -299,6 +307,18 @@ func (s *state) execAssign(x *ast.AssignStmt) {
 		s.storeIndex(l, nil, token.ASSIGN) // m["a"], err = f(): the element is not understood
 		s.killLHS(l)
 	}
+	if len(x.Rhs) == 1 {
+		if call, ok := ast.Unparen(x.Rhs[0]).(*ast.CallExpr); ok {
+			// a, b := f(): what a summary says about each result
+			for i, l := range x.Lhs {
+				if lt := s.a.info.TypeOf(l); lt != nil {
+					if k, ok := s.operand(l); ok {
+						s.apply(k, s.summarySpecs(call, i, lt))
+					}
+				}
+			}
+		}
+	}
 	if len(x.Lhs) == 2 && len(x.Rhs) == 1 {
 		switch r := ast.Unparen(x.Rhs[0]).(type) {
 		case *ast.TypeAssertExpr:
@@ -369,6 +389,15 @@ func (s *state) execValueSpec(vs *ast.ValueSpec) {
 		for _, name := range vs.Names {
 			if v, _ := s.a.info.Defs[name].(*types.Var); v != nil {
 				s.killKey(key{v: v})
+			}
+		}
+		if len(vs.Values) == 1 {
+			if call, ok := ast.Unparen(vs.Values[0]).(*ast.CallExpr); ok {
+				for i, name := range vs.Names {
+					if v, _ := s.a.info.Defs[name].(*types.Var); v != nil && name.Name != "_" {
+						s.apply(key{v: v}, s.summarySpecs(call, i, v.Type()))
+					}
+				}
 			}
 		}
 	}
@@ -493,6 +522,8 @@ func (s *state) zeroWith(k key, t types.Type, w *why, depth int) {
 func (s *state) learnForm(f cmpForm, taken bool, si stepInfo) {
 	holds := (f.op == token.EQL || f.op == token.NEQ) && ((f.op == token.EQL) == taken) // the equality is true
 	switch {
+	case f.ifaceConst:
+		return // an interface compared with a constant: its type set stays as it is
 	case f.elem != nil:
 		return // nothing learned about an element
 	case f.isNil:

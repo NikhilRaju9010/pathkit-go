@@ -100,4 +100,8 @@ type Result struct {
 	// Unknown: the path takes a type switch case on a value whose origin
 	// PathKit cannot follow (a candidate for unknown-input-type).
 	Unknown *Suspect
+	// Defect: the path takes a case, or a comparison, that no value can satisfy
+	// only because the value is a pointer and the code tests the pointed-to type
+	// or value. The path is NOT called impossible.
+	Defect *Suspect
 }

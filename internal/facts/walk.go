@@ -40,6 +40,7 @@ func (w *Walk) Step(st model.Step) *Claim {
 	}
 	s := w.s
 	step := s.stepsDone + 1
+	s.cur = st.Junction.Stmt.Pos()
 	var c *Claim
 	switch st.Junction.Kind {
 	case model.PlainIf:
@@ -60,7 +61,9 @@ func (w *Walk) Step(st model.Step) *Claim {
 
 // Result is what the walk found so far besides claims: a suspect or an
 // unknown-input-type.
-func (w *Walk) Result() Result { return Result{Suspect: w.s.suspect, Unknown: w.s.unknown} }
+func (w *Walk) Result() Result {
+	return Result{Suspect: w.s.suspect, Unknown: w.s.unknown, Defect: w.s.defect}
+}
 
 // Clone copies the walk.
 func (w *Walk) Clone() *Walk {
@@ -99,7 +102,7 @@ func (w *Walk) Rebase() {
 	s.stage++
 	s.stepsDone = 0
 	s.taken = nil
-	s.suspect, s.unknown = nil, nil
+	s.suspect, s.unknown, s.defect = nil, nil, nil
 	s.seenLoop = map[*model.Junction]bool{}
 }
 
@@ -133,6 +136,19 @@ func (w *Walk) Signature() string {
 			}
 			for _, kv := range d.keys {
 				p += "," + kv.ExactString()
+			}
+			if d.perKey != nil {
+				var ks []string
+				for k, set := range d.perKey {
+					var ts []string
+					for _, e := range set.ents {
+						ts = append(ts, e.t.String())
+					}
+					sort.Strings(ts)
+					ks = append(ks, fmt.Sprintf("%q:[%s nil=%v]", k, strings.Join(ts, ","), set.mayNil))
+				}
+				sort.Strings(ks)
+				p += "{" + strings.Join(ks, ";") + "}"
 			}
 			if d.soft != "" {
 				p += "~"
